@@ -27,10 +27,11 @@ Licences are in place: `LICENSE` is AGPL-3.0 for code, `LICENSE-ART.txt` is CC B
 
 ## 2. Hosting (5 min): Cloudflare Pages recommended (Netlify also works)
 
-Cloudflare Pages: **Workers & Pages → Create → Pages → Connect to Git**, then pick the repo.
+Cloudflare: **Workers & Pages → Create → Import a repository**, then pick the repo. It deploys as a Worker serving static assets (`wrangler.jsonc` points it at `dist/`).
 - Build command: `npm run build`
-- Output directory: `dist`
-- Environment variable: `NODE_VERSION=22`
+- Deploy command: `npx wrangler deploy`
+- Non-production branch deploy command: `npx wrangler versions upload`
+- Supabase keys go under **Settings → Build → Variables and secrets** (Vite bakes them in at build time), not runtime variables.
 
 Netlify works with zero config (`netlify.toml` is included). Either way you get a static site; the game is fully playable there before Supabase exists, but each browser has its own world.
 
