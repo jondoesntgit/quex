@@ -138,7 +138,8 @@ def hex_column(top, sides, depth, radius=1.0, z_top=0.0):
         mid = math.degrees(math.radians(60 * i + 30)) % 360
         # edge normals: 30,90,150 face away from camera; 210,270,330 visible
         f.material_index = {210: 1, 270: 2, 330: 3}.get(round(mid), 2)
-    bm.faces.new(list(reversed(ring_b)))
+    fb = bm.faces.new(list(reversed(ring_b)))
+    fb.material_index = 2
     return link(bm, "hex", [mat(top), mat(sides[0]), mat(sides[1]), mat(sides[2])])
 
 
@@ -334,7 +335,146 @@ def feat_cactus():
     return build
 
 
+# ---------------------------------------------------------------- creatures
+# Built big and blocky on purpose: silhouettes must read at 24 px. Each one
+# is ~0.8-1.2 hex tall, with one bright accent colour (club, cap, axe, wings).
+
+def blob(loc, r, h, color, shade, segs=8):
+    """Rounded lump: a short widening frustum under a narrowing one."""
+    x, y, z = loc
+    cone((x, y, z), r * 0.75, h * 0.35, color, segs=segs, r_top=r, shade=shade)
+    cone((x, y, z + h * 0.35), r, h * 0.65, color, segs=segs, r_top=r * 0.55, shade=shade)
+
+
+def creature_troll():
+    p = PAL["creatures"]
+
+    def build(W):
+        sk = (p["troll_light"], p["troll_dark"])
+        # legs
+        for dx in (-0.16, 0.16):
+            box((dx, 0, 0), (0.16, 0.18, 0.28), p["troll_dark"], (p["troll"], p["troll_dark"], p["troll_dark"]))
+        # big belly + shoulders
+        blob((0, 0, 0.24), 0.42, 0.62, p["troll"], sk)
+        # head sunk into shoulders
+        blob((0, -0.05, 0.78), 0.2, 0.3, p["troll"], sk)
+        # glowing eyes (big enough to survive 24 px)
+        for dx in (-0.08, 0.08):
+            box((dx, -0.2, 0.92), (0.07, 0.03, 0.06), p["eye"], (p["eye"], p["eye"], p["eye"]))
+        # tusks
+        for dx in (-0.08, 0.08):
+            box((dx, -0.22, 0.82), (0.05, 0.04, 0.09), p["tusk"], (p["tusk"], p["tusk"], p["tusk"]))
+        # arms
+        box((-0.5, 0, 0.3), (0.14, 0.16, 0.42), p["troll"], (p["troll_light"], p["troll"], p["troll_dark"]))
+        box((0.5, 0, 0.3), (0.14, 0.16, 0.42), p["troll"], (p["troll_light"], p["troll"], p["troll_dark"]))
+        # club over the right shoulder
+        box((0.58, -0.05, 0.25), (0.12, 0.12, 0.75), p["club"], (p["club_light"], p["club"], p["club_dark"]), rot=0.0)
+        blob((0.58, -0.05, 0.9), 0.14, 0.22, p["club"], (p["club_light"], p["club_dark"]))
+    return build
+
+
+def creature_goblins():
+    p = PAL["creatures"]
+
+    def one(x, y, s):
+        sk = (p["goblin_light"], p["goblin_dark"])
+        box((x, y, 0), (0.2 * s, 0.16 * s, 0.22 * s), p["goblin_cloth"], (p["goblin_cloth"], p["goblin_cloth_dark"], p["goblin_cloth_dark"]))
+        blob((x, y, 0.2 * s), 0.16 * s, 0.24 * s, p["goblin"], sk)
+        # ears
+        for dx in (-1, 1):
+            box((x + dx * 0.17 * s, y, 0.3 * s), (0.14 * s, 0.03 * s, 0.06 * s), p["goblin"], (p["goblin_light"], p["goblin"], p["goblin_dark"]))
+        # pointy red hood
+        cone((x, y, 0.4 * s), 0.12 * s, 0.22 * s, p["hood"], segs=5, shade=(p["hood_light"], p["hood_dark"]))
+
+    def build(W):
+        one(-0.35, 0.1, 1.2)
+        one(0.35, 0.15, 1.1)
+        one(0.0, -0.25, 1.35)
+    return build
+
+
+def creature_orcs():
+    p = PAL["creatures"]
+
+    def build(W):
+        sk = (p["orc_light"], p["orc_dark"])
+        for dx in (-0.12, 0.12):
+            box((dx, 0, 0), (0.14, 0.16, 0.25), p["orc_cloth"], (p["orc_cloth"], p["orc_cloth_dark"], p["orc_cloth_dark"]))
+        box((0, 0, 0.22), (0.46, 0.3, 0.38), p["orc_cloth"], (p["orc_cloth"], p["orc_cloth"], p["orc_cloth_dark"]))
+        blob((0, 0, 0.58), 0.18, 0.28, p["orc"], sk)
+        # iron helmet
+        cone((0, 0, 0.78), 0.2, 0.14, p["helmet"], segs=6, shade=(p["helmet_light"], p["helmet_dark"]))
+        for dx in (-0.32, 0.32):
+            box((dx, 0, 0.25), (0.12, 0.14, 0.34), p["orc"], (p["orc_light"], p["orc"], p["orc_dark"]))
+        # big axe
+        box((0.42, -0.05, 0.1), (0.06, 0.06, 0.8), p["club"], (p["club_light"], p["club"], p["club_dark"]))
+        box((0.52, -0.05, 0.75), (0.24, 0.05, 0.22), p["helmet"], (p["helmet_light"], p["helmet"], p["helmet_dark"]))
+    return build
+
+
+def creature_dragon():
+    p = PAL["creatures"]
+
+    def build(W):
+        sk = (p["dragon_light"], p["dragon_dark"])
+        # coiled body
+        blob((0.05, 0.15, 0), 0.45, 0.45, p["dragon"], sk)
+        # neck + head
+        cone((-0.2, -0.05, 0.3), 0.16, 0.45, p["dragon"], segs=6, r_top=0.12, shade=sk)
+        box((-0.28, -0.12, 0.72), (0.34, 0.2, 0.18), p["dragon"], (p["dragon_light"], p["dragon"], p["dragon_dark"]))
+        # horns
+        for dx in (-0.1, 0.06):
+            cone((-0.2 + dx, -0.05, 0.88), 0.04, 0.16, p["tusk"], segs=4, shade=(p["tusk"], p["tusk"]))
+        # wings: flat, tilted wedges in the accent colour
+        for sx in (-1, 1):
+            bm = bmesh.new()
+            pts = [(0.15 * sx, 0.2, 0.4), (0.75 * sx, 0.35, 1.05), (0.8 * sx, 0.3, 0.45), (0.55 * sx, 0.25, 0.3)]
+            vs = [bm.verts.new(v) for v in pts]
+            bm.faces.new(vs if sx > 0 else list(reversed(vs)))
+            link(bm, "wing", [mat(p["wing"])])
+        # tail
+        cone((0.45, -0.2, 0.0), 0.12, 0.1, p["dragon"], segs=5, r_top=0.05, shade=sk)
+    return build
+
+
+def unit_scout():
+    p = PAL["creatures"]
+
+    def build(W):
+        for dx in (-0.07, 0.07):
+            box((dx, 0, 0), (0.09, 0.1, 0.2), p["boots"], (p["boots"], p["boots"], p["boots"]))
+        box((0, 0, 0.18), (0.28, 0.18, 0.3), p["tunic"], (p["tunic_light"], p["tunic"], p["tunic_dark"]))
+        blob((0, 0, 0.46), 0.12, 0.2, p["skin"], (p["skin_light"], p["skin_dark"]))
+        cone((0, 0, 0.6), 0.16, 0.1, p["hat"], segs=6, r_top=0.08, shade=(p["hat"], p["hat_dark"]))
+        # banner pole
+        box((0.24, 0.02, 0.0), (0.04, 0.04, 0.85), p["club"], (p["club_light"], p["club"], p["club_dark"]))
+        box((0.34, 0.02, 0.62), (0.2, 0.02, 0.18), p["banner"], (p["banner"], p["banner"], p["banner"]))
+    return build
+
+
+def unit_caravan():
+    p = PAL["creatures"]
+    f = PAL["features"]
+
+    def build(W):
+        # ox
+        box((-0.35, 0, 0.12), (0.36, 0.22, 0.22), p["ox"], (p["ox_light"], p["ox"], p["ox_dark"]))
+        box((-0.58, 0, 0.2), (0.14, 0.16, 0.14), p["ox"], (p["ox_light"], p["ox"], p["ox_dark"]))
+        for dx in (-0.48, -0.22):
+            box((dx, 0, 0), (0.06, 0.12, 0.12), p["ox_dark"], (p["ox_dark"],) * 3)
+        # cart with load
+        box((0.2, 0, 0.12), (0.5, 0.36, 0.14), f["plank"], (f["plank"], f["plank_dark"], f["plank_dark"]))
+        box((0.2, 0, 0.26), (0.4, 0.3, 0.2), p["cargo"], (p["cargo_light"], p["cargo"], p["cargo_dark"]))
+        for dx in (0.0, 0.4):
+            cone((dx, -0.2, 0.0), 0.12, 0.02, p["boots"], segs=8, r_top=0.12)
+    return build
+
+
+CREATURE_SCALE = {"troll": 1.4, "orcs": 1.4, "goblins": 1.3, "dragon": 1.25, "scout": 1.35, "caravan": 1.15}
+
 FEATURES = {
+    "troll": creature_troll(), "goblins": creature_goblins(), "orcs": creature_orcs(), "dragon": creature_dragon(),
+    "scout": unit_scout(), "caravan": unit_caravan(),
     "pine1": feat_trees("pine", 1), "pine3": feat_trees("pine", 3), "pine5": feat_trees("pine", 5),
     "oak1": feat_trees("oak", 1), "oak3": feat_trees("oak", 3), "oak5": feat_trees("oak", 5),
     "mountain": feat_mountain(False), "mountain_snow": feat_mountain(True),
@@ -364,11 +504,15 @@ def main():
             continue
         clear_objects()
         build(W)
+        k = CREATURE_SCALE.get(name)
+        if kind == "features" and k:
+            for ob in bpy.data.objects:
+                ob.scale = (k, k, k)
         if kind == "terrain":
             H = face + (MAX_TIER + 1) * tier
             ax, ay = W // 2, face // 2
         else:
-            H = W * 3 // 2
+            H = W * 2 if name in CREATURE_SCALE else W * 3 // 2
             ax, ay = W // 2, H - face // 2
         setup_camera(W, H, ax, ay)
         render(os.path.join(out, kind, name + ".png"))

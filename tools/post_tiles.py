@@ -31,6 +31,7 @@ for t in PAL["terrain"].values():
     ALL.add(rgb(t["top"]))
     ALL.update(rgb(s) for s in t["sides"])
 ALL.update(rgb(v) for v in PAL["features"].values())
+ALL.update(rgb(v) for v in PAL["creatures"].values())
 ALL = list(ALL)
 
 
@@ -81,13 +82,19 @@ def terrain_variant(base, name, seed):
         if pat == "wave" and is_top(x + 1, y) and is_top(x - 1, y):
             px[x + 1, y] = alt
             px[x - 1, y] = alt
-    # rim: back half darker, front half lighter
-    for (x, y) in cells:
-        edge = any(not (is_top(x + dx, y + dy) or px[x + dx, y + dy][:3] == alt[:3]
-                        if 0 <= x + dx < W and 0 <= y + dy < img.height else True)
-                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-        if edge:
-            px[x, y] = shade(top, 0.82 if y < face // 2 else 1.10) + (255,)
+    # rim: compute the edge mask first (in-place edits would cascade), then paint.
+    # Light lip along the whole rim reads as a bevel; a darker 1px line on the
+    # two back (upper) diagonal edges separates neighbouring hexes.
+    texture = {(x, y) for (x, y) in cells if px[x, y][:3] == alt[:3]}
+    def face_px(x, y):
+        return (x, y) in cellset
+    cellset = set(cells)
+    edges = [(x, y) for (x, y) in cells
+             if any(not face_px(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
+    for (x, y) in edges:
+        upper = not face_px(x, y - 1)
+        px[x, y] = shade(top, 0.80 if upper else 1.12) + (255,)
+    del texture
     return img
 
 
