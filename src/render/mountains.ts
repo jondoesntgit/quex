@@ -109,32 +109,46 @@ export class Mountains {
     const W = this.W, TP = this.TP, S = this.seed
     const pts = this.near(i)
     const sig = 0.62 * W, k2 = 1 / (2 * sig * sig)
-    const scale = 1 / (2.0 * W) // ridges a couple of hexes long
+    const sm = 0.32 * W, km = 1 / (2 * sm * sm)
+    const scale = 1 / (1.4 * W) // ridges a hex or two long
     return (gx: number, gy: number) => {
       const x = gx, y = gy * K
       let m = 0, wt = 0, tsum = 0, cold = 0
+      let mm = 0, all = 0 // soft mountain mask: share of nearby land that is mountain
       let dM = Infinity, dN = Infinity
       for (const p of pts) {
         const d2 = (x - p.x) ** 2 + (y - p.y) ** 2
+        const wm = Math.exp(-d2 * km)
+        all += wm
+        if (p.m) dM = Math.min(dM, d2)
+        else dN = Math.min(dN, d2)
         if (p.m) {
           const w = Math.exp(-d2 * k2)
           m += w; wt += w; tsum += w * p.tier; cold += w * p.cold
-          dM = Math.min(dM, d2)
-        } else dN = Math.min(dN, d2)
+          mm += wm
+        }
       }
       if (wt <= 0) return { alt: 0, snow: Infinity, ground: 0 }
-      // distance inside the range's outline (Voronoi edge between mountain and lowland hexes)
-      const inside = dN === Infinity ? W : (Math.sqrt(dN) - Math.sqrt(dM)) / 2
-      const fade = Math.max(0, Math.min(1, inside / (0.55 * W)))
-      const edge = Math.pow(fade * fade * (3 - 2 * fade), 1.4) // foothills slope up gently
+      // rounded outline and gentle foothills from the blurred mask (no per-hex bumps)
+      // the mask is 1/2 on the border with lowland hexes: height falls to nothing there
+      const fade = Math.max(0, Math.min(1, (mm / all - 0.5) / 0.42))
+      // and rise over at least half a hex of foothills from the lowland border (no sheer walls)
+      const fromBorder = dN === Infinity ? 1 : Math.min(1, (Math.sqrt(dN) - Math.sqrt(dM)) / 2 / (0.5 * W))
+      const edge = Math.pow(fade * fade * (3 - 2 * fade), 0.9) * Math.pow(Math.max(0, fromBorder), 1.3)
       // surrounded points stand taller: m is ~1 for a lone hex, 2-3 deep in a range
       const mass = 1 - Math.exp(-0.9 * m)
-      const r = ridged(x * scale, y * scale, S)
-      const fine = vnoise(x / (0.7 * W), y / (0.7 * W), S + 9) - 0.5
-      const h = W * (0.12 + 1.55 * mass * mass) * (0.22 + 1.05 * Math.pow(r, 1.7)) + fine * 0.08 * W
+      // ridgelines, softened with rolling noise so crests are rugged but not needle-sharp
+      const r = 0.6 * ridged(x * scale, y * scale, S) + 0.4 * vnoise(x * scale * 1.3, y * scale * 1.3, S + 5)
+      const fine = vnoise(x / (0.45 * W), y / (0.45 * W), S + 9) - 0.5
+      const raw = W * (0.06 + 1.6 * Math.pow(mass, 2.2)) * (0.12 + 1.25 * Math.pow(r, 1.4))
+      // ease the tops over (tall tips become broad, rugged crowns, not needles)
+      const crown = 1.6 * W
+      const eased = crown * Math.tanh(raw / crown)
       const tier = tsum / wt
-      const snowLine = TP * 6 + W * (0.85 - 0.28 * (cold / wt))
-      return { alt: tier * TP + Math.max(0, h) * edge, snow: snowLine, ground: tier * TP }
+      const snowLine = TP * 6 + W * (0.85 - 0.45 * (cold / wt))
+      // jaggedness: mid-sized knobs over the whole surface, strongest up high
+      const h = eased * Math.pow(edge, 0.8) + fine * W * (0.05 + 0.1 * Math.min(1, eased / W)) * edge
+      return { alt: tier * TP + Math.max(0, h), snow: snowLine, ground: tier * TP }
     }
   }
 
@@ -161,11 +175,22 @@ export class Mountains {
       const dy = -hh + r * STEP
       for (let col = 0; col < w; col++) {
         const dx = col + 0.5 - hw
-        if (!inHex(dx, dy) && !inHex(dx, dy - STEP) && !inHex(dx, dy + STEP) && !inHex(dx - 1, dy) && !inHex(dx + 1, dy)) continue
+        // the hex plus a few pixels around it, so smoothing and shading at the rim see true heights
+        if (!inHex(dx, dy) && !inHex(dx - 3, dy) && !inHex(dx + 3, dy) && !inHex(dx, dy - 1.5) && !inHex(dx, dy + 1.5)) continue
         const f = field(p.x + dx, p.y + dy)
         Z[r * w + col] = f.alt - base
         ALT[r * w + col] = f.alt
         SN[r * w + col] = f.snow
+      }
+    }
+    // round off the sharpest tips: two light smoothing passes over the grid
+    for (let pass = 0; pass < 2; pass++) {
+      const src = Z.slice()
+      for (let r = 1; r < rows - 1; r++) for (let col = 1; col < w - 1; col++) {
+        const k = r * w + col
+        if (!src[k]) continue
+        const n = (src[k - 1] + src[k + 1] + src[k - w] + src[k + w]) / 4
+        Z[k] = src[k] * 0.5 + n * 0.5
       }
     }
     const zg = (r: number, col: number) => Z[Math.max(0, Math.min(rows - 1, r)) * w + Math.max(0, Math.min(w - 1, col))]
@@ -179,7 +204,9 @@ export class Mountains {
         const z = Z[r * w + col]
         if (z <= 0.3) continue
         const sy = Math.floor(top + dy - z)
-        if (sy >= ybuf) continue
+        // never paint below this point's own ground line (no square blocks hanging off the hex)
+        const floor = Math.min(ybuf, Math.ceil(top + dy) + 1)
+        if (sy >= floor) continue
         // light from the upper left, like the Blender art: shade by slope
         const dzx = (zg(r, col + 1) - zg(r, col - 1)) / 2
         const dzy = (zg(r + 1, col) - zg(r - 1, col)) / (2 * STEP * K)
@@ -188,7 +215,7 @@ export class Mountains {
         const tone = lit > 0.7 ? 0 : lit > 0.42 ? 1 : 2
         const snowy = ALT[r * w + col] + (hash2(p.x + dx, p.y + dy, 3) - 0.5) * 2 > SN[r * w + col]
         const rgb = (snowy ? SNOW : ROCK)[tone]
-        for (let y = Math.max(0, sy); y < ybuf; y++) {
+        for (let y = Math.max(0, sy); y < floor; y++) {
           const o = (y * w + col) * 4
           img[o] = rgb[0]; img[o + 1] = rgb[1]; img[o + 2] = rgb[2]; img[o + 3] = 255
         }
