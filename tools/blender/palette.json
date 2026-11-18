@@ -1,0 +1,36 @@
+{
+  "terrain": {
+    "deep":     {"top": "#2850b8", "sides": ["#2040a0", "#183088", "#102070"]},
+    "ocean":    {"top": "#3070d8", "sides": ["#2858b8", "#2048a0", "#183888"]},
+    "shallow":  {"top": "#50a8f0", "sides": ["#3880d0", "#2868b8", "#2058a0"]},
+    "beach":    {"top": "#f8e090", "sides": ["#d8b060", "#b88840", "#987030"]},
+    "grass":    {"top": "#78c850", "sides": ["#a87838", "#886028", "#684818"]},
+    "meadow":   {"top": "#a0d858", "sides": ["#a87838", "#886028", "#684818"]},
+    "forest":   {"top": "#48a040", "sides": ["#987030", "#785820", "#584010"]},
+    "swamp":    {"top": "#709858", "sides": ["#786840", "#605030", "#484020"]},
+    "hills":    {"top": "#b0c860", "sides": ["#a88048", "#886838", "#685028"]},
+    "desert":   {"top": "#f0c868", "sides": ["#d8a048", "#b88038", "#986028"]},
+    "savannah": {"top": "#d8d060", "sides": ["#b89848", "#987838", "#786028"]},
+    "rock":     {"top": "#b07858", "sides": ["#986048", "#784838", "#583028"]},
+    "tundra":   {"top": "#b8d0c0", "sides": ["#98a8a0", "#788880", "#586860"]},
+    "snow":     {"top": "#f8f8ff", "sides": ["#c8d0e8", "#a8b0d0", "#8890b8"]}
+  },
+  "features": {
+    "trunk": "#784818", "trunk_dark": "#583010",
+    "pine": "#208838", "pine_light": "#40b048", "pine_dark": "#106028",
+    "leaf": "#40a030", "leaf_light": "#70c840", "leaf_dark": "#287020",
+    "rock": "#c06848", "rock_light": "#e09068", "rock_dark": "#884030",
+    "snow": "#ffffff", "snow_dark": "#b8c8e8",
+    "hill": "#98c058", "hill_light": "#b8d870", "hill_dark": "#709040",
+    "wall": "#e8d0a0", "wall_light": "#f8e8c0", "wall_dark": "#c0a070",
+    "roof": "#d84830", "roof_dark": "#a03020",
+    "tent": "#c83850", "tent_light": "#f06070", "tent_dark": "#902038",
+    "flag": "#f8d820",
+    "mine_hole": "#201818",
+    "crop": "#f0d040", "crop_alt": "#c8a830", "crop_dark": "#987820",
+    "plank": "#b88048", "plank_dark": "#805028",
+    "boat": "#a06030", "boat_dark": "#704018",
+    "reed": "#88a838", "reed_dark": "#587020",
+    "cactus": "#50a040", "cactus_dark": "#307028"
+  }
+}
