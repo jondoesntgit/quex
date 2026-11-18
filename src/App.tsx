@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore } from './app/supabase'
-import { Account } from './ui/Account'
+import { Account, SignIn } from './ui/Account'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
@@ -17,6 +17,7 @@ type Tab = 'today' | 'village' | 'party' | 'log'
 export default function App() {
   const [game, setGame] = useState<Game | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [needSignIn, setNeedSignIn] = useState(false)
   useEffect(() => {
     let g: Game | null = null
     ;(async () => {
@@ -24,14 +25,15 @@ export default function App() {
         const meta = loadMeta() ?? newMeta(new URLSearchParams(location.search).get('seed') ?? 'quex-season-1')
         saveMeta(meta)
         const remote = await createSupabaseStore(meta.worldSeed)
+        if (remote === 'signin') return setNeedSignIn(true)
         const store: EventStore = remote ?? new LocalStore()
         g = new Game(meta, store)
         await g.init()
         if (remote) {
-          // signed in on a new device (or after a sign-in): adopt this account's villages
+          // online, you play exactly this account's villages (new device, or a different account)
           const owned = (await remote.ownedPlayers()).filter((id) => g!.state.players[id])
-          for (const id of owned) if (!meta.localPlayers.includes(id)) meta.localPlayers.push(id)
-          if (!meta.activePlayer || !g.state.players[meta.activePlayer]) meta.activePlayer = owned[0] ?? null
+          meta.localPlayers = owned
+          if (!meta.activePlayer || !owned.includes(meta.activePlayer)) meta.activePlayer = owned[0] ?? null
           saveMeta(meta)
         }
         setGame(g)
@@ -42,6 +44,7 @@ export default function App() {
     })()
     return () => g?.dispose()
   }, [])
+  if (needSignIn) return <SignIn />
   if (error) return <div className="modal"><div className="card"><h1>Oops</h1><p>{error}</p></div></div>
   if (!game) return <div className="modal"><div className="card"><h1>QUEX</h1><p className="muted">Generating the world…</p></div></div>
   return <Main game={game} />

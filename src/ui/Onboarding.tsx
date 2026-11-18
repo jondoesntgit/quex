@@ -5,17 +5,6 @@ import type { GameEvent } from '../game/types'
 import { ROLES, type Role } from '../world/types'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, roleFits, type Fit, type Spot } from './helpers'
-import { account } from '../app/supabase'
-import { Account } from './Account'
-
-/** name + habit survive the reload that signing in to an existing account needs */
-const DRAFT_KEY = 'quex:draft:v1'
-function loadDraft(): { name: string; habit: string } {
-  try { return { name: '', habit: 'water', ...JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}') } } catch { return { name: '', habit: 'water' } }
-}
-function saveDraft(d: { name: string; habit: string } | null) {
-  try { if (d) localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); else localStorage.removeItem(DRAFT_KEY) } catch { /* private mode */ }
-}
 
 export type { Spot }
 
@@ -34,10 +23,8 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
   linked?: boolean
 }) {
   const [step, setStep] = useState<'about' | 'place'>('about')
-  const [draft] = useState(loadDraft)
-  const [name, setName] = useState(draft.name)
-  const [habit, setHabit] = useState(draft.habit)
-  const [signIn, setSignIn] = useState(false)
+  const [name, setName] = useState('')
+  const [habit, setHabit] = useState('water')
   const [picked, setPicked] = useState<{ key: string; role: Role } | null>(null)
   const pid = useState(() => 'p_' + Math.random().toString(36).slice(2, 10))[0]
   const tz = -new Date().getTimezoneOffset()
@@ -53,17 +40,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
 
   const problem = site ? foundingProblem(game.state, game.world, site) : null
 
-  /** Found button: guests sign in first (no ghost villages), then we settle. */
-  const found = async () => {
-    if (account.enabled) {
-      const info = await account.info()
-      if (!info || info.guest) return setSignIn(true)
-    }
-    await go()
-  }
-
   const go = async () => {
-    setSignIn(false)
     if (!site || !role) return
     const join: GameEvent = {
       t: 'join', id: eventId(), at: game.now().toISOString(), playerId: pid, name: name.trim() || 'Wanderer',
@@ -78,7 +55,6 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
     game.meta.activePlayer = pid
     game.meta.joinedOn[pid] = game.today(pid)
     game.saveMeta()
-    saveDraft(null)
     onDone(pid)
   }
 
@@ -110,8 +86,6 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
   }
 
   return (
-    <>
-    {signIn && <Account game={game} onClose={() => setSignIn(false)} onSignedIn={go} beforeReload={() => saveDraft({ name, habit })} />}
     <div className="placebar card">
       {!site && linked && <p style={{ margin: '0 0 6px' }}><b>The spot from your link is marked in pink.</b> Settle near it: tap a hex just outside the red.</p>}
       {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Red land is too close to a neighbour.</span></p>}
@@ -137,10 +111,9 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
       <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}>You can abandon your village any time and settle somewhere new, but that resets your progress.</p>
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn" onClick={() => setStep('about')}>← Back</button>
-        <button className="btn primary" disabled={!site || !!problem || !role} onClick={found}>Found village</button>
+        <button className="btn primary" disabled={!site || !!problem || !role} onClick={go}>Found village</button>
       </div>
     </div>
-    </>
   )
 }
 

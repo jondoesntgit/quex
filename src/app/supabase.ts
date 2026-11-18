@@ -21,19 +21,14 @@ function getClient(): Promise<SupabaseClient> {
     createClient(URL_!, KEY!, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })))
 }
 
-export async function createSupabaseStore(worldSeed: string): Promise<SupabaseStore | null> {
+/** The shared world, or 'signin' when nobody is signed in with an email yet
+ *  (the whole world sits behind sign-in, so there are no ghost villages). */
+export async function createSupabaseStore(worldSeed: string): Promise<SupabaseStore | 'signin' | null> {
   if (!supabaseEnabled) return null
   const sb = await getClient()
-  // Everyone starts as an anonymous guest; adding an email (see `account`)
-  // keeps the same user id, so their villages come with them.
+  // detectSessionInUrl has already turned an emailed sign-in link into a session
   const { data: s } = await sb.auth.getSession()
-  if (!s.session) {
-    const { error } = await sb.auth.signInAnonymously()
-    if (error) {
-      console.warn('Supabase sign-in failed, playing offline:', error.message)
-      return null
-    }
-  }
+  if (!s.session || s.session.user.is_anonymous || !s.session.user.email) return 'signin'
   await sb.rpc('join_world', { p_world: worldSeed }).then(({ error }) => error && console.warn('join_world', error.message))
   return new SupabaseStore(sb, worldSeed)
 }
@@ -89,10 +84,7 @@ export class SupabaseStore implements EventStore {
 
 export interface AccountInfo { email: string | null; guest: boolean }
 
-/** Email sign-in. A guest *adds* an email to their existing account (keeping
- *  their villages); if that email already has an account, we sign in to it
- *  instead. Either way the email carries a link and (if the template has
- *  {{ .Token }}) a 6-digit code. */
+/** Email sign-in: the email carries a link and a 6-digit code ({{ .Token }}). */
 export const account = {
   enabled: supabaseEnabled,
 
@@ -105,22 +97,15 @@ export const account = {
     return { email, guest: !!data.user.is_anonymous || !email }
   },
 
-  /** Returns which kind of code was sent, to pass back to `verify`. */
-  async sendCode(email: string): Promise<'email_change' | 'email'> {
+  /** Email a sign-in link + 6-digit code (creates the account if new). */
+  async sendCode(email: string): Promise<'email'> {
     const sb = await getClient()
-    const redirect = location.origin + location.pathname
-    const { data } = await sb.auth.getUser()
-    if (data.user?.is_anonymous) {
-      const { error } = await sb.auth.updateUser({ email }, { emailRedirectTo: redirect })
-      if (!error) return 'email_change'
-      if (error.code !== 'email_exists' && !/already/i.test(error.message)) throw error
-    }
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect, shouldCreateUser: true } })
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname + location.search, shouldCreateUser: true } })
     if (error) throw error
     return 'email'
   },
 
-  async verify(email: string, code: string, type: 'email_change' | 'email') {
+  async verify(email: string, code: string, type: 'email' = 'email') {
     const sb = await getClient()
     const { error } = await sb.auth.verifyOtp({ email, token: code.trim(), type })
     if (error) throw error
