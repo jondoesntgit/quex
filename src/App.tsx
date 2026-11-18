@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore } from './app/supabase'
 import { Account, ManageWard, SignIn } from './ui/Account'
+import { Help } from './ui/Help'
 import { rememberAccount } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
@@ -91,6 +92,7 @@ function Main({ game }: { game: Game }) {
   const [managing, setManaging] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showAccount, setShowAccount] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   // one-off message from startup (e.g. accepting a parent link)
   useEffect(() => {
     if (!game.flash) return
@@ -202,6 +204,7 @@ function Main({ game }: { game: Game }) {
         {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
         <span className="spacer" />
         {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
+        <button className="chip" onClick={() => setShowHelp(true)} title="How to play" aria-label="How to play">?</button>
         {account.enabled && <button className="chip" onClick={() => setShowAccount(true)}>Account</button>}
       </div>
 
@@ -248,6 +251,7 @@ function Main({ game }: { game: Game }) {
           onDone={() => { setOnboard(null); setPlacing(false); setPreview(null); centred.current = null }} />
       )}
       {showAccount && <Account game={game} onClose={() => setShowAccount(false)} notify={notify} />}
+      {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {managing && game.state.players[managing] && <ManageWard game={game} pid={managing} onClose={() => setManaging(null)} />}
       {!p && !onboard && (
         // a parent/guardian without a village of their own

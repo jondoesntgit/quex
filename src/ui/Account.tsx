@@ -3,12 +3,14 @@ import { account, SupabaseStore, type AccountInfo } from '../app/supabase'
 import { eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
+import { Help } from './Help'
 import { forgetAccount, rememberedAccounts } from '../app/accounts'
 
 /** Full-screen sign-in in front of the shared world: Google, an emailed
  *  code (or link), or email + password. Every route ends in a reload, which
  *  loads the world as the signed-in player. */
 export function SignIn() {
+  const [help, setHelp] = useState(false)
   const [recent, setRecent] = useState(rememberedAccounts)
   const [mode, setMode] = useState<'code' | 'password'>('code')
   const [email, setEmail] = useState(() => rememberedAccounts()[0] ?? '')
@@ -50,8 +52,10 @@ export function SignIn() {
         <h1>QUEX</h1>
         <p style={{ marginTop: 0 }}>
           Your real-life quests power a little village in a hex world. Finish today’s tasks and spend the actions you earn
-          in order to better you and your party, then get back to life.
+          in order to better you and your party, then get back to life.{' '}
+          <button type="button" className="linkbtn" onClick={() => setHelp(true)}>How does it work?</button>
         </p>
+        {help && <Help onClose={() => setHelp(false)} />}
         {sent ? (
           <form onSubmit={(e) => { e.preventDefault(); if (code.trim().length >= 6) verify() }}>
             <p>Check <b>{email}</b>. Type the 6-digit code here, or tap the link in the email.</p>
