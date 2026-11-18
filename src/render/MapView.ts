@@ -605,9 +605,10 @@ export class MapView {
 }
 
 /** Hexes drawn unfogged: everything while choosing a site (or with no
- *  player yet), otherwise what any player in the world has seen. */
+ *  player yet, or a visitor to an empty world), otherwise what any player in the world has seen. */
 function visibleSet(s: SceneInput): Set<number> {
-  if (s.showAll || (!s.viewer && !s.guest)) return new Set(s.world.cells.map((_, i) => i))
+  // a visitor to a world nobody has explored yet sees the land waiting to be settled
+  if (s.showAll || (!s.viewer && (!s.guest || !s.state.revealed.length))) return new Set(s.world.cells.map((_, i) => i))
   return new Set(s.state.revealed)
 }
 

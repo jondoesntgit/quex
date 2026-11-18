@@ -346,7 +346,7 @@ export function GuestPanel({ game }: { game: Game }) {
                     <b>{o.name}</b>
                     <span className="muted">{ROLE_INFO[v.role]?.name} · {v.name}</span>
                   </div>
-                  <span className="muted">{Math.floor(v.population)} villagers · {v.buildings.length} buildings</span>
+                  <span className="muted">{Math.floor(v.population)} villagers · {v.buildings.length} {v.buildings.length === 1 ? 'building' : 'buildings'}</span>
                 </div>
               )
             })}

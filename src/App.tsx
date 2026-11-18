@@ -199,8 +199,12 @@ function Main({ game }: { game: Game }) {
       const v = game.state.villages[p.villageId]
       view.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)
     } else {
+      // visitors and newcomers: where the villages are, or the starter region in an empty world
+      const vs = Object.values(game.state.villages)
       const rg = game.world.regions[game.world.startRegion]
-      view.centreOn((rg.col0 + rg.col1) >> 1, (rg.row0 + rg.row1) >> 1, 2)
+      const col = vs.length ? Math.round(vs.reduce((t, x) => t + x.col, 0) / vs.length) : (rg.col0 + rg.col1) >> 1
+      const row = vs.length ? Math.round(vs.reduce((t, x) => t + x.row, 0) / vs.length) : (rg.row0 + rg.row1) >> 1
+      view.centreOn(col, row, 2)
     }
   }, [ready, p, game, linked])
 
