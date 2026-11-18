@@ -6,6 +6,7 @@ import { addDays, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
+import { FAMILY_WORLD, SANDBOX_WORLD, worldUrl } from '../app/worlds'
 import { Icon } from './Icon'
 
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
@@ -312,12 +313,15 @@ export function LogPanel({ game, p }: { game: Game; p: Player }) {
   )
 }
 
-/** What a guest sees: who plays here and what's been happening (read-only). */
+const DAY_STATUS = /^\(ignored|^Night falls|^❄️ Winter rest|perfect week|used a freeze/
+
+/** What a visitor sees: who plays here and what's been happening (read-only), but not how anyone's day went. */
 export function GuestPanel({ game }: { game: Game }) {
   const [tab, setTab] = useState<'party' | 'log'>('party')
   const [collapsed, setCollapsed] = useState(false)
   const players = Object.values(game.state.players)
-  const entries = game.state.log.filter((e) => !e.text.startsWith('(ignored') && e.kind !== 'info').slice(-60).reverse()
+  // players' days (scores, freezes, streaks) stay between players: visitors see the village story only
+  const entries = game.state.log.filter((e) => e.kind !== 'info' && !DAY_STATUS.test(e.text)).slice(-60).reverse()
   return (
     <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>
       <div className="tabs">
@@ -331,9 +335,10 @@ export function GuestPanel({ game }: { game: Game }) {
       <div className="sheet-body">
         {tab === 'party' ? (
           <div>
-            <p className="muted" style={{ marginTop: 0 }}>You’re looking around a public world. Players’ dots show whether they finished today’s tasks, never what they were.</p>
+            {game.meta.worldSeed === FAMILY_WORLD
+              ? <p style={{ marginTop: 0 }}>You’re looking around the world where friends and family are playtesting Quex. <a href={worldUrl(SANDBOX_WORLD)}>Try it yourself in the sandbox →</a></p>
+              : <p className="muted" style={{ marginTop: 0 }}>You’re looking around a public world.</p>}
             {players.map((o) => {
-              const d = o.days[game.today(o.id)]
               const v = game.state.villages[o.villageId]
               return (
                 <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px dashed var(--paper-2)' }}>
@@ -341,10 +346,7 @@ export function GuestPanel({ game }: { game: Game }) {
                     <b>{o.name}</b>
                     <span className="muted">{ROLE_INFO[v.role]?.name} · {v.name}</span>
                   </div>
-                  <span className="pips">
-                    {(d?.slots ?? []).map((sl, i) => <span key={i} className={`pip ${sl.status} ${d?.frozen ? 'frozen' : ''}`} />)}
-                    {!d && <span className="muted">no check-in yet today</span>}
-                  </span>
+                  <span className="muted">{Math.floor(v.population)} villagers · {v.buildings.length} buildings</span>
                 </div>
               )
             })}

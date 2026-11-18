@@ -5,6 +5,7 @@ import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
 import { Help } from './Help'
 import { forgetAccount, rememberedAccounts } from '../app/accounts'
+import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldName, worldUrl } from '../app/worlds'
 
 /** Full-screen sign-in in front of the shared world: Google, an emailed
  *  code (or link), or email + password. Every route ends in a reload, which
@@ -117,7 +118,13 @@ export function SignIn() {
         {err && <p style={{ color: 'var(--danger)' }}>{err}</p>}
         {!sent && (
           <p className="muted" style={{ textAlign: 'center', marginBottom: 0 }}>
-            Just curious? <button type="button" className="linkbtn" onClick={() => account.enterGuest()}>Look around as a guest</button> (public worlds only).
+            Just curious? <button type="button" className="linkbtn" onClick={() => account.enterGuest()}>Look around as a guest</button>.
+          </p>
+        )}
+        {!sent && (
+          <p className="muted playtest-note">
+            New here? Signing in puts you in the <b>sandbox</b>, a world open to anyone. Quex is being playtested by a
+            small group of friends and family on their own, smaller world: <a href={familyPreviewUrl()}>preview it →</a>
           </p>
         )}
       </div>
@@ -206,6 +213,17 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           </>
         )}
 
+        {remote && (
+          <>
+            <label>World</label>
+            <p style={{ margin: 0 }}>
+              You’re in {worldName(game.meta.worldSeed)}.{' '}
+              {game.meta.worldSeed !== SANDBOX_WORLD && <a href={worldUrl(SANDBOX_WORLD)}>Go to the sandbox</a>}
+              {game.meta.worldSeed !== FAMILY_WORLD && <a href={worldUrl(FAMILY_WORLD)}>Go to the family playtest world</a>}
+            </p>
+          </>
+        )}
+
         {remote && info && !info.guest && <AssistantLinks notify={notify} />}
 
         <form onSubmit={(e) => { e.preventDefault(); savePw() }}>
@@ -273,7 +291,7 @@ function WorldSettings({ game, remote, notify }: { game: Game; remote: SupabaseS
   }
   // people with a village here who aren't admins yet
   const candidates = [...new Set(a.owners.map((o) => o.user))].filter((u) => !a.admins.includes(u))
-  const link = location.origin + location.pathname + (game.meta.worldSeed !== 'quex-season-1' ? `?seed=${encodeURIComponent(game.meta.worldSeed)}` : '')
+  const link = worldUrl(game.meta.worldSeed)
   return (
     <>
       <label>World <span className="muted">(you’re an admin)</span></label>
@@ -282,7 +300,12 @@ function WorldSettings({ game, remote, notify }: { game: Game; remote: SupabaseS
           onChange={(e) => run(() => remote.setPublic(e.target.checked), e.target.checked ? 'World is public: anyone with the link can look around.' : 'World is private: players only.')} />
         <span><b>Public</b>: anyone can look around without joining</span>
       </div>
-      {a.public && <p className="muted" style={{ margin: '4px 0' }}>Share <b>{link}</b>; visitors choose “Look around as a guest”. Task names always stay private.</p>}
+      {a.public && <p className="muted" style={{ margin: '4px 0' }}>Share <b>{link}</b> to let people look around. Visitors never see task names or how anyone’s day went.</p>}
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" id="world-closed" checked={!a.closed} disabled={busy}
+          onChange={(e) => run(() => remote.setClosed(!e.target.checked), e.target.checked ? 'Anyone signed in can now join and settle.' : 'Closed: only existing players can play; others can only look.')} />
+        <span><b>Taking new players</b>: anyone signed in can join and settle</span>
+      </div>
       <p style={{ margin: '8px 0 4px' }}>Admins: {a.admins.map((u) => (
         <span key={u} style={{ marginRight: 8 }}>
           {game.userName(u)}

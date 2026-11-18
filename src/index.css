@@ -242,3 +242,11 @@ h1, h2, h3, .help summary, .tab.on { text-shadow: 0.0625em 0 0 currentColor; }
 .tab { padding: 6px 4px 8px; white-space: nowrap; }
 .chip { padding: 2px 8px 4px; }
 .tri button { font-family: 'Pixelify Sans', monospace; }
+
+/* the sandbox's note about the family playtest world (a full row under the top bar) */
+.sandbox-note {
+  pointer-events: auto; flex-basis: 100%; max-width: 34rem; margin: 2px 0 0; padding: 8px 10px;
+  background: var(--paper); border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.sandbox-note a, .playtest-note a { font-weight: 600; }
+.playtest-note { text-align: center; margin: 10px 0 0; }

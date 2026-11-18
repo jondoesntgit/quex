@@ -9,6 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GameEvent } from '../game/types'
 import type { EventStore } from './store'
+import { FAMILY_WORLD, SANDBOX_WORLD } from './worlds'
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -23,7 +24,7 @@ function getClient(): Promise<SupabaseClient> {
 
 /** The shared world, or 'signin' when nobody is signed in with an email yet
  *  (the whole world sits behind sign-in, so there are no ghost villages). */
-export async function createSupabaseStore(worldSeed: string): Promise<SupabaseStore | 'signin' | null> {
+export async function createSupabaseStore(worldSeed: string, preview = false): Promise<SupabaseStore | 'signin' | null> {
   if (!supabaseEnabled) return null
   const sb = await getClient()
   // detectSessionInUrl has already turned an emailed sign-in link into a session
@@ -33,11 +34,15 @@ export async function createSupabaseStore(worldSeed: string): Promise<SupabaseSt
     // was signed in, so carry on from its copy of the world until we're back
     if (!navigator.onLine && savedSessionEmail()) return new SupabaseStore(sb, worldSeed)
     // looking around without an account (public worlds only)
-    if (account.isGuest()) return new SupabaseStore(sb, worldSeed, true)
+    if (preview) { try { sessionStorage.setItem(GUEST_KEY, '1') } catch { /* ignore */ } }
+    if (preview || account.isGuest()) return new SupabaseStore(sb, worldSeed, true)
     return 'signin'
   }
   if (account.isGuest()) account.leaveGuest(false) // signed in now: no longer a guest
-  await sb.rpc('join_world', { p_world: worldSeed }).then(({ error }) => error && console.warn('join_world', error.message))
+  const { error } = await sb.rpc('join_world', { p_world: worldSeed })
+  // a world that isn't taking new players: look around it instead (it's public)
+  if (error && /WORLD_CLOSED/.test(error.message)) return new SupabaseStore(sb, worldSeed, true, true)
+  if (error) console.warn('join_world', error.message)
   return new SupabaseStore(sb, worldSeed)
 }
 
@@ -73,13 +78,16 @@ export class SupabaseStore implements EventStore {
   onStatus: () => void = () => {}
   private flushing = false
 
-  /** read-only visitor without an account */
+  /** read-only visitor: no account, or signed in to a world that isn't taking new players */
   readonly guest: boolean
+  /** the visitor is signed in, but this world is closed to new players */
+  readonly closedToMe: boolean
 
-  constructor(sb: SupabaseClient, world: string, guest = false) {
+  constructor(sb: SupabaseClient, world: string, guest = false, closedToMe = false) {
     this.sb = sb
     this.world = world
     this.guest = guest
+    this.closedToMe = closedToMe
     window.addEventListener('online', () => { void this.flush() })
   }
 
@@ -94,6 +102,10 @@ export class SupabaseStore implements EventStore {
 
   async setPublic(on: boolean) {
     const { error } = await this.sb.rpc('set_world_public', { p_world: this.world, p_public: on })
+    if (error) throw new Error(error.message)
+  }
+  async setClosed(on: boolean) {
+    const { error } = await this.sb.rpc('set_world_closed', { p_world: this.world, p_closed: on })
     if (error) throw new Error(error.message)
   }
   async addAdmin(user: string) {
@@ -225,14 +237,14 @@ export class SupabaseStore implements EventStore {
 
   /** Who is signed in, who guards which player, and which user plays which player. */
   async access(): Promise<Access> {
-    if (this.guest) return { me: null, guardians: [], owners: [], admins: [], public: true }
+    if (this.guest) return { me: null, guardians: [], owners: [], admins: [], public: true, closed: this.closedToMe }
     const key = `quex:access:v1:${this.world}`
     const { data: s } = await this.sb.auth.getSession()
     const [g, o, ad, w] = await Promise.all([
       this.sb.from('player_guardians').select('player_id, guardian_id').eq('world', this.world),
       this.sb.from('player_owners').select('player_id, user_id').eq('world', this.world),
       this.sb.from('world_admins').select('user_id').eq('world', this.world),
-      this.sb.from('worlds').select('public').eq('seed', this.world).maybeSingle(),
+      this.sb.from('worlds').select('public, closed').eq('seed', this.world).maybeSingle(),
     ])
     if (g.error || o.error) {
       // offline: who guards whom hasn't changed, use the last known roles
@@ -246,6 +258,7 @@ export class SupabaseStore implements EventStore {
       owners: (o.data ?? []).map((r) => ({ player: r.player_id as string, user: r.user_id as string })),
       admins: (ad.data ?? []).map((r) => r.user_id as string),
       public: !!(w.data as { public?: boolean } | null)?.public,
+      closed: !!(w.data as { closed?: boolean } | null)?.closed,
     }
     if (!g.error && !o.error) writeJSON(key, a)
     return a
@@ -258,7 +271,7 @@ export class SupabaseStore implements EventStore {
     const { error } = await this.sb.from('guardian_invites').insert({ token, world: this.world, player_id: playerId })
     if (error) throw new Error(error.message)
     const u = new URL(location.origin + location.pathname)
-    if (this.world !== 'quex-season-1') u.searchParams.set('seed', this.world)
+    u.searchParams.set('seed', this.world)
     u.searchParams.set('guardian', token)
     return u.toString()
   }
@@ -298,6 +311,8 @@ export interface Access {
   admins: string[]
   /** can people without an account look at it? */
   public: boolean
+  /** only existing players can join */
+  closed: boolean
 }
 
 /** A guest tried to look at a world that isn't public. */
@@ -396,6 +411,22 @@ export const account = {
     const sb = await getClient()
     const { error } = await sb.rpc('revoke_assistant_link', { p_id: id })
     if (error) throw new Error(error.message)
+  },
+
+  /** Where a signed-in person plays by default: the family world if they have a
+   *  village there or look after a child there, otherwise the sandbox. */
+  async homeWorld(): Promise<string> {
+    if (!supabaseEnabled) return SANDBOX_WORLD
+    const sb = await getClient()
+    const { data: s } = await sb.auth.getSession()
+    const uid = s.session?.user.id
+    if (!uid) return SANDBOX_WORLD
+    const [o, g] = await Promise.all([
+      sb.from('player_owners').select('player_id').eq('world', FAMILY_WORLD).eq('user_id', uid).limit(1),
+      sb.from('player_guardians').select('player_id').eq('world', FAMILY_WORLD).eq('guardian_id', uid).limit(1),
+    ])
+    if (o.error && g.error) return offlineError(o.error.message) ? FAMILY_WORLD : SANDBOX_WORLD
+    return (o.data?.length || g.data?.length) ? FAMILY_WORLD : SANDBOX_WORLD
   },
 
   async signOut() {

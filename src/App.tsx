@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore, PrivateWorldError, SupabaseStore } from './app/supabase'
+import { familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/worlds'
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
 import { rememberAccount } from './app/accounts'
@@ -25,10 +26,18 @@ export default function App() {
     let g: Game | null = null
     ;(async () => {
       try {
-        const meta = loadMeta() ?? newMeta(new URLSearchParams(location.search).get('seed') ?? 'quex-season-1')
-        saveMeta(meta)
-        const remote = await createSupabaseStore(meta.worldSeed)
+        // which world: the link's ?seed=, else this device's world, else the
+        // family world for its players and the sandbox for everyone else
+        const q = new URLSearchParams(location.search)
+        const asked = q.get('seed')
+        const preview = q.get('preview') === '1'
+        let meta = loadMeta()
+        if (asked && meta && meta.worldSeed !== asked) meta = null
+        meta ??= newMeta(asked ?? (account.enabled ? await account.homeWorld() : SANDBOX_WORLD))
+        const remote = await createSupabaseStore(meta.worldSeed, preview)
         if (remote === 'signin') return setNeedSignIn(true)
+        // just looking: don't make this the device's world
+        if (!remote?.guest) saveMeta(meta)
         const store: EventStore = remote ?? new LocalStore()
         g = new Game(meta, store)
         try {
@@ -234,9 +243,13 @@ function Main({ game }: { game: Game }) {
           <span className="chip" title="No connection: you're playing from this device's copy of the world. Your changes will send when you're back online.">📴 Offline</span>
         )}
         <button className="chip" onClick={() => setShowHelp(true)} title="How to play" aria-label="How to play">?</button>
-        {game.guest && <span className="chip" title="You're looking around without an account">👀 Guest</span>}
-        {game.guest && <button className="chip" onClick={() => account.leaveGuest()}>Sign in to play</button>}
+        {game.guest && <span className="chip" title="You're looking around: you can't change anything here">👀 Visiting</span>}
+        {game.guest && game.meta.worldSeed !== SANDBOX_WORLD && (
+          <button className="chip" onClick={() => { account.leaveGuest(false); location.href = worldUrl(SANDBOX_WORLD) }}>Play in the sandbox</button>
+        )}
+        {game.guest && game.meta.worldSeed === SANDBOX_WORLD && <button className="chip" onClick={() => account.leaveGuest()}>Sign in to play</button>}
         {account.enabled && !game.guest && <button className="chip" onClick={() => setShowAccount(true)}>Account</button>}
+        {game.meta.worldSeed === SANDBOX_WORLD && <SandboxNote />}
       </div>
 
       <div className="zoom">
@@ -313,6 +326,23 @@ function Main({ game }: { game: Game }) {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+    </div>
+  )
+}
+
+const NOTE_KEY = 'quex:sandbox-note:v1'
+
+/** In the sandbox: say that the real playtest happens on a smaller family world, with a way to look at it. */
+function SandboxNote() {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(NOTE_KEY) !== 'seen' } catch { return true } })
+  const close = () => { setOpen(false); try { localStorage.setItem(NOTE_KEY, 'seen') } catch { /* ignore */ } }
+  if (!open) return <button className="chip sandbox-chip" onClick={() => setOpen(true)} title="About this world">🧪 Sandbox</button>
+  return (
+    <div className="sandbox-note">
+      <b>🧪 This is the Quex sandbox.</b> Anyone can try the game here. Quex is being playtested by a small group of
+      friends and family on their own, smaller world.{' '}
+      <a href={familyPreviewUrl()}>Preview their world →</a>
+      <button className="btn ghost" onClick={close} aria-label="close" style={{ float: 'right' }}>✕</button>
     </div>
   )
 }

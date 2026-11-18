@@ -125,6 +125,11 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>Send a <b>caravan</b> (medium action) to share goods with a neighbour. It takes time on the road; walking habits speed it up.</li>
             <li>Tap a hex and <b>🔗 Share</b>, or use <b>Invite someone to settle nearby</b> in the Village tab, to text someone a link to that spot.</li>
             <li>Villages need a little space: you can’t settle right next to someone else’s land (shown in red while choosing).</li>
+            <li>
+              Quex has two worlds: the <b>sandbox</b>, open to anyone who wants to try it, and a smaller world where friends and
+              family are playtesting. Anyone can look around the family world, but only its players can play there. Visitors
+              never see task names or how anyone’s day went.
+            </li>
           </ul>
         </details>
 

@@ -164,7 +164,7 @@ export class Game {
     }
   }
 
-  saveMeta() { saveMeta(this.meta); this.emit() }
+  saveMeta() { if (!this.guest) saveMeta(this.meta); this.emit() }
 
   label(pid: string, date: string, slot: number) {
     return this.meta.labels[pid]?.[date]?.[slot] ?? ''

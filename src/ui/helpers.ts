@@ -49,12 +49,10 @@ export interface Spot { col: number; row: number }
 
 export { roleFits, type Fit } from '../game/sites'
 
-const DEFAULT_SEED = 'quex-season-1'
-
 /** A link that opens the game centred on one hex (and its world, if not the default). */
 export function spotLink(game: Game, at: Spot): string {
   const u = new URL(location.origin + location.pathname)
-  if (game.meta.worldSeed !== DEFAULT_SEED) u.searchParams.set('seed', game.meta.worldSeed)
+  u.searchParams.set('seed', game.meta.worldSeed)
   u.searchParams.set('at', `${at.col},${at.row}`)
   return u.toString()
 }
