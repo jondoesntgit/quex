@@ -11,6 +11,7 @@
  *  then whatever stands on it, so nearer hexes correctly cover farther ones.
  */
 import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } from 'pixi.js'
+import { Ambient } from './ambient'
 import { hexToPixel, neighbours, pixelToHex } from '../world/hex'
 import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
@@ -53,6 +54,8 @@ export class MapView {
   overlay = new Container()
   people!: People
   traders!: Traders
+  /** surf, glints, swaying trees, shimmering fields */
+  ambient!: Ambient
   zoom = typeof window !== "undefined" && window.innerWidth < 700 ? 1 : 2
   /** CSS upscale of the canvas (zoom >= 1) */
   private get cssScale() { return Math.max(1, this.zoom) }
@@ -116,6 +119,7 @@ export class MapView {
     this.app.ticker.add((t) => {
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
+      this.ambient?.update(performance.now() / 1000, this.sceneScale)
     })
     this.app.stage.addChild(this.root)
     this.resize()
@@ -235,7 +239,9 @@ export class MapView {
     const { tier: TP } = this.atlas.meta
     const W = this.W
     const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes()])
-    for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy()
+    for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy({ children: true })
+    this.ambient ??= new Ambient(W)
+    this.ambient.reset()
     this.overlay.removeChildren().forEach((c) => c.destroy())
 
     const revealed = visibleSet(input)
@@ -302,6 +308,23 @@ export class MapView {
         this.cells.addChild(s)
       }
       if (!known) continue
+      if (WATER.has(land!.terrain)) {
+        // surf where the water meets land, glints out on open water
+        const corners = hexCorners(cx, cy, W)
+        const edges: [number, number, number, number][] = []
+        neighbours(cell.col, cell.row).forEach(([nc, nr], k) => {
+          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
+          const ni = idx(nc, nr)
+          if (!revealed.has(ni) || world.cells[ni].tier <= cell.tier) return
+          const [a, b] = EDGE_CORNERS[k]
+          edges.push([corners[a][0], corners[a][1], corners[b][0], corners[b][1]])
+        })
+        if (edges.length) for (const n of this.ambient.shore(cx, cy, edges, i)) { n.zIndex = z(i, 0.5); this.cells.addChild(n) }
+        else if (land!.terrain !== 'shallow') { const g = this.ambient.glint(cx, cy, i); if (g) { g.zIndex = z(i, 0.5); this.cells.addChild(g) } }
+      } else if ((land!.terrain === 'meadow' || land!.terrain === 'savannah') && !land!.feature && !things.has(i) && ((i * 2654435761) >>> 0) % 3 === 0) {
+        const g = this.ambient.field(cx, cy, i, 2)
+        g.zIndex = z(i, 0.5); this.cells.addChild(g)
+      }
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
         this.cells.addChild(this.road(world, i, cx, cy, roadSet, hubs)).zIndex = z(i, 1)
       if (cell.riverTo !== -1 && cell.tier > 0) this.cells.addChild(this.river(world, i, cx, cy)).zIndex = z(i, 1)
@@ -318,11 +341,18 @@ export class MapView {
         if (!f) continue
         const s = new Sprite(f.texture)
         s.cullable = true
-        s.x = cx - f.frame.ax
-        s.y = cy - f.frame.ay + l.dy
+        // anchored at its foot, so trees can sway from the ground
+        s.anchor.set(f.frame.ax / f.frame.w, f.frame.ay / f.frame.h)
+        s.x = cx
+        s.y = cy + l.dy
         s.alpha = l.alpha
         s.zIndex = z(i, 3)
         this.cells.addChild(s)
+        if (TREES.test(l.name) && l.alpha === 1) this.ambient.tree(s, cx, cy, i)
+        if (l.name === 'f_farm' && l.alpha === 1) {
+          const g = this.ambient.field(cx, cy, i + 0.5)
+          g.zIndex = z(i, 3.2); this.cells.addChild(g)
+        }
       }
     }
 
@@ -642,6 +672,9 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */
+const WATER = new Set(['deep', 'ocean', 'shallow'])
+const TREES = /^f_(pine|oak)/
+
 function hexCorners(cx: number, cy: number, W: number): [number, number][] {
   const hw = W / 2, qw = W / 4, hh = W / 4
   return [[cx + hw, cy], [cx + qw, cy + hh], [cx - qw, cy + hh], [cx - hw, cy], [cx - qw, cy - hh], [cx + qw, cy - hh]]
