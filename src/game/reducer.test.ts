@@ -373,3 +373,23 @@ describe('water tracker', () => {
     expect(validate(s, world, ev('drink', 'ann', `${addDays(SUN, 1)}T09:00:00Z`, { date: SUN, habitId: 'water', amount: 1 }))).toMatch(/over/)
   })
 })
+
+describe('log and renames', () => {
+  it('shows current names in old log lines, and announces the rename to everyone', async () => {
+    const { logText } = await import('./reducer')
+    const s = setup()
+    const founded = s.log.find((e) => e.text.includes('founded'))!
+    expect(logText(s, founded.text)).toMatch(/^Ann founded/)
+    apply(s, world, ev('rename', 'ann', `${SUN}T09:00:00Z`, { name: 'Jonathan' }))
+    expect(logText(s, founded.text)).toMatch(/^Jonathan founded/)
+    const rename = s.log[s.log.length - 1]
+    expect(logText(s, rename.text)).toBe('Ann is now known as Jonathan.')
+    expect(rename.kind).not.toBe('info') // shown in everyone's log
+  })
+  it('falls back to the name at the time when the player is gone', async () => {
+    const { logText } = await import('./reducer')
+    const s = setup()
+    apply(s, world, ev('abandon', 'ann', `${SUN}T09:00:00Z`, {}))
+    expect(logText(s, s.log[s.log.length - 1].text)).toMatch(/^Ann abandoned Ann’s /)
+  })
+})

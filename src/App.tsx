@@ -216,6 +216,10 @@ function Main({ game }: { game: Game }) {
       <div className="zoom">
         <button className="btn icon" onClick={() => viewRef.current?.zoomStep(1)}>＋</button>
         <button className="btn icon" onClick={() => viewRef.current?.zoomStep(-1)}>－</button>
+        {v && (
+          <button className="btn icon" title="Back to your village" aria-label="Back to your village"
+            onClick={() => viewRef.current?.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)}>⌂</button>
+        )}
       </div>
 
       {p && p.tokens.length > 0 && !sel && (

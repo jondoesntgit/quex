@@ -406,7 +406,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'freeze': {
       ensureDay(p, ev.date).frozen = true
       p.freezes--
-      log(s, ev.at, p.id, `${p.name} used a freeze for ${ev.date}.`, 'info')
+      log(s, ev.at, p.id, `${P(p)} used a freeze for ${ev.date}.`, 'info')
       return s
     }
     case 'resetHour':
@@ -421,7 +421,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       const name = ev.name.trim()
       // a village still called after its founder follows the new name
       if (v.name === `${p.name}’s ${ROLE_TOWN[v.role]}`) v.name = `${name}’s ${ROLE_TOWN[v.role]}`
-      log(s, ev.at, p.id, `${p.name} is now known as ${name}.`, 'info')
+      log(s, ev.at, p.id, `${p.name} is now known as {p:${p.id}|${name}}.`, 'good')
       p.name = name
       return s
     }
@@ -434,7 +434,7 @@ function abandon(s: GameState, p: Player, at: string) {
   s.caravans = s.caravans.filter((c) => c.from !== v.id && c.to !== v.id)
   delete s.villages[v.id]
   delete s.players[p.id]
-  log(s, at, null, `${p.name} abandoned ${v.name}. The land is free again.`, 'info')
+  log(s, at, null, `${P(p)} abandoned ${V(v)}. The land is free again.`, 'info')
   return s
 }
 
@@ -444,6 +444,17 @@ function syncGoal(d: DayRecord, h: { id: string; goal?: { target: number } }) {
   const done = (d.amounts?.[h.id] ?? 0) + 1e-9 >= h.goal.target
   d.habitsDone = d.habitsDone.filter((x) => x !== h.id)
   if (done) d.habitsDone.push(h.id)
+}
+
+/** Log lines name players and villages by reference, so a rename shows
+ *  everywhere, even in old lines: {p:id|name-then} / {v:id|name-then}. */
+const P = (p: { id: string; name: string }) => `{p:${p.id}|${p.name}}`
+const V = (v: { id: string; name: string }) => `{v:${v.id}|${v.name}}`
+
+/** A log line with today's names filled in (the name at the time if it's gone). */
+export function logText(s: GameState, text: string): string {
+  return text.replace(/\{([pv]):([^|}]+)\|([^}]*)\}/g, (_, kind: string, id: string, then: string) =>
+    (kind === 'p' ? s.players[id]?.name : s.villages[id]?.name) ?? then)
 }
 
 function log(s: GameState, at: string, playerId: string | null, text: string, kind: LogEntry['kind']) {
@@ -466,7 +477,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   s.players[p.id] = p
   s.villages[vid] = v
   reveal(world, s, ev.site, 4)
-  log(s, ev.at, p.id, `${ev.name} founded a ${ev.role} village.`, 'good')
+  log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role} village.`, 'good')
   return s
 }
 
@@ -573,7 +584,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         id: ev.id, from: v.id, to: to.id, goods: ev.goods!, departAt: ev.at,
         arriveAt: new Date(Date.parse(ev.at) + mins * 60_000).toISOString(),
       })
-      log(s, ev.at, p.id, `A caravan set off for ${to.name}.`, 'info')
+      log(s, ev.at, p.id, `A caravan set off for ${V(to)}.`, 'info')
       break
     }
     case 'outpost':
@@ -650,7 +661,7 @@ function deliverCaravans(s: GameState, at: string) {
     addGoods(to, c.goods)
     const gift = Object.keys(c.goods).some((g) => ['berries', 'cheese', 'relic', 'cloth', 'bread', 'tin'].includes(g))
     if (gift) to.morale = Math.min(100, to.morale + 2)
-    log(s, c.arriveAt, to.playerId, `A caravan from ${s.villages[c.from]?.name ?? 'afar'} arrived: ${fmtGoods(c.goods)}.`, 'good')
+    log(s, c.arriveAt, to.playerId, `A caravan from ${s.villages[c.from] ? V(s.villages[c.from]) : 'afar'} arrived: ${fmtGoods(c.goods)}.`, 'good')
   }
 }
 
@@ -770,7 +781,7 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
     if (p.perfectStreak >= PERFECT_DAYS_PER_SLOT && p.habitSlots < MAX_HABIT_SLOTS) {
       p.habitSlots++
       p.perfectStreak = 0
-      log(s, ev.at, p.id, `A perfect week! ${p.name} unlocked habit slot ${p.habitSlots}.`, 'good')
+      log(s, ev.at, p.id, `A perfect week! ${P(p)} unlocked habit slot ${p.habitSlots}.`, 'good')
     }
   }
 

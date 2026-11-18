@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, SIZE_POINTS, type Good } from '../game/data'
-import { dayScore, defence, foodStock, popCap, storageCap } from '../game/reducer'
+import { dayScore, defence, foodStock, logText, popCap, storageCap } from '../game/reducer'
 import type { Habit, Player, TaskStatus } from '../game/types'
 import { addDays, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
@@ -305,7 +305,7 @@ export function LogPanel({ game, p }: { game: Game; p: Player }) {
     <div className="log">
       {entries.length ? entries.map((e, i) => (
         <p key={i} className={e.kind}>
-          <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{e.text}
+          <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{logText(game.state, e.text)}
         </p>
       )) : <p className="muted">Nothing has happened yet.</p>}
     </div>

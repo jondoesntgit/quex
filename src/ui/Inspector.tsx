@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, villageAt } from '../game/reducer'
+import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
@@ -41,7 +41,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
     if (!r.ev) return notify(r.error ?? 'Not possible')
     await game.dispatch(r.ev)
     const last = game.state.log[game.state.log.length - 1]
-    if (last) notify(last.text)
+    if (last) notify(logText(game.state, last.text))
     setMode('main')
   }
 
