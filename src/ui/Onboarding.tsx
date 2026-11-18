@@ -92,7 +92,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
       {site && problem && <p style={{ margin: 0 }}><b>Can’t settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
       {site && !problem && fits && (
         <>
-          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; ★ marks what this land suits.</span></p>
+          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; stars rate what’s within 3 hexes.</span></p>
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
             {ranked.map((r) => (
               <button key={r} className={`btn fit-${fits[r].fit} ${role === r ? 'primary' : ''}`} title={ROLE_INFO[r].blurb} onClick={() => setRole(r)}>
@@ -103,7 +103,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
           {role && (
             <p className="muted" style={{ margin: '6px 0 0' }}>
               {ROLE_INFO[role].blurb}{' '}
-              {fits[role].fit === 'ok' ? <>This spot isn’t ideal for it ({fits[role].why}), but it’s your call.</> : <>Good here: {fits[role].why}.</>}
+              {fits[role].fit === 'ok' ? <>Not much for it within reach ({fits[role].why}), but it’s your call.</> : <>Within reach: {fits[role].why}.</>}
             </p>
           )}
         </>

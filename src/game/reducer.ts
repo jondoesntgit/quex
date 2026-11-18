@@ -5,7 +5,7 @@
  */
 import { distance, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
-import { hasTrees, isOpen, MOUNTAIN_TERRAIN, type Land } from '../world/land'
+import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, weekSeason, weekday } from './calendar'
 import {
@@ -68,11 +68,22 @@ export function territoryCells(world: World, v: Village): number[] {
 export const VILLAGE_RADIUS = 2
 export const FOUNDING_GAP = 2
 
-/** Why a village can't be founded here (null = fine). */
-export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }): string | null {
+/** Villages founded before this keep their spot even if the terrain rule
+ *  (no mountains, woods, swamp or hills) would refuse it now. */
+export const TERRAIN_RULE_FROM = '2026-11-18T12:16:00Z'
+
+/** Why a village can't be founded here (null = fine). `at` is the join time
+ *  when replaying history; omit it for a new settlement. */
+export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }, at?: string): string | null {
   const cell = world.cells[cellIndex(world, site.col, site.row)]
   if (!cell || site.col < 0 || site.row < 0 || site.col >= world.width || site.row >= world.height) return 'Off the map'
   if (cell.tier === 0) return 'Villages must be on land'
+  const land = landAt(world, s, cellIndex(world, site.col, site.row))
+  if (at && at < TERRAIN_RULE_FROM) { /* grandfathered */ }
+  else if (MOUNTAIN_TERRAIN.includes(land.terrain)) return 'Too steep: a village needs flat ground'
+  else if (hasTrees(land)) return 'Thick woods: settle on open ground nearby (you can fell trees later)'
+  else if (land.terrain === 'swamp') return 'Too boggy for a village square'
+  else if (!isVillageSite(land)) return 'Too hilly for a village square: try the flat land below'
   if (s.lairs.some((l) => !l.cleared && l.col === site.col && l.row === site.row)) return 'Monsters live here'
   for (const v of Object.values(s.villages)) {
     if (territory(v).some((t) => distance(t, site) <= t.radius + VILLAGE_RADIUS + FOUNDING_GAP))
@@ -193,7 +204,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   const p = s.players[ev.playerId]
   if (ev.t === 'join') {
     if (p) return 'Already joined'
-    return foundingProblem(s, world, ev.site)
+    return foundingProblem(s, world, ev.site, ev.at)
   }
   if (!p) return 'Unknown player'
   const v = s.villages[p.villageId]
@@ -412,7 +423,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
 }
 
 const ROLE_TOWN: Record<string, string> = {
-  farm: 'Farmstead', port: 'Harbour', mining: 'Mine', forestry: 'Woodhall', herding: 'Steading', explorer: 'Camp',
+  farm: 'Farmstead', port: 'Trading Post', mining: 'Mine', forestry: 'Woodhall', herding: 'Steading', explorer: 'Camp',
 }
 
 /** Map knowledge is shared by every human player in the world. */

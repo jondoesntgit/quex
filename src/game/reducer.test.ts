@@ -228,10 +228,20 @@ describe('founding and shared fog', () => {
     const land = world.cells.filter((c) => c.tier > 0)
     const near = land.find((c) => distance(c, ann) === limit)!
     expect(foundingProblem(s, world, near)).toMatch(/Too close/)
-    const far = land.find((c) => Object.values(s.villages).every((v) => distance(c, v) > limit + 3) &&
+    const far = land.find((c) => isVillageSite(cellLand(c)) && Object.values(s.villages).every((v) => distance(c, v) > limit + 3) &&
       !s.lairs.some((l) => l.col === c.col && l.row === c.row))!
     expect(foundingProblem(s, world, far)).toBeNull()
     expect(validate(s, world, ev('join', 'cat', `${SUN}T09:00:00Z`, { name: 'Cat', role: 'farm', site: near, resetHour: 0, tz: 0 }))).toMatch(/Too close/)
+  })
+  it('refuses mountains, woods and swamp, so settling never erases them', async () => {
+    const { foundingProblem } = await import('./reducer')
+    const s = setup()
+    const { distance } = await import('../world/hex')
+    const clear = (c: { col: number; row: number }) => Object.values(s.villages).every((v) => distance(c, v) > 10)
+    const mountain = world.cells.find((c) => (c.terrain === 'rock' || c.terrain === 'snow') && clear(c))!
+    const woods = world.cells.find((c) => c.tier > 0 && hasTrees(cellLand(c)) && clear(c))!
+    expect(foundingProblem(s, world, mountain)).toMatch(/steep/i)
+    expect(foundingProblem(s, world, woods)).toMatch(/woods/i)
   })
   it('refuses water', async () => {
     const { foundingProblem } = await import('./reducer')
@@ -282,5 +292,43 @@ describe('abandoning a village', () => {
     expect(s.caravans).toHaveLength(1)
     apply(s, world, ev('abandon', 'ann', `${SUN}T10:01:00Z`, {}))
     expect(s.caravans).toHaveLength(0)
+  })
+})
+
+describe('role fit stars', () => {
+  it('rate what is within reach, not the centre hex', async () => {
+    const { roleScores } = await import('./sites')
+    const s = newGame(world, SUN)
+    // a coastal open site: trade scores from the coast around it even though the centre is dry land
+    const coastal = world.cells.find((c) => isVillageSite(cellLand(c)) &&
+      spiral(c, 1).some((o) => world.cells[cellIndex(world, o.col, o.row)]?.tier === 0))!
+    expect(roleScores(world, s, coastal).port.score).toBeGreaterThan(0)
+    // an inland site far from the sea has no trade score
+    const inland = world.cells.find((c) => isVillageSite(cellLand(c)) &&
+      spiral(c, 4).every((o) => (world.cells[cellIndex(world, o.col, o.row)]?.tier ?? 0) > 0))!
+    expect(roleScores(world, s, inland).port.score).toBe(0)
+  })
+  it('give most sites a few good options', async () => {
+    const { roleFits } = await import('./sites')
+    const { foundingProblem } = await import('./reducer')
+    const s = newGame(world, SUN)
+    const sites = world.cells.filter((c) => !foundingProblem(s, world, c)).filter((_, k) => k % 7 === 0)
+    const starred = sites.map((c) => Object.values(roleFits(world, s, c)).filter((f) => f.fit !== 'ok').length)
+    const avg = starred.reduce((a, b) => a + b, 0) / starred.length
+    expect(avg).toBeGreaterThan(1.8)
+    expect(avg).toBeLessThan(4)
+  })
+})
+
+describe('terrain rule history', () => {
+  it('keeps villages founded on a mountain before the rule, refuses new ones', async () => {
+    const { TERRAIN_RULE_FROM } = await import('./reducer')
+    const mountain = world.cells.find((c) => c.terrain === 'rock' && c.tier > 0)!
+    const s = newGame(world, SUN)
+    apply(s, world, ev('join', 'old', '2026-11-18T11:00:00Z', { name: 'Old', role: 'mining', site: mountain, resetHour: 0, tz: 0 }))
+    expect(s.players.old).toBeDefined()
+    const s2 = newGame(world, SUN)
+    apply(s2, world, ev('join', 'new', TERRAIN_RULE_FROM, { name: 'New', role: 'mining', site: mountain, resetHour: 0, tz: 0 }))
+    expect(s2.players.new).toBeUndefined()
   })
 })
