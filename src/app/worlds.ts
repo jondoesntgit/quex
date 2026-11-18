@@ -6,7 +6,7 @@ export const FAMILY_WORLD = 'quex-season-1'
 export const SANDBOX_WORLD = 'quex-sandbox'
 
 export const worldName = (seed: string) =>
-  seed === FAMILY_WORLD ? 'the family playtest world' : seed === SANDBOX_WORLD ? 'the sandbox' : `world “${seed}”`
+  seed === FAMILY_WORLD ? 'the family playtest world' : seed === SANDBOX_WORLD ? 'the sandbox' : `world "${seed}"`
 
 /** A link to the game in this world (always names the world, so it works whatever the visitor's default is). */
 export function worldUrl(seed: string, params: Record<string, string> = {}): string {

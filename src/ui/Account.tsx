@@ -52,7 +52,7 @@ export function SignIn() {
       <div className="card">
         <h1>QUEX</h1>
         <p style={{ marginTop: 0 }}>
-          Your real-life quests power a little village in a hex world. Finish today’s tasks and spend the actions you earn
+          Your real-life quests power a little village in a hex world. Finish today's tasks and spend the actions you earn
           in order to better you and your party, then get back to life.{' '}
           <button type="button" className="linkbtn" onClick={() => setHelp(true)}>How does it work?</button>
         </p>
@@ -96,7 +96,7 @@ export function SignIn() {
               <input type="text" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
               {mode === 'code' ? (
                 <>
-                  <p className="muted">We’ll email you a 6-digit code. New here? The same step creates your account.</p>
+                  <p className="muted">We'll email you a 6-digit code. New here? The same step creates your account.</p>
                   <div className="row" style={{ justifyContent: 'flex-end' }}>
                     <button type="submit" className="btn primary" disabled={busy || !emailOk}>Email me a code</button>
                   </div>
@@ -217,7 +217,7 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           <>
             <label>World</label>
             <p style={{ margin: 0 }}>
-              You’re in {worldName(game.meta.worldSeed)}.{' '}
+              You're in {worldName(game.meta.worldSeed)}.{' '}
               {game.meta.worldSeed !== SANDBOX_WORLD && <a href={worldUrl(SANDBOX_WORLD)}>Go to the sandbox</a>}
               {game.meta.worldSeed !== FAMILY_WORLD && <a href={worldUrl(FAMILY_WORLD)}>Go to the family playtest world</a>}
             </p>
@@ -262,10 +262,10 @@ export function ManageWard({ game, pid, onClose }: { game: Game; pid: string; on
     <div className="modal account" onClick={onClose}>
       <div className="card manage" onClick={(e) => e.stopPropagation()}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0 }}>{w.name}’s day</h2>
+          <h2 style={{ margin: 0 }}>{w.name}'s day</h2>
           <button className="btn ghost" onClick={onClose} aria-label="close">✕</button>
         </div>
-        <p className="muted" style={{ marginTop: 4 }}>You set and check off {w.name}’s tasks and habits. {w.name} spends the actions they earn.</p>
+        <p className="muted" style={{ marginTop: 4 }}>You set and check off {w.name}'s tasks and habits. {w.name} spends the actions they earn.</p>
         <TodayPanel game={game} p={w} />
         <form onSubmit={async (e) => { e.preventDefault(); setMsg(await renamePlayer(game, pid, name)) }}>
           <label>Name</label>
@@ -294,13 +294,13 @@ function WorldSettings({ game, remote, notify }: { game: Game; remote: SupabaseS
   const link = worldUrl(game.meta.worldSeed)
   return (
     <>
-      <label>World <span className="muted">(you’re an admin)</span></label>
+      <label>World <span className="muted">(you're an admin)</span></label>
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <input type="checkbox" id="world-public" checked={a.public} disabled={busy}
           onChange={(e) => run(() => remote.setPublic(e.target.checked), e.target.checked ? 'World is public: anyone with the link can look around.' : 'World is private: players only.')} />
         <span><b>Public</b>: anyone can look around without joining</span>
       </div>
-      {a.public && <p className="muted" style={{ margin: '4px 0' }}>Share <b>{link}</b> to let people look around. Visitors never see task names or how anyone’s day went.</p>}
+      {a.public && <p className="muted" style={{ margin: '4px 0' }}>Share <b>{link}</b> to let people look around. Visitors never see task names or how anyone's day went.</p>}
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <input type="checkbox" id="world-closed" checked={!a.closed} disabled={busy}
           onChange={(e) => run(() => remote.setClosed(!e.target.checked), e.target.checked ? 'Anyone signed in can now join and settle.' : 'Closed: only existing players can play; others can only look.')} />
@@ -351,14 +351,14 @@ function AssistantLinks({ notify }: { notify: (s: string) => void }) {
     <>
       <label>AI assistant <span className="muted">(Claude, ChatGPT)</span></label>
       <p className="muted" style={{ margin: '0 0 6px' }}>
-        Let an assistant read your tasks and plan days ahead, for you and any children you look after. It can’t tick
+        Let an assistant read your tasks and plan days ahead, for you and any children you look after. It can't tick
         tasks off or touch your village.
       </p>
       {fresh && (
         <div className="assistant-link">
           <input type="text" readOnly value={fresh} onFocus={(e) => e.target.select()} style={{ width: '100%' }} />
           <p className="muted" style={{ margin: '4px 0' }}>
-            Copy this now: it won’t be shown again. Keep it secret, like a password.
+            Copy this now: it won't be shown again. Keep it secret, like a password.
             In <b>Claude</b>: Settings → Connectors → Add custom connector, paste it as the URL.
             In <b>ChatGPT</b>: Settings → Apps & Connectors → Advanced → Developer mode, then Create and paste it (no authentication).
           </p>

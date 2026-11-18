@@ -65,7 +65,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
           {first && <h1>QUEX</h1>}
           <p style={{ marginTop: 0 }}>
             {first
-              ? 'Your real-life quests power a little village in a hex world. Finish today’s tasks and spend the actions you earn in order to better you and your party, then get back to life.'
+              ? 'Your real-life quests power a little village in a hex world. Finish today\'s tasks and spend the actions you earn in order to better you and your party, then get back to life.'
               : 'Add a friend on this device to try co-op before the online version is set up.'}
           </p>
           <label>Name</label>
@@ -89,10 +89,10 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
     <div className="placebar card">
       {!site && linked && <p style={{ margin: '0 0 6px' }}><b>The spot from your link is marked in pink.</b> Settle near it: tap a hex just outside the red.</p>}
       {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Red land is too close to a neighbour.</span></p>}
-      {site && problem && <p style={{ margin: 0 }}><b>Can’t settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
+      {site && problem && <p style={{ margin: 0 }}><b>Can't settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
       {site && !problem && fits && (
         <>
-          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; stars rate what’s within 3 hexes.</span></p>
+          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; stars rate what's within 3 hexes.</span></p>
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
             {ranked.map((r) => (
               <button key={r} className={`btn fit-${fits[r].fit} ${role === r ? 'primary' : ''}`} title={ROLE_INFO[r].blurb} onClick={() => setRole(r)}>
@@ -103,7 +103,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
           {role && (
             <p className="muted" style={{ margin: '6px 0 0' }}>
               {ROLE_INFO[role].blurb}{' '}
-              {fits[role].fit === 'ok' ? <>Not much for it within reach ({fits[role].why}), but it’s your call.</> : <>Within reach: {fits[role].why}.</>}
+              {fits[role].fit === 'ok' ? <>Not much for it within reach ({fits[role].why}), but it's your call.</> : <>Within reach: {fits[role].why}.</>}
             </p>
           )}
         </>

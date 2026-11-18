@@ -134,7 +134,7 @@ export type ActionKind = 'scout' | 'gather' | 'clear' | 'plant' | 'road' | 'buil
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
-  gather: { size: 'small', name: 'Gather', blurb: 'Collect a hex’s resource by hand.' },
+  gather: { size: 'small', name: 'Gather', blurb: "Collect a hex's resource by hand." },
   clear: { size: 'small', name: 'Fell trees', blurb: 'Clear the hex for building; keep the timber.' },
   plant: { size: 'small', name: 'Plant trees', blurb: 'Grassland slowly becomes forest.' },
   road: { size: 'small', name: 'Dirt road', blurb: 'Faster caravans through this hex.' },

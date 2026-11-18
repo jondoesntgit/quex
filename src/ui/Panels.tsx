@@ -243,7 +243,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
         </>
       ) : (
         <>
-          <p style={{ marginTop: 0 }}><b>Abandon {v.name}?</b> All progress resets. This can’t be undone.</p>
+          <p style={{ marginTop: 0 }}><b>Abandon {v.name}?</b> All progress resets. This can't be undone.</p>
           <div className="row">
             <button className="btn" onClick={() => setConfirm(false)}>Keep it</button>
             <button className="btn danger" onClick={onAbandon}>Abandon and start over</button>
@@ -336,8 +336,8 @@ export function GuestPanel({ game }: { game: Game }) {
         {tab === 'party' ? (
           <div>
             {game.meta.worldSeed === FAMILY_WORLD
-              ? <p style={{ marginTop: 0 }}>You’re looking around the world where friends and family are playtesting Quex. <a href={worldUrl(SANDBOX_WORLD)}>Try it yourself in the sandbox →</a></p>
-              : <p className="muted" style={{ marginTop: 0 }}>You’re looking around a public world.</p>}
+              ? <p style={{ marginTop: 0 }}>You're looking around the world where friends and family are playtesting Quex. <a href={worldUrl(SANDBOX_WORLD)}>Try it yourself in the sandbox →</a></p>
+              : <p className="muted" style={{ marginTop: 0 }}>You're looking around a public world.</p>}
             {players.map((o) => {
               const v = game.state.villages[o.villageId]
               return (

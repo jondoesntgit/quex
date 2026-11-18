@@ -343,7 +343,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (hasTrees(land)) return 'Fell the trees there first'
       if (!isOpen(land)) return 'Outposts need open ground'
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 4)) return 'Too far from your territory'
-      if (Object.values(s.villages).some((o) => o.id !== v.id && inTerritory(o, ev.col, ev.row))) return 'That is a neighbour’s land'
+      if (Object.values(s.villages).some((o) => o.id !== v.id && inTerritory(o, ev.col, ev.row))) return "That is a neighbour's land"
       if (!hasGoods(v, { timber: 6, stone: 2 }, tok.strength)) return `Needs ${fmtGoods({ timber: 6, stone: 2 }, tok.strength)}`
       return null
     }
@@ -420,7 +420,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       const v = s.villages[p.villageId]
       const name = ev.name.trim()
       // a village still called after its founder follows the new name
-      if (v.name === `${p.name}’s ${ROLE_TOWN[v.role]}`) v.name = `${name}’s ${ROLE_TOWN[v.role]}`
+      if (v.name === `${p.name}'s ${ROLE_TOWN[v.role]}`) v.name = `${name}'s ${ROLE_TOWN[v.role]}`
       log(s, ev.at, p.id, `${p.name} is now known as {p:${p.id}|${name}}.`, 'good')
       p.name = name
       return s
@@ -469,7 +469,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
     habits: [], habitSlots: 1, perfectStreak: 0, freezes: 1, days: {}, tokens: [], lastTick: null,
   }
   const v: Village = {
-    id: vid, playerId: p.id, name: `${ev.name}’s ${ROLE_TOWN[ev.role]}`, role: ev.role,
+    id: vid, playerId: p.id, name: `${ev.name}'s ${ROLE_TOWN[ev.role]}`, role: ev.role,
     col: ev.site.col, row: ev.site.row, population: 5, morale: 60,
     goods: { grain: 12, timber: 8, stone: 3, berries: 4 }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',

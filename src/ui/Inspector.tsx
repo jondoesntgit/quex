@@ -66,7 +66,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
         <div className="actions">
           {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => run('build', { building: d.id }, d.size)} />)}
         </div>
-        <p className="muted">Other roles’ buildings cost double: specialise and trade.</p>
+        <p className="muted">Other roles' buildings cost double: specialise and trade.</p>
       </Shell>
     )
   }

@@ -306,7 +306,7 @@ function Main({ game }: { game: Game }) {
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {mapError && (
         <div className="modal"><div className="card">
-          <h2 style={{ marginTop: 0 }}>The map didn’t load</h2>
+          <h2 style={{ marginTop: 0 }}>The map didn't load</h2>
           <p>{mapError}</p>
           <p className="muted">{navigator.userAgent}</p>
           <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn primary" onClick={() => location.reload()}>Reload</button></div>

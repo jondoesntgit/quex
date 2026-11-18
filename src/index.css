@@ -1,12 +1,7 @@
-@import '@fontsource/pixelify-sans/400.css';
-@import '@fontsource/pixelify-sans/700.css';
-
-/* Two pixel fonts:
-   - m5x7 by Daniel Linssen (managore.itch.io/m5x7, CC0) for titles, buttons,
-     tabs, chips and labels. Each font pixel is 1/16 em, so it's only crisp at
-     16px multiples; it's used at 32px (2x).
-   - Pixelify Sans for reading text (help, tasks, log, descriptions) at ~18px,
-     rounder and easier on the eyes in sentences, and for symbols m5x7 lacks. */
+/* One pixel font everywhere: m5x7 by Daniel Linssen (managore.itch.io/m5x7,
+   CC0). Each font pixel is 1/16 em, so sizes are rounded to 8px steps (whole
+   half-pixels) to stay sharp: 24px for text by default, 16px for tiny notes.
+   Symbols m5x7 lacks (½ ✓ ✕ emoji) fall back to the system font. */
 @font-face {
   font-family: 'm5x7';
   src: url('/fonts/m5x7.ttf') format('truetype');
@@ -40,14 +35,14 @@
    elsewhere the browser's default font size applies. Everything below is
    sized in rem relative to it. */
 html {
-  font-family: 'Pixelify Sans', ui-monospace, monospace;
+  font-family: 'm5x7', system-ui, sans-serif;
   line-height: 1.35;
 }
 /* iPhone/iPad only (on a Mac the system body font is a small 13px) */
 @supports (-webkit-touch-callout: none) {
   html {
     font: -apple-system-body;
-    font-family: 'Pixelify Sans', ui-monospace, monospace;
+    font-family: 'm5x7', system-ui, sans-serif;
     line-height: 1.35;
   }
 }
@@ -149,7 +144,7 @@ input { -webkit-user-select: text; user-select: text; }
 .habit input { width: 20px; height: 20px; accent-color: var(--good); }
 
 .goods { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 10px; }
-.good { display: flex; gap: 6px; align-items: center; line-height: 1.1; }
+.good { display: flex; gap: 6px; align-items: center; }
 .ico { flex: none; }
 .bar { height: 10px; border: 2px solid var(--ink); border-radius: 3px; background: white; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--good); }
@@ -192,7 +187,7 @@ input { -webkit-user-select: text; user-select: text; }
 .chipbtn { display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
 .chipbtn .x { border: 0; background: transparent; cursor: pointer; padding: 0 4px; color: inherit; }
 .card.manage { width: min(560px, 100%); }
-.card.help { width: min(620px, 100%); line-height: 1.45; }
+.card.help { width: min(620px, 100%); }
 .help details { border-top: 1px dashed var(--paper-2); padding: 6px 0; }
 .help summary { cursor: pointer; font-weight: 700; padding: 4px 0; list-style: none; }
 .help summary::before { content: '▸ '; }
@@ -212,36 +207,28 @@ input { -webkit-user-select: text; user-select: text; }
 }
 
 /* ---------------------------------------------------------------- type */
-/* reading text (Pixelify Sans), relative to the player's text size */
-body { font-size: 1rem; }
-.muted, .log p, .goods, .supervised, .action small, .toast, .card p, .help li { font-size: 0.9rem; }
-/* inputs never below 16px, or iPhones zoom in when you tap them */
-.slot input, .water input, .card input[type='text'], .card input[type='password'] { font-size: max(16px, 1rem); }
-.size { font-size: 0.8rem; }
-.token { font-size: 0.85rem; }
-.tri button, .labelmark { font-size: 1rem; }
-.water-hist small { font-size: 0.65rem; }
-.btn small { font-family: 'Pixelify Sans', monospace; font-size: 0.8rem; line-height: 1.25; word-spacing: normal; }
-
-/* labels, buttons and titles: m5x7 at 1.5x the text size, rounded to whole
-   half-pixels of the font (8px steps) so it stays sharp; it still grows and
-   shrinks with the player's text-size setting. m5x7 has no bold, so bold is
-   thickened by exactly one font pixel, and its wide spaces are tightened. */
-.chip, .tab, .btn, .title, h1, h2, h3, .help summary, .card label, .sheet-body h3, .inspector h2, .water-total, .chip.score b {
-  font-family: 'm5x7', 'Pixelify Sans', monospace;
-  font-size: 1.5rem;
-  font-size: round(nearest, 1.5rem, 8px);
-  line-height: 0.85;
-  font-weight: 400;
-  word-spacing: -0.15em;
-  font-synthesis: none;
+/* Sizes follow the player's text size (1rem): m5x7 text at 1.5rem (24px by
+   default), rounded to 8px steps so it stays sharp. m5x7 has no bold, so bold
+   is thickened by exactly one font pixel; its wide spaces are tightened. */
+body {
+  font-size: 1.5rem; font-size: round(nearest, 1.5rem, 8px);
+  line-height: 0.8; font-weight: 400; word-spacing: -0.15em; font-synthesis: none;
+}
+/* inputs never below 16px, or iPhones zoom in when you tap them (24px here) */
+input, textarea, select { font-size: inherit; }
+h1, h2, h3 { font-size: inherit; }
+/* tiny notes: one font pixel per screen pixel */
+small, .size, .token small, .water-hist small, .btn small, .action small {
+  font-size: 1rem; font-size: round(nearest, 1rem, 8px); line-height: 0.85;
 }
 .card h1 { font-size: 3rem; font-size: round(nearest, 3rem, 16px); letter-spacing: 0.0625em; }
-h1, h2, h3, .help summary, .tab.on { text-shadow: 0.0625em 0 0 currentColor; }
+.btn, .chip, .tab, .title { line-height: 0.85; }
+h1, h2, h3, .help summary, .tab.on { font-weight: 400; text-shadow: 0.0625em 0 0 currentColor; }
+/* inline bold: a hair thicker, so words in a sentence don't smear */
+b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .btn { min-height: 34px; padding: 3px 10px 5px; }
 .tab { padding: 6px 4px 8px; white-space: nowrap; }
 .chip { padding: 2px 8px 4px; }
-.tri button { font-family: 'Pixelify Sans', monospace; }
 
 /* the sandbox's note about the family playtest world (a full row under the top bar) */
 .sandbox-note {

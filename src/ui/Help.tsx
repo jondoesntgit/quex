@@ -17,7 +17,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <button className="btn ghost" onClick={onClose} aria-label="close">✕</button>
         </div>
         <p>
-          Quex turns your real to-do list into a little village. Finish today’s tasks, spend the actions they earn on
+          Quex turns your real to-do list into a little village. Finish today's tasks, spend the actions they earn on
           the map, and get back to life. A few minutes a day is plenty.
         </p>
 
@@ -63,7 +63,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>Buildings produce every night. How much depends on how well your day went (a good day means a good harvest).</li>
             <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more.</li>
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
-            <li>Buildings that match your village’s role produce 25% more. Other roles’ buildings cost double.</li>
+            <li>Buildings that match your village's role produce 25% more. Other roles' buildings cost double.</li>
           </ul>
           <p>Wrong spot or role? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
         </details>
@@ -97,7 +97,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <ul>{HABIT_PRESETS.map((h) => <li key={h.id}><b>{h.name}:</b> {h.blurb}.</li>)}</ul>
           <p>
             You start with one habit slot. Do all your habits for {PERFECT_DAYS_PER_SLOT} days to unlock another, up to {MAX_HABIT_SLOTS}.
-            Missing a day never takes a slot away, and Saturday misses don’t break your streak.
+            Missing a day never takes a slot away, and Saturday misses don't break your streak.
           </p>
           <p>
             <b>Water</b> is a tracker: set a daily target and unit (8 cups, 2 L, 64 oz…), log what you drink with the
@@ -113,7 +113,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li><b>Roads</b> speed caravans, and your villagers love them. <b>Fell trees</b> to clear land for building; <b>plant</b> them to grow a forest back.</li>
             <li>Monster lairs (goblins, orcs, trolls, a dragon) grow bolder as villages grow and sometimes raid your stores. A palisade helps.</li>
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
-            <li>Merchant caravans pass through now and then on their way to trade. They’re just passing; enjoy the view.</li>
+            <li>Merchant caravans pass through now and then on their way to trade. They're just passing; enjoy the view.</li>
           </ul>
           <p>Drag to move around; pinch, scroll or use ＋/－ to zoom. Zoom right out to see the whole continent.</p>
         </details>
@@ -121,14 +121,14 @@ export function Help({ onClose }: { onClose: () => void }) {
         <details>
           <summary>Playing together</summary>
           <ul>
-            <li>The <b>Party</b> tab shows your neighbours and today’s pips: whether they finished their tasks, never what they were.</li>
+            <li>The <b>Party</b> tab shows your neighbours and today's pips: whether they finished their tasks, never what they were.</li>
             <li>Send a <b>caravan</b> (medium action) to share goods with a neighbour. It takes time on the road; walking habits speed it up.</li>
             <li>Tap a hex and <b>🔗 Share</b>, or use <b>Invite someone to settle nearby</b> in the Village tab, to text someone a link to that spot.</li>
-            <li>Villages need a little space: you can’t settle right next to someone else’s land (shown in red while choosing).</li>
+            <li>Villages need a little space: you can't settle right next to someone else's land (shown in red while choosing).</li>
             <li>
               Quex has two worlds: the <b>sandbox</b>, open to anyone who wants to try it, and a smaller world where friends and
               family are playtesting. Anyone can look around the family world, but only its players can play there. Visitors
-              never see task names or how anyone’s day went.
+              never see task names or how anyone's day went.
             </li>
           </ul>
         </details>
@@ -140,11 +140,11 @@ export function Help({ onClose }: { onClose: () => void }) {
             actions and exploring.
           </p>
           <ol>
-            <li>On the child’s account: <b>Account → Add a parent or guardian</b>. This makes a one-time link (valid for 7 days).</li>
+            <li>On the child's account: <b>Account → Add a parent or guardian</b>. This makes a one-time link (valid for 7 days).</li>
             <li>The parent opens the link while signed in to <i>their own</i> account.</li>
-            <li>The parent’s Party tab now has <b>Set & check tasks</b> for that child: task names, ticks, habits, water and freezes.</li>
+            <li>The parent's Party tab now has <b>Set & check tasks</b> for that child: task names, ticks, habits, water and freezes.</li>
           </ol>
-          <p>Add as many parents and grandparents as you like, one link each. The child’s Today tab shows who sets their tasks.</p>
+          <p>Add as many parents and grandparents as you like, one link each. The child's Today tab shows who sets their tasks.</p>
         </details>
 
         <details>
@@ -160,8 +160,8 @@ export function Help({ onClose }: { onClose: () => void }) {
         <details>
           <summary>Planning with an AI assistant</summary>
           <p>
-            Claude, ChatGPT and other assistants can read your task list and plan days ahead with you: “plan my week”,
-            or, for a parent, “plan my son’s tasks for tomorrow”.
+            Claude, ChatGPT and other assistants can read your task list and plan days ahead with you: "plan my week",
+            or, for a parent, "plan my son's tasks for tomorrow".
           </p>
           <ol>
             <li><b>Account → Connect an AI assistant</b> makes a private link. Copy it straight away.</li>
@@ -170,7 +170,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           </ol>
           <p>
             The assistant can see and write task names for you and any children you look after, from yesterday up to two
-            weeks ahead. It can’t tick tasks off, take actions or change your village, and a child’s own assistant can’t
+            weeks ahead. It can't tick tasks off, take actions or change your village, and a child's own assistant can't
             change tasks a parent sets. Treat the link like a password; <b>Turn off</b> in Account stops it at once.
           </p>
         </details>
