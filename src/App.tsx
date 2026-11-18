@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
+import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore } from './app/supabase'
 import { Account } from './ui/Account'
 import { loadAtlas } from './render/atlas'
@@ -121,6 +121,20 @@ function Main({ game }: { game: Game }) {
     }
   }, [ready, p, game])
 
+  const abandon = async () => {
+    if (!p) return
+    await game.dispatch({ t: 'abandon', id: eventId(), at: game.now().toISOString(), playerId: p.id })
+    const m = game.meta
+    m.localPlayers = m.localPlayers.filter((id) => id !== p.id)
+    delete m.labels[p.id]
+    delete m.joinedOn[p.id]
+    m.activePlayer = m.localPlayers.find((id) => game.state.players[id]) ?? null
+    game.saveMeta()
+    setTab('today')
+    centred.current = null
+    if (!m.activePlayer) setOnboard('first')
+  }
+
   const notify = (s: string) => {
     setToast(s)
     setTimeout(() => setToast((t) => (t === s ? null : t)), 3500)
@@ -175,7 +189,7 @@ function Main({ game }: { game: Game }) {
           </div>
           <div className="sheet-body">
             {tab === 'today' && <TodayPanel game={game} p={p} />}
-            {tab === 'village' && <VillagePanel game={game} p={p} />}
+            {tab === 'village' && <VillagePanel game={game} p={p} onAbandon={abandon} />}
             {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} />}
             {tab === 'log' && <LogPanel game={game} p={p} />}
           </div>

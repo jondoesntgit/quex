@@ -254,3 +254,33 @@ describe('founding and shared fog', () => {
     expect(validate(s, world, { t: 'act', id: 'x', at, playerId: 'bob', tokenId: s.players.bob.tokens[0].id, action: 'scout', col: frontier.col, row: frontier.row })).toBeNull()
   })
 })
+
+describe('abandoning a village', () => {
+  it('removes the player and village, frees the land, keeps the map', async () => {
+    const { foundingProblem } = await import('./reducer')
+    const s = setup()
+    const ann = s.villages.v_ann
+    const seen = s.revealed.length
+    apply(s, world, ev('progress', 'bob', `${SUN}T10:00:00Z`, { date: SUN, slot: 1, status: 'full' }))
+    apply(s, world, ev('abandon', 'ann', `${SUN}T11:00:00Z`, {}))
+    expect(s.players.ann).toBeUndefined()
+    expect(s.villages.v_ann).toBeUndefined()
+    expect(s.revealed.length).toBe(seen)
+    expect(foundingProblem(s, world, ann)).toBeNull()
+    // events from the abandoned player are ignored afterwards
+    apply(s, world, ev('progress', 'ann', `${SUN}T12:00:00Z`, { date: SUN, slot: 0, status: 'full' }))
+    expect(s.players.ann).toBeUndefined()
+    expect(s.players.bob).toBeDefined()
+  })
+  it('drops caravans to or from the abandoned village', () => {
+    const s = setup()
+    const at = `${SUN}T10:00:00Z`
+    apply(s, world, ev('progress', 'bob', at, { date: SUN, slot: 1, status: 'full' }))
+    const tok = s.players.bob.tokens[0]
+    const bob = s.villages.v_bob
+    apply(s, world, ev('act', 'bob', at, { tokenId: tok.id, action: 'caravan', col: bob.col, row: bob.row, to: 'v_ann', goods: { grain: 2 } }))
+    expect(s.caravans).toHaveLength(1)
+    apply(s, world, ev('abandon', 'ann', `${SUN}T10:01:00Z`, {}))
+    expect(s.caravans).toHaveLength(0)
+  })
+})

@@ -54,5 +54,12 @@ console.log('friend site:', (await settleNear(far))?.split('\n').slice(0, 2).joi
 await page.click('.placebar >> text=Found village')
 await page.waitForTimeout(600)
 await shot('f5-two-villages')
+// the friend abandons: back to Jonathan, and only one village remains
+await page.click('.tab:has-text("Village")')
+await page.click('text=Abandon village…')
+await page.click('text=Abandon and start over')
+await page.waitForTimeout(400)
+await page.click('.tab:has-text("Party")')
+console.log('after abandon:', (await page.locator('.sheet-body').innerText()).replace(/\s+/g, ' ').slice(0, 120))
 console.log('ERRORS', JSON.stringify(errors))
 await browser.close()

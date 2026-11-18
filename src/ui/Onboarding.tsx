@@ -4,7 +4,7 @@ import { foundingProblem, validate } from '../game/reducer'
 import type { GameEvent } from '../game/types'
 import { ROLES, type Role } from '../world/types'
 import { eventId, type Game } from '../app/store'
-import { ROLE_INFO, suggestRole, type Spot } from './helpers'
+import { ROLE_INFO, roleFits, type Fit, type Spot } from './helpers'
 
 export type { Spot }
 
@@ -28,10 +28,12 @@ export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
   const tz = -new Date().getTimezoneOffset()
 
   useEffect(() => { onStep(step) }, [step, onStep])
-  const suggested = site ? suggestRole(game.world, game.state, site) : null
-  // a role pick sticks to the spot it was made for; a new spot starts from its suggestion
+  const fits = site ? roleFits(game.world, game.state, site) : null
+  // best-suited first, but every role stays on offer
+  const ranked = fits ? [...ROLES].sort((a, b) => RANK[fits[b].fit] - RANK[fits[a].fit]) : [...ROLES]
+  // a role pick sticks to the spot it was made for; a new spot starts on its best fit
   const siteKey = site ? `${site.col},${site.row}` : ''
-  const role = picked?.key === siteKey ? picked.role : suggested
+  const role = picked?.key === siteKey ? picked.role : fits ? ranked[0] : null
   const setRole = (r: Role) => setPicked({ key: siteKey, role: r })
 
   const problem = site ? foundingProblem(game.state, game.world, site) : null
@@ -85,19 +87,25 @@ export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
     <div className="placebar card">
       {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Red land is too close to a neighbour.</span></p>}
       {site && problem && <p style={{ margin: 0 }}><b>Can’t settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
-      {site && !problem && (
+      {site && !problem && fits && (
         <>
-          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">(★ suits this land)</span></p>
+          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; ★ marks what this land suits.</span></p>
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            {ROLES.map((r) => (
-              <button key={r} className={`btn ${role === r ? 'primary' : ''}`} title={ROLE_INFO[r].blurb} onClick={() => setRole(r)}>
-                {r === suggested ? '★ ' : ''}{ROLE_INFO[r].name}
+            {ranked.map((r) => (
+              <button key={r} className={`btn fit-${fits[r].fit} ${role === r ? 'primary' : ''}`} title={ROLE_INFO[r].blurb} onClick={() => setRole(r)}>
+                {STARS[fits[r].fit]}{ROLE_INFO[r].name}
               </button>
             ))}
           </div>
-          {role && <p className="muted" style={{ margin: '6px 0 0' }}>{ROLE_INFO[role].blurb}</p>}
+          {role && (
+            <p className="muted" style={{ margin: '6px 0 0' }}>
+              {ROLE_INFO[role].blurb}{' '}
+              {fits[role].fit === 'ok' ? <>This spot isn’t ideal for it ({fits[role].why}), but it’s your call.</> : <>Good here: {fits[role].why}.</>}
+            </p>
+          )}
         </>
       )}
+      <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}>You can abandon your village any time and settle somewhere new, but that resets your progress.</p>
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn" onClick={() => setStep('about')}>← Back</button>
         <button className="btn primary" disabled={!site || !!problem || !role} onClick={go}>Found village</button>
@@ -105,3 +113,6 @@ export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
     </div>
   )
 }
+
+const RANK: Record<Fit, number> = { great: 2, good: 1, ok: 0 }
+const STARS: Record<Fit, string> = { great: '★★ ', good: '★ ', ok: '' }

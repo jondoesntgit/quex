@@ -77,8 +77,9 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   )
 }
 
-export function VillagePanel({ game, p }: { game: Game; p: Player }) {
+export function VillagePanel({ game, p, onAbandon }: { game: Game; p: Player; onAbandon: () => void }) {
   const v = game.state.villages[p.villageId]
+  const [confirm, setConfirm] = useState(false)
   const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) > 0.05) as [Good, number][]
   return (
     <div>
@@ -105,6 +106,21 @@ export function VillagePanel({ game, p }: { game: Game; p: Player }) {
           <span className="muted">{b.progress >= 1 ? 'working' : `${Math.round(b.progress * 100)}% built`}</span>
         </div>
       )) : <p className="muted">Tap a hex in your territory (yellow border) and finish a medium task to build.</p>}
+      <h3>Start over</h3>
+      {!confirm ? (
+        <>
+          <p className="muted" style={{ marginTop: 0 }}>Wrong spot or wrong role? You can abandon this village and settle somewhere new. Your habits, buildings, goods and streaks are lost; the map stays explored.</p>
+          <button className="btn" onClick={() => setConfirm(true)}>Abandon village…</button>
+        </>
+      ) : (
+        <>
+          <p style={{ marginTop: 0 }}><b>Abandon {v.name}?</b> All progress resets. This can’t be undone.</p>
+          <div className="row">
+            <button className="btn" onClick={() => setConfirm(false)}>Keep it</button>
+            <button className="btn danger" onClick={onAbandon}>Abandon and start over</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

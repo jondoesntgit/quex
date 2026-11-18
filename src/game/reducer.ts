@@ -219,6 +219,8 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       if (p.days[ev.date]?.frozen) return 'Already frozen'
       if (p.days[ev.date]?.ticked) return 'That day is already over'
       return null
+    case 'abandon':
+      return null
     case 'resetHour':
       if (p.resetChangedAt && daysBetween(p.resetChangedAt.slice(0, 10), ev.at.slice(0, 10)) < 7)
         return 'Bedtime can only change once a week'
@@ -371,7 +373,18 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       return s
     case 'act': return act(s, world, p, ev)
     case 'tick': return tick(s, world, p, ev)
+    case 'abandon': return abandon(s, p, ev.at)
   }
+}
+
+/** The village and all progress go; the map it revealed stays known to everyone. */
+function abandon(s: GameState, p: Player, at: string) {
+  const v = s.villages[p.villageId]
+  s.caravans = s.caravans.filter((c) => c.from !== v.id && c.to !== v.id)
+  delete s.villages[v.id]
+  delete s.players[p.id]
+  log(s, at, null, `${p.name} abandoned ${v.name}. The land is free again.`, 'info')
+  return s
 }
 
 function log(s: GameState, at: string, playerId: string | null, text: string, kind: LogEntry['kind']) {

@@ -2,7 +2,7 @@ import { useEffect, useReducer } from 'react'
 import { ACTIONS, SIZE_RANK, type ActionKind, type BuildingId } from '../game/data'
 import { cellIndex, effectiveTerrain, validate } from '../game/reducer'
 import type { GameState } from '../game/types'
-import { spiral } from '../world/hex'
+import { distance, spiral } from '../world/hex'
 import { MOUNTAIN_TERRAIN } from '../world/land'
 import type { Role, World } from '../world/types'
 import type { GameEvent, Player, Token } from '../game/types'
@@ -50,22 +50,36 @@ export const ROLE_INFO: Record<string, { name: string; blurb: string }> = {
 
 export interface Spot { col: number; row: number }
 
-/** The role the land around a spot favours most. */
-export function suggestRole(world: World, s: GameState, at: Spot): Role {
-  const count = { water: 0, mountain: 0, forest: 0, pasture: 0 }
+export type Fit = 'great' | 'good' | 'ok'
+
+/** How well each role suits the land around a spot, with a short reason.
+ *  Advice only: any role can be founded anywhere. */
+export function roleFits(world: World, s: GameState, at: Spot): Record<Role, { fit: Fit; why: string }> {
+  const n = { water: 0, mountain: 0, hills: 0, forest: 0, meadow: 0, open: 0, river: 0 }
   for (const o of spiral(at, 2)) {
     if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) continue
     const i = cellIndex(world, o.col, o.row)
+    const c = world.cells[i]
     const t = effectiveTerrain(world, s, i)
-    if (world.cells[i].tier === 0) count.water++
-    else if (MOUNTAIN_TERRAIN.includes(t)) count.mountain++
-    else if (t === 'forest') count.forest++
-    else if (t === 'hills' || t === 'meadow') count.pasture++
+    if (c.tier === 0) { n.water++; continue }
+    if (c.riverTo !== -1) n.river++
+    if (MOUNTAIN_TERRAIN.includes(t)) n.mountain++
+    else if (t === 'hills') n.hills++
+    else if (t === 'forest') n.forest++
+    else if (t === 'meadow') n.meadow++
+    if (t === 'grass' || t === 'meadow' || t === 'savannah') n.open++
   }
-  const nextToSea = spiral(at, 1).some((o) => world.cells[cellIndex(world, o.col, o.row)]?.tier === 0)
-  if (nextToSea && count.water >= 3) return 'port'
-  if (count.mountain >= 3) return 'mining'
-  if (count.forest >= 6) return 'forestry'
-  if (count.pasture >= 5) return 'herding'
-  return 'farm'
+  const coast = spiral(at, 1).some((o) => world.cells[cellIndex(world, o.col, o.row)]?.tier === 0)
+  const cell = world.cells[cellIndex(world, at.col, at.row)]
+  const danger = world.regions[cell?.region ?? 0]?.danger ?? 0
+  const nearest = Math.min(Infinity, ...Object.values(s.villages).map((v) => distance(v, at)))
+  const grade = (score: number, great: number, good: number): Fit => (score >= great ? 'great' : score >= good ? 'good' : 'ok')
+  return {
+    farm: { fit: grade(n.open + n.river * 2, 12, 7), why: n.river ? 'open land by a river' : 'open land' },
+    port: { fit: coast ? grade(n.water, 6, 3) : 'ok', why: coast ? 'on the coast' : 'needs a coast' },
+    mining: { fit: grade(n.mountain * 2 + n.hills, 6, 3), why: n.mountain ? 'mountains nearby' : 'hills nearby' },
+    forestry: { fit: grade(n.forest, 8, 4), why: 'woodland around' },
+    herding: { fit: grade(n.hills + n.meadow, 7, 4), why: 'hills and meadows' },
+    explorer: { fit: grade(danger * 2 + (nearest >= 14 ? 2 : 0), 4, 2), why: danger ? 'toward the frontier' : 'far from neighbours' },
+  }
 }

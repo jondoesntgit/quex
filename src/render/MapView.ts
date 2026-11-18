@@ -239,6 +239,16 @@ export class MapView {
       }
       g.stroke({ width: 1, color: mine ? 0xfff070 : 0xff90c0, alpha: 1 })
     }
+    // highlighted hexes (e.g. the spot chosen for a new village): gold wash + bold outline
+    for (const i of hl) {
+      const cell = world.cells[i]
+      if (!cell) continue
+      const p = hexToPixel(cell.col, cell.row, W)
+      const cs = hexCorners(p.x, p.y - (revealed.has(i) ? cell.tier : 0) * TP, W).flat()
+      g.poly(cs, true).fill({ color: 0xffe040, alpha: 0.45 })
+      g.poly(cs, true).stroke({ width: 4, color: 0x141424 })
+      g.poly(cs, true).stroke({ width: 2, color: 0xfff6c0 })
+    }
     if (input.selected) {
       const { col, row } = input.selected
       const cell = world.cells[idx(col, row)]

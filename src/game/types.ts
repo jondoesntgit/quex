@@ -130,3 +130,5 @@ export type GameEvent =
   | (Base & { t: 'act'; tokenId: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
+  /** give up this village entirely; the player can found a new one */
+  | (Base & { t: 'abandon' })
