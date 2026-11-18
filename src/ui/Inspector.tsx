@@ -4,6 +4,7 @@ import { buildCost, buildingAt, cellIndex, effectiveTerrain, fmtGoods, inTerrito
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, tryAction } from './helpers'
+import { Icon } from './Icon'
 
 const TERRAIN_NAME: Record<string, string> = {
   deep: 'Deep sea', ocean: 'Sea', shallow: 'Shallows', beach: 'Beach', grass: 'Grassland', meadow: 'Meadow',
@@ -140,7 +141,7 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
       <p className="muted">Up to 15 goods (6 on a half-finished task). Gifts of food or rare goods cheer them up.</p>
       {have.map(([g, n]) => (
         <div key={g} className="row" style={{ justifyContent: 'space-between' }}>
-          <span>{GOOD_LABEL[g]} <span className="muted">({Math.floor(n)})</span></span>
+          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(n)})</span></span>
           <span className="row">
             <button className="btn icon" onClick={() => setLoad({ ...load, [g]: Math.max(0, (load[g] ?? 0) - 1) })}>−</button>
             <b style={{ width: 24, textAlign: 'center' }}>{load[g] ?? 0}</b>

@@ -1,13 +1,17 @@
 {
   "name": "quex",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "art": "bash tools/build_art.sh",
+    "ios": "npm run build && npx cap sync ios && npx cap open ios",
+    "world": "tsx scripts/dump-world.ts"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.2",
@@ -16,11 +20,11 @@
     "@supabase/supabase-js": "^2.119.0",
     "pixi.js": "^8.23.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "@capacitor/ios": "^8.6.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.2",
-    "@capacitor/ios": "^8.6.2",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -31,5 +35,7 @@
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
-  }
+  },
+  "license": "AGPL-3.0-or-later",
+  "description": "Quex: a co-op hex strategy game powered by your real-life 1-2-3 daily tasks."
 }

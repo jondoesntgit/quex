@@ -10,6 +10,7 @@ import { Inspector } from './ui/Inspector'
 import { Onboarding } from './ui/Onboarding'
 import { LogPanel, PartyPanel, TodayPanel, VillagePanel } from './ui/Panels'
 import { SIZE_LABEL, useGame } from './ui/helpers'
+import { Icon } from './ui/Icon'
 
 type Tab = 'today' | 'village' | 'party' | 'log'
 
@@ -52,6 +53,9 @@ function Main({ game }: { game: Game }) {
 
   const pid = game.meta.activePlayer
   const p = pid ? game.state.players[pid] : null
+
+  // switching player (hot-seat) clears the other player's selection
+  useEffect(() => { setSel(null) }, [pid])
 
   // mount Pixi once
   useEffect(() => {
@@ -121,8 +125,8 @@ function Main({ game }: { game: Game }) {
       <div className="topbar">
         <span className="chip title">QUEX</span>
         <span className="chip">{SEASON_ICON[season]} {season} · wk {Math.min(week, SEASON_WEEKS)}/{SEASON_WEEKS}</span>
-        {p && <span className="chip score">⭐ <b>{score}</b>/100</span>}
-        {v && <span className="chip">👥 {Math.floor(v.population)} · 🙂 {v.morale}</span>}
+        {p && <span className="chip score"><Icon name="star" size={16} /> <b>{score}</b>/100</span>}
+        {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
         <span className="spacer" />
         {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
       </div>

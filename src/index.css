@@ -99,7 +99,9 @@ input { -webkit-user-select: text; user-select: text; }
 .habit { display: flex; gap: 8px; align-items: center; padding: 5px 0; }
 .habit input { width: 20px; height: 20px; accent-color: var(--good); }
 
-.goods { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px 10px; font-size: 14px; }
+.goods { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 10px; font-size: 13px; }
+.good { display: flex; gap: 6px; align-items: center; line-height: 1.1; }
+.ico { flex: none; }
 .bar { height: 10px; border: 2px solid var(--ink); border-radius: 3px; background: white; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--good); }
 

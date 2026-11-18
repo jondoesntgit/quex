@@ -97,15 +97,22 @@ export class Game {
     this.state = newGame(this.world, meta.seasonStart)
   }
 
-  async init() {
-    this.events = await this.store.load()
+  /** Rebuild state from the log in time order (stable for equal timestamps). */
+  replay() {
     this.events.sort((a, b) => (a.at === b.at ? 0 : a.at < b.at ? -1 : 1))
     this.state = newGame(this.world, this.meta.seasonStart)
     for (const ev of this.events) apply(this.state, this.world, ev)
+  }
+
+  async init() {
+    this.events = await this.store.load()
+    this.replay()
     this.unsub = this.store.subscribe((ev) => {
       if (this.events.some((e) => e.id === ev.id)) return
+      const last = this.events[this.events.length - 1]
       this.events.push(ev)
-      apply(this.state, this.world, ev)
+      if (last && ev.at < last.at) this.replay() // arrived out of order: rebuild in time order
+      else apply(this.state, this.world, ev)
       this.emit()
     })
     await this.catchUp()

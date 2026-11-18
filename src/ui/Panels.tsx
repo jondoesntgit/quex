@@ -4,6 +4,7 @@ import { dayScore, defence, foodStock, popCap, storageCap } from '../game/reduce
 import type { Player, TaskStatus } from '../game/types'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, SIZE_LABEL } from './helpers'
+import { Icon } from './Icon'
 
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   const date = game.today(p.id)
@@ -47,6 +48,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
       {p.habits.map((h) => (
         <label className="habit" key={h.id}>
           <input type="checkbox" checked={!!day?.habitsDone.includes(h.id)} onChange={(e) => toggleHabit(h.id, e.target.checked)} />
+          {h.effect === 'rain' && <Icon name="water" size={16} />}
           <span>{h.name}</span>
           <span className="muted">{HABIT_PRESETS.find((x) => x.id === h.id)?.blurb}</span>
         </label>
@@ -63,7 +65,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
         </div>
       )}
 
-      <h3>Freezes</h3>
+      <h3><Icon name="freeze" size={16} /> Freezes</h3>
       <div className="row">
         <span className="muted">{p.freezes} left this week. A frozen day is shown to neighbours.</span>
         <button className="btn" disabled={p.freezes <= 0 || day?.frozen}
@@ -83,9 +85,9 @@ export function VillagePanel({ game, p }: { game: Game; p: Player }) {
       <h3 style={{ marginTop: 0 }}>{v.name}</h3>
       <p className="muted" style={{ marginTop: 0 }}>{ROLE_INFO[v.role]?.blurb}</p>
       <div className="row" style={{ gap: 14 }}>
-        <span>👥 {Math.floor(v.population)}/{popCap(v)}</span>
-        <span>🛡 {defence(v)}</span>
-        <span>🍞 {Math.round(foodStock(v))}/{storageCap(v)}</span>
+        <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}</span>
+        <span><Icon name="defence" title="Defence" /> {defence(v)}</span>
+        <span><Icon name="bread" title="Food stored" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
         <span>Winter: <b>{v.winterForecast}</b></span>
       </div>
       <div style={{ margin: '8px 0' }}>
@@ -94,7 +96,7 @@ export function VillagePanel({ game, p }: { game: Game; p: Player }) {
       </div>
       <h3>Goods</h3>
       {goods.length ? (
-        <div className="goods">{goods.map(([g, n]) => <span key={g}>{GOOD_LABEL[g]}: <b>{Math.round(n * 10) / 10}</b></span>)}</div>
+        <div className="goods">{goods.map(([g, n]) => <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{Math.round(n * 10) / 10}</b></span></span>)}</div>
       ) : <p className="muted">Nothing in store.</p>}
       <h3>Buildings</h3>
       {v.buildings.length ? v.buildings.map((b) => (
@@ -151,7 +153,7 @@ export function LogPanel({ game, p }: { game: Game; p: Player }) {
     <div className="log">
       {entries.length ? entries.map((e, i) => (
         <p key={i} className={e.kind}>
-          <span className="muted">{e.at.slice(5, 10)} </span>{e.text}
+          <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{e.text}
         </p>
       )) : <p className="muted">Nothing has happened yet.</p>}
     </div>
