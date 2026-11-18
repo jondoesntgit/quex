@@ -237,3 +237,14 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 }
 .sandbox-note a, .playtest-note a { font-weight: 600; }
 .playtest-note { text-align: center; margin: 10px 0 0; }
+
+/* winter prep checklist (Village tab) and its nudge on the Today tab */
+.winter { border: 2px solid var(--ink); border-radius: var(--radius); padding: 6px 8px; margin: 8px 0; background: #eef4fb; }
+.winter summary { cursor: pointer; list-style: none; }
+.checklist { list-style: none; padding: 0; margin: 6px 0 0; }
+.checklist li { display: flex; gap: 8px; padding: 6px 0; border-top: 1px dashed var(--paper-2); }
+.checklist li .tick { width: 1.2em; flex: none; text-align: center; }
+.checklist li.ok .tick { color: var(--good); }
+.checklist .todo { display: flex; gap: 6px; align-items: baseline; margin-top: 4px; }
+.checklist .todo .size { flex: none; padding: 0 4px; min-width: 3.2em; }
+.winter-nudge { background: #eef4fb; border: 2px solid var(--ink); border-radius: var(--radius); padding: 6px 8px; margin: 6px 0; }

@@ -89,6 +89,11 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>❄️ <b>Winter</b> (Saturday): a day of rest. Nothing grows and the village lives off its stores.</li>
           </ul>
           <p>On Thursday and Friday the Village tab forecasts winter as <i>stocked</i>, <i>tight</i> or <i>hungry</i>. A season lasts {SEASON_WEEKS} weeks.</p>
+          <p>
+            The <b>Winter prep</b> checklist in the Village tab shows what's still missing: food that keeps (grain,
+            smoked fish, cheese), room to store it, a palisade if your stores look thin, and a varied larder. It
+            suggests what to do with each size of task, and how much food that keeps a full day of tasks will make tonight.
+          </p>
         </details>
 
         <details>

@@ -1,0 +1,142 @@
+/** Winter prep: what a village needs before Saturday's winter, what's still
+ *  missing, and what finishing real-life tasks would do about it. Pure, read
+ *  only: it mirrors the nightly tick's rules (see tick() in reducer.ts). */
+import { BUILDINGS, FOOD, type BuildingId, type Good, type TaskSize } from './data'
+import { CROP_SEASON, weekday, weekSeason } from './calendar'
+import { defence, foodStock, storageCap } from './reducer'
+import type { ISODate, Village } from './types'
+
+export interface PrepItem {
+  id: 'food' | 'storage' | 'defence' | 'variety'
+  ok: boolean
+  title: string
+  /** where things stand, in numbers */
+  status: string
+  /** what happens in winter if this isn't done */
+  impact: string
+  /** suggested things to do, each tied to the size of task that pays for it */
+  todo: { size: TaskSize; text: string }[]
+}
+
+export interface WinterPrep {
+  /** days until Saturday (0 = it's winter today) */
+  days: number
+  /** food the village eats in winter, and what counts as "stocked" */
+  need: number
+  target: number
+  /** food that keeps (grain, smoked fish, cheese) in store now */
+  keeps: number
+  /** live forecast (the village's own is only updated on Thursday and Friday nights) */
+  forecast: 'stocked' | 'tight' | 'hungry'
+  /** keeping food the village's buildings should make tonight: at today's score so far, and with every task done */
+  tonight: { now: number; full: number }
+  items: PrepItem[]
+}
+
+const KEEPS = (Object.entries(FOOD) as [Good, { keeps: boolean }][]).filter(([, f]) => f.keeps).map(([g]) => g)
+const r1 = (n: number) => Math.round(n * 10) / 10
+
+/** Buildings that make food that keeps through winter. */
+const KEEPERS: BuildingId[] = (Object.keys(BUILDINGS) as BuildingId[]).filter((id) => {
+  const p = BUILDINGS[id].produces
+  return !!p && Object.keys(p).some((g) => KEEPS.includes(g as Good))
+})
+
+/** Keeping food made tonight at a given score (0-100), following the tick's production rules. */
+function keepsMade(v: Village, date: ISODate, score: number): number {
+  const season = weekSeason(date)
+  if (season === 'winter') return 0
+  const prod = 0.15 + 0.85 * (score / 100)
+  const moraleK = 0.75 + v.morale / 200
+  let t = 0
+  for (const b of v.buildings) {
+    if (b.progress < 1) continue
+    const def = BUILDINGS[b.type]
+    if (!def.produces) continue
+    let k = prod * moraleK * (def.role === v.role ? 1.25 : 1)
+    if (def.crop) k *= CROP_SEASON[season]
+    for (const [g, n] of Object.entries(def.produces)) {
+      const f = FOOD[g as Good]
+      if (f?.keeps) t += (n ?? 0) * k * f.value
+    }
+  }
+  return t
+}
+
+export function winterPrep(v: Village, today: ISODate, score: number): WinterPrep {
+  const days = (6 - weekday(today) + 7) % 7
+  const need = Math.floor(v.population) * 0.5
+  const target = need * 1.5
+  const keeps = foodStock(v, true)
+  const tonight = { now: keepsMade(v, today, score), full: keepsMade(v, today, 100) }
+  const has = (id: BuildingId) => v.buildings.some((b) => b.type === id)
+  const mine = KEEPERS.filter((id) => BUILDINGS[id].role === v.role || BUILDINGS[id].role === 'any')
+  const items: PrepItem[] = []
+
+  // 1. food that keeps
+  const foodTodo: PrepItem['todo'] = []
+  if (tonight.full > 0.05 && days > 0) {
+    foodTodo.push({ size: 'big', text: `Finish today's tasks: your buildings make about ${r1(tonight.full)} food that keeps tonight with a full day (${r1(tonight.now)} at your score so far).` })
+  }
+  const next = mine.find((id) => !has(id)) ?? KEEPERS.find((id) => !has(id))
+  if (next) {
+    const def = BUILDINGS[next]
+    const own = def.role === v.role || def.role === 'any'
+    foodTodo.push({ size: def.size, text: `Build a ${def.name}${own ? '' : ' (another role\'s building: costs double)'}: ${def.blurb}` })
+  }
+  foodTodo.push({ size: 'small', text: 'Gather grain where it grows on your land: +3 grain for each small task.' })
+  foodTodo.push({ size: 'medium', text: "A neighbour's caravan (one of their medium tasks) can bring grain, smoked fish or cheese: ask them." })
+  items.push({
+    id: 'food',
+    ok: keeps >= target,
+    title: 'Stock food that keeps',
+    status: `${r1(keeps)} of ${r1(target)} in store (grain, smoked fish, cheese). Your ${Math.floor(v.population)} villagers eat ${r1(need)} on Saturday.`,
+    impact: keeps >= need
+      ? 'Enough to get through, but with little to spare. Fresh food (fish, bread, berries, game) loses 30% every night, so it can\'t be counted on.'
+      : 'If the stores run out on Saturday, morale drops by 12 and a family may leave.',
+    todo: keeps >= target ? [] : foodTodo,
+  })
+
+  // 2. room to store it
+  const cap = storageCap(v)
+  const stock = foodStock(v)
+  const room = stock + tonight.full * Math.max(1, Math.min(days, 2)) <= cap
+  items.push({
+    id: 'storage',
+    ok: room,
+    title: 'Room to store it',
+    status: `${Math.round(stock)} of ${cap} storage used.`,
+    impact: 'Food beyond what you can store rots overnight.',
+    todo: room ? [] : [{ size: BUILDINGS.granary.size, text: `Build a Granary: +${BUILDINGS.granary.storage} storage (${costText(BUILDINGS.granary.cost)}).` }],
+  })
+
+  // 3. defence: hungry villages draw raids in winter
+  const def = defence(v)
+  const hungry = keeps < need
+  items.push({
+    id: 'defence',
+    ok: !hungry || has('palisade'),
+    title: 'Guard the stores',
+    status: `Defence ${def}.${hungry ? ' Your stores look thin, and monsters can tell.' : ''}`,
+    impact: 'Monster lairs raid hungry villages 50% more often in winter, and each raid takes a fifth of one of your goods.',
+    todo: !hungry || has('palisade') ? [] : [{ size: BUILDINGS.palisade.size, text: `Build a Palisade: +${BUILDINGS.palisade.defence} defence (${costText(BUILDINGS.palisade.cost)}).` }],
+  })
+
+  // 4. variety keeps spirits up
+  const kinds = (Object.keys(FOOD) as Good[]).filter((g) => (v.goods[g] ?? 0) >= 0.5)
+  items.push({
+    id: 'variety',
+    ok: kinds.length >= 3,
+    title: 'A varied larder',
+    status: `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of food in store.`,
+    impact: 'Eating three or more kinds of food lifts morale, and morale drives how much your buildings make.',
+    todo: kinds.length >= 3 ? [] : [{ size: 'small', text: 'Gather berries, fish or game on your land (small tasks) for something different to eat.' }],
+  })
+
+  const forecast = keeps >= target ? 'stocked' : keeps >= need ? 'tight' : 'hungry'
+  return { days, need, target, keeps, forecast, tonight, items }
+}
+
+function costText(c: Partial<Record<Good, number>>) {
+  return Object.entries(c).map(([g, n]) => `${n} ${g.replace('_', ' ')}`).join(', ')
+}

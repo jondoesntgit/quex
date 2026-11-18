@@ -7,6 +7,7 @@ import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
 import { FAMILY_WORLD, SANDBOX_WORLD, worldUrl } from '../app/worlds'
+import { winterPrep } from '../game/winter'
 import { Icon } from './Icon'
 
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
@@ -30,6 +31,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
         <h3 style={{ margin: 0 }}>Today · {dayScore(day)}/100</h3>
         <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>
       </div>
+      <WinterNudge game={game} p={p} />
       {mine && !editable && (
         <p className="supervised">👪 Your tasks are set and checked off by {guardians.join(' & ') || 'your parent'}. Spend the actions you earn on the map!</p>
       )}
@@ -214,12 +216,13 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
         <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}</span>
         <span><Icon name="defence" title="Defence" /> {defence(v)}</span>
         <span><Icon name="bread" title="Food stored" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
-        <span>Winter: <b>{v.winterForecast}</b></span>
+        <span>Winter: <b>{winterPrep(v, game.today(p.id), dayScore(p.days[game.today(p.id)])).forecast}</b></span>
       </div>
       <div style={{ margin: '8px 0' }}>
         <span className="muted">Morale {v.morale}</span>
         <div className="bar"><i style={{ width: `${v.morale}%`, background: v.morale < 35 ? 'var(--danger)' : undefined }} /></div>
       </div>
+      <WinterPrepCard game={game} p={p} />
       <button className="btn" style={{ marginBottom: 4 }} onClick={async () => {
         const msg = await shareSpot(game, v, `Come settle near ${v.name} in Quex!`)
         if (msg) notify(msg)
@@ -363,5 +366,56 @@ export function GuestPanel({ game }: { game: Game }) {
         )}
       </div>
     </div>
+  )
+}
+
+const whenWinter = (days: number) =>
+  days === 0 ? "It's winter today: nothing grows, and the village lives off its stores tonight."
+    : days === 1 ? 'Winter is tomorrow (Saturday).'
+    : `Winter is on Saturday, in ${days} days.`
+
+/** A line on the Today tab from Wednesday on: how winter prep stands, and that today's tasks help. */
+function WinterNudge({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  if (!v) return null
+  const date = game.today(p.id)
+  const w = winterPrep(v, date, dayScore(p.days[date]))
+  if (w.days > 3) return null
+  const left = w.items.filter((x) => !x.ok).length
+  return (
+    <p className="winter-nudge">
+      ❄️ {whenWinter(w.days)} {left ? `${left} thing${left === 1 ? '' : 's'} left to prepare: see the winter checklist in the Village tab.` : 'Your village is ready for it.'}
+      {w.days > 0 && w.tonight.full > 0.05 && ` A full day makes about ${Math.round(w.tonight.full * 10) / 10} food that keeps tonight.`}
+    </p>
+  )
+}
+
+/** The winter prep checklist: what's ready, what isn't, and which tasks fix it. */
+function WinterPrepCard({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  const date = game.today(p.id)
+  const w = winterPrep(v, date, dayScore(p.days[date]))
+  const ready = w.items.every((x) => x.ok)
+  const [open, setOpen] = useState(w.days <= 3 && !ready)
+  return (
+    <details className="winter" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>❄️ Winter prep {ready ? '· ready' : `· ${w.items.filter((x) => !x.ok).length} to do`}</summary>
+      <p className="muted" style={{ marginTop: 4 }}>{whenWinter(w.days)} Forecast: <b>{w.forecast}</b>.</p>
+      <ul className="checklist">
+        {w.items.map((it) => (
+          <li key={it.id} className={it.ok ? 'ok' : ''}>
+            <span className="tick" aria-hidden>{it.ok ? '✓' : '○'}</span>
+            <div>
+              <b>{it.title}</b>
+              <div>{it.status}</div>
+              {!it.ok && <div className="muted">{it.impact}</div>}
+              {it.todo.map((t, k) => (
+                <div key={k} className="todo"><span className={`size ${t.size}`}>{SIZE_LABEL[t.size]}</span> {t.text}</div>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </details>
   )
 }
