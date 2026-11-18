@@ -218,6 +218,17 @@ export class Game {
   flash: string | null = null
   setAccess(a: Access | null) { this.access = a; this.emit() }
 
+  /** Looking around without an account: read-only. */
+  get guest() { return !!(this.store as { guest?: boolean }).guest }
+  /** Can this account change the world's settings? */
+  isAdmin() { return !!this.access?.me && this.access.admins.includes(this.access.me) }
+  /** A user's name in this world (the name of a village they play). */
+  userName(user: string): string {
+    const a = this.access
+    const pid = a?.owners.find((o) => o.user === user && this.state.players[o.player])?.player
+    return pid ? this.state.players[pid].name : user === a?.me ? 'you' : 'someone'
+  }
+
   /** Player ids this account looks after as a parent/guardian. */
   wards(): string[] {
     const a = this.access

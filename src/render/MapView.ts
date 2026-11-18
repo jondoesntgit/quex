@@ -31,6 +31,8 @@ export interface SceneInput {
   focus?: number
   /** lift the fog (choosing where to found a village) */
   showAll?: boolean
+  /** a guest: no player, but sees only what the world's players have explored */
+  guest?: boolean
   today: string
 }
 
@@ -605,7 +607,7 @@ export class MapView {
 /** Hexes drawn unfogged: everything while choosing a site (or with no
  *  player yet), otherwise what any player in the world has seen. */
 function visibleSet(s: SceneInput): Set<number> {
-  if (s.showAll || !s.viewer) return new Set(s.world.cells.map((_, i) => i))
+  if (s.showAll || (!s.viewer && !s.guest)) return new Set(s.world.cells.map((_, i) => i))
   return new Set(s.state.revealed)
 }
 

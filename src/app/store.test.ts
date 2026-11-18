@@ -69,6 +69,7 @@ describe('parents and guardians', () => {
       me: 'u-dad',
       guardians: [{ player: 'kid', user: 'u-dad' }, { player: 'kid', user: 'u-gran' }],
       owners: [{ player: 'dad', user: 'u-dad' }, { player: 'kid', user: 'u-kid' }],
+      admins: ['u-dad'], public: false,
     })
     return g
   }
@@ -87,7 +88,7 @@ describe('parents and guardians', () => {
     expect(g.isSupervised('kid')).toBe(true)
     expect(g.canEditTasks('kid')).toBe(false)
     expect(g.wards()).toEqual([])
-    g.setAccess({ me: 'u-kid', guardians: [], owners: [] })
+    g.setAccess({ me: 'u-kid', guardians: [], owners: [], admins: [], public: false })
     expect(g.canEditTasks('kid')).toBe(true)
   })
   it('offline (no accounts) everything local is editable', () => {

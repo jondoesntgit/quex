@@ -3,7 +3,7 @@
  * - Built files (/assets/*, hashed names), tile art, icons, fonts: cache first.
  * - Everything else (Supabase API, realtime) goes straight to the network.
  * Bump VERSION to drop old caches. */
-const VERSION = 'quex-v1'
+const VERSION = 'quex-v2'
 const STATIC = /^\/(assets|art|icons)\/|\.(woff2?|ttf|png|svg|webmanifest)$/
 
 self.addEventListener('install', (e) => {
@@ -28,7 +28,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(req).then((res) => {
         const copy = res.clone()
-        caches.open(VERSION).then((c) => c.put('/', copy))
+        if (res.status === 200) caches.open(VERSION).then((c) => c.put('/', copy))
         return res
       }).catch(() => caches.match('/').then((r) => r || caches.match(req))),
     )
@@ -38,7 +38,8 @@ self.addEventListener('fetch', (e) => {
   if (STATIC.test(url.pathname)) {
     e.respondWith(
       caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)) }
+        // only keep complete, ordinary responses (never partial or opaque ones)
+        if (res.status === 200 && res.type === 'basic') { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)) }
         return res
       })),
     )

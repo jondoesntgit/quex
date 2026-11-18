@@ -6,6 +6,7 @@ const mem = new Map<string, string>()
 const g = globalThis as unknown as Record<string, unknown>
 g.localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k), key: (i: number) => [...mem.keys()][i] ?? null, get length() { return mem.size } }
 const online = { on: true }
+const publicWorld = { on: false }
 Object.defineProperty(globalThis.navigator, 'onLine', { get: () => online.on, configurable: true })
 const listeners: Record<string, (() => void)[]> = {}
 g.window = { addEventListener: (t: string, f: () => void) => { (listeners[t] ??= []).push(f) } }
@@ -21,6 +22,7 @@ function fakeServer() {
     return c
   }
   const sb = {
+    rpc: async (name: string) => (name === 'world_is_public' ? { data: publicWorld.on, error: null } : { data: null, error: null }),
     from: () => ({
       ...chain(() => (online.on ? { data: rows.map((body) => ({ body })), error: null } : fail())),
       insert: (r: { body: GameEvent }) => chain(() => {
@@ -76,5 +78,19 @@ describe('playing offline', async () => {
     const { sb } = fakeServer()
     online.on = false
     await expect(new SupabaseStore(sb as never, 'w').load()).rejects.toThrow()
+  })
+})
+
+describe('guests', async () => {
+  const { SupabaseStore, PrivateWorldError } = await import('./supabase')
+  beforeEach(() => { mem.clear(); online.on = true })
+  it('can look at a public world but not a private one', async () => {
+    const { sb, rows } = fakeServer()
+    rows.push(ev('a'))
+    publicWorld.on = false
+    await expect(new SupabaseStore(sb as never, 'w', true).load()).rejects.toBeInstanceOf(PrivateWorldError)
+    publicWorld.on = true
+    expect((await new SupabaseStore(sb as never, 'w', true).load()).map((e) => e.id)).toEqual(['a'])
+    expect((await new SupabaseStore(sb as never, 'w', true).access()).me).toBeNull()
   })
 })

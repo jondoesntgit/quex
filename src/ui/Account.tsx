@@ -115,6 +115,11 @@ export function SignIn() {
           </>
         )}
         {err && <p style={{ color: 'var(--danger)' }}>{err}</p>}
+        {!sent && (
+          <p className="muted" style={{ textAlign: 'center', marginBottom: 0 }}>
+            Just curious? <button type="button" className="linkbtn" onClick={() => account.enterGuest()}>Look around as a guest</button> (public worlds only).
+          </p>
+        )}
       </div>
     </div>
   )
@@ -192,6 +197,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           </>
         )}
 
+        {remote && game.isAdmin() && <WorldSettings game={game} remote={remote} notify={notify} />}
+
         {wards.length > 0 && (
           <>
             <label>You look after</label>
@@ -250,5 +257,44 @@ export function ManageWard({ game, pid, onClose }: { game: Game; pid: string; on
         </form>
       </div>
     </div>
+  )
+}
+
+/** Admins only: who can see the world, and who else administers it. */
+function WorldSettings({ game, remote, notify }: { game: Game; remote: SupabaseStore; notify: (s: string) => void }) {
+  const a = game.access!
+  const [busy, setBusy] = useState(false)
+  const refresh = async () => game.setAccess(await remote.access())
+  const run = async (f: () => Promise<void>, ok: string) => {
+    setBusy(true)
+    try { await f(); await refresh(); notify(ok) } catch (e) { notify(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  // people with a village here who aren't admins yet
+  const candidates = [...new Set(a.owners.map((o) => o.user))].filter((u) => !a.admins.includes(u))
+  const link = location.origin + location.pathname + (game.meta.worldSeed !== 'quex-season-1' ? `?seed=${encodeURIComponent(game.meta.worldSeed)}` : '')
+  return (
+    <>
+      <label>World <span className="muted">(you’re an admin)</span></label>
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" id="world-public" checked={a.public} disabled={busy}
+          onChange={(e) => run(() => remote.setPublic(e.target.checked), e.target.checked ? 'World is public: anyone with the link can look around.' : 'World is private: players only.')} />
+        <span><b>Public</b>: anyone can look around without joining</span>
+      </div>
+      {a.public && <p className="muted" style={{ margin: '4px 0' }}>Share <b>{link}</b>; visitors choose “Look around as a guest”. Task names always stay private.</p>}
+      <p style={{ margin: '8px 0 4px' }}>Admins: {a.admins.map((u) => (
+        <span key={u} style={{ marginRight: 8 }}>
+          {game.userName(u)}
+          {a.admins.length > 1 && <button className="linkbtn" disabled={busy} onClick={() => run(() => remote.removeAdmin(u), 'Admin removed.')} title="Remove as admin"> ×</button>}
+        </span>
+      ))}</p>
+      {candidates.length > 0 && (
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          <span className="muted">Make admin:</span>
+          {candidates.map((u) => (
+            <button key={u} className="btn" disabled={busy} onClick={() => run(() => remote.addAdmin(u), `${game.userName(u)} is now an admin.`)}>{game.userName(u)}</button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }

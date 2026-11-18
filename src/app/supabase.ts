@@ -32,8 +32,11 @@ export async function createSupabaseStore(worldSeed: string): Promise<SupabaseSt
     // offline with an expired token: the session can't refresh, but this device
     // was signed in, so carry on from its copy of the world until we're back
     if (!navigator.onLine && savedSessionEmail()) return new SupabaseStore(sb, worldSeed)
+    // looking around without an account (public worlds only)
+    if (account.isGuest()) return new SupabaseStore(sb, worldSeed, true)
     return 'signin'
   }
+  if (account.isGuest()) account.leaveGuest(false) // signed in now: no longer a guest
   await sb.rpc('join_world', { p_world: worldSeed }).then(({ error }) => error && console.warn('join_world', error.message))
   return new SupabaseStore(sb, worldSeed)
 }
@@ -70,10 +73,36 @@ export class SupabaseStore implements EventStore {
   onStatus: () => void = () => {}
   private flushing = false
 
-  constructor(sb: SupabaseClient, world: string) {
+  /** read-only visitor without an account */
+  readonly guest: boolean
+
+  constructor(sb: SupabaseClient, world: string, guest = false) {
     this.sb = sb
     this.world = world
+    this.guest = guest
     window.addEventListener('online', () => { void this.flush() })
+  }
+
+  /** Can people without an account look at this world? */
+  async isPublic(): Promise<boolean> {
+    const { data, error } = await this.sb.rpc('world_is_public', { p_world: this.world })
+    if (error) { console.warn('world_is_public', error.message); return false }
+    return !!data
+  }
+
+  // -------------------------------------------------------------- world admin
+
+  async setPublic(on: boolean) {
+    const { error } = await this.sb.rpc('set_world_public', { p_world: this.world, p_public: on })
+    if (error) throw new Error(error.message)
+  }
+  async addAdmin(user: string) {
+    const { error } = await this.sb.rpc('add_world_admin', { p_world: this.world, p_user: user })
+    if (error) throw new Error(error.message)
+  }
+  async removeAdmin(user: string) {
+    const { error } = await this.sb.rpc('remove_world_admin', { p_world: this.world, p_user: user })
+    if (error) throw new Error(error.message)
   }
 
   private get cacheKey() { return `quex:world:v1:${this.world}` }
@@ -86,6 +115,7 @@ export class SupabaseStore implements EventStore {
   }
 
   async load(): Promise<GameEvent[]> {
+    if (this.guest && !(await this.isPublic())) throw new PrivateWorldError()
     const out: GameEvent[] = []
     let from = 0
     try {
@@ -195,11 +225,14 @@ export class SupabaseStore implements EventStore {
 
   /** Who is signed in, who guards which player, and which user plays which player. */
   async access(): Promise<Access> {
+    if (this.guest) return { me: null, guardians: [], owners: [], admins: [], public: true }
     const key = `quex:access:v1:${this.world}`
     const { data: s } = await this.sb.auth.getSession()
-    const [g, o] = await Promise.all([
+    const [g, o, ad, w] = await Promise.all([
       this.sb.from('player_guardians').select('player_id, guardian_id').eq('world', this.world),
       this.sb.from('player_owners').select('player_id, user_id').eq('world', this.world),
+      this.sb.from('world_admins').select('user_id').eq('world', this.world),
+      this.sb.from('worlds').select('public').eq('seed', this.world).maybeSingle(),
     ])
     if (g.error || o.error) {
       // offline: who guards whom hasn't changed, use the last known roles
@@ -211,6 +244,8 @@ export class SupabaseStore implements EventStore {
       me: s.session?.user.id ?? null,
       guardians: (g.data ?? []).map((r) => ({ player: r.player_id as string, user: r.guardian_id as string })),
       owners: (o.data ?? []).map((r) => ({ player: r.player_id as string, user: r.user_id as string })),
+      admins: (ad.data ?? []).map((r) => r.user_id as string),
+      public: !!(w.data as { public?: boolean } | null)?.public,
     }
     if (!g.error && !o.error) writeJSON(key, a)
     return a
@@ -259,6 +294,15 @@ export interface Access {
   me: string | null
   guardians: { player: string; user: string }[]
   owners: { player: string; user: string }[]
+  /** users who administer this world */
+  admins: string[]
+  /** can people without an account look at it? */
+  public: boolean
+}
+
+/** A guest tried to look at a world that isn't public. */
+export class PrivateWorldError extends Error {
+  constructor() { super('This world is private') }
 }
 
 export interface AccountInfo { email: string | null; guest: boolean }
@@ -267,8 +311,15 @@ const here = () => location.origin + location.pathname + location.search
 
 /** Sign-in: emailed code/link, password, or Google (when enabled in Supabase
  *  and VITE_AUTH_GOOGLE=1). Emails carry a link and a 6-digit {{ .Token }}. */
+const GUEST_KEY = 'quex:guest'
+
 export const account = {
   enabled: supabaseEnabled,
+
+  /** Looking around a public world without an account (this tab only). */
+  isGuest(): boolean { try { return sessionStorage.getItem(GUEST_KEY) === '1' } catch { return false } },
+  enterGuest() { try { sessionStorage.setItem(GUEST_KEY, '1') } catch { /* ignore */ } location.reload() },
+  leaveGuest(reload = true) { try { sessionStorage.removeItem(GUEST_KEY) } catch { /* ignore */ } if (reload) location.reload() },
   google: import.meta.env.VITE_AUTH_GOOGLE === '1',
 
   async info(): Promise<AccountInfo | null> {

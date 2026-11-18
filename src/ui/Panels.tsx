@@ -311,3 +311,55 @@ export function LogPanel({ game, p }: { game: Game; p: Player }) {
     </div>
   )
 }
+
+/** What a guest sees: who plays here and what's been happening (read-only). */
+export function GuestPanel({ game }: { game: Game }) {
+  const [tab, setTab] = useState<'party' | 'log'>('party')
+  const [collapsed, setCollapsed] = useState(false)
+  const players = Object.values(game.state.players)
+  const entries = game.state.log.filter((e) => !e.text.startsWith('(ignored') && e.kind !== 'info').slice(-60).reverse()
+  return (
+    <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>
+      <div className="tabs">
+        {(['party', 'log'] as const).map((t) => (
+          <button key={t} className={`tab ${tab === t && !collapsed ? 'on' : ''}`}
+            onClick={() => { if (tab === t) setCollapsed(!collapsed); else { setTab(t); setCollapsed(false) } }}>
+            {t === 'party' ? 'Players' : 'Log'}
+          </button>
+        ))}
+      </div>
+      <div className="sheet-body">
+        {tab === 'party' ? (
+          <div>
+            <p className="muted" style={{ marginTop: 0 }}>You’re looking around a public world. Players’ dots show whether they finished today’s tasks, never what they were.</p>
+            {players.map((o) => {
+              const d = o.days[game.today(o.id)]
+              const v = game.state.villages[o.villageId]
+              return (
+                <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px dashed var(--paper-2)' }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <b>{o.name}</b>
+                    <span className="muted">{ROLE_INFO[v.role]?.name} · {v.name}</span>
+                  </div>
+                  <span className="pips">
+                    {(d?.slots ?? []).map((sl, i) => <span key={i} className={`pip ${sl.status} ${d?.frozen ? 'frozen' : ''}`} />)}
+                    {!d && <span className="muted">no check-in yet today</span>}
+                  </span>
+                </div>
+              )
+            })}
+            {!players.length && <p className="muted">Nobody has settled here yet.</p>}
+          </div>
+        ) : (
+          <div className="log">
+            {entries.length ? entries.map((e, i) => (
+              <p key={i} className={e.kind}>
+                <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{logText(game.state, e.text)}
+              </p>
+            )) : <p className="muted">Nothing has happened yet.</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
