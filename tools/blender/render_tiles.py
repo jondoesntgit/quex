@@ -253,14 +253,6 @@ def feat_trees(kind, n, v=0):
     return build
 
 
-MOUNTAIN_SHAPES = [
-    # one big peak with two shoulders (the original)
-    [(0.05, 0.15, 0.7, 1.4), (-0.5, -0.15, 0.45, 0.8), (0.55, -0.2, 0.42, 0.75)],
-    # twin peaks with a small foothill in front
-    [(-0.28, 0.12, 0.58, 1.2), (0.33, 0.05, 0.55, 1.02), (0.05, -0.38, 0.32, 0.5)],
-    # a tall sharp spire over a long low ridge
-    [(-0.1, 0.18, 0.6, 1.6), (0.45, 0.05, 0.45, 0.65), (-0.6, -0.1, 0.32, 0.45), (0.2, -0.35, 0.3, 0.4)],
-]
 HILL_SHAPES = [
     [(-0.35, 0.15, 0.45, 0.35), (0.35, -0.1, 0.5, 0.4)],
     [(-0.45, 0.05, 0.38, 0.28), (0.1, 0.25, 0.42, 0.38), (0.42, -0.22, 0.36, 0.3)],
@@ -268,21 +260,82 @@ HILL_SHAPES = [
 ]
 
 
-PEAK_HEIGHT = 1.6  # mountains tower over the land around them
+# ---------------------------------------------------------------- mountains
+# Mountains are faceted heightfields with a few broad swells each (no spiky
+# cones), and snow covers everything above one level snow line, so ranges
+# read as big landforms with a clean, level snowfield.
+
+SNOW_Z = {False: 1.25, True: 0.85}   # snow line height: ordinary / snowy (cold) mountains
+PEAK_SHAPES = [
+    # (x, y, sigma, height): gaussian swells
+    [(0.0, 0.12, 0.48, 1.45), (-0.45, -0.15, 0.35, 0.55), (0.48, -0.12, 0.33, 0.5)],    # one big summit
+    [(-0.32, 0.1, 0.38, 1.3), (0.34, 0.05, 0.36, 1.2), (0.0, -0.3, 0.3, 0.35)],         # twin summits
+    [(-0.15, 0.15, 0.42, 1.5), (0.45, 0.0, 0.42, 0.75), (-0.55, -0.12, 0.3, 0.4)],       # summit and long shoulder
+]
+
+
+def lowfreq(x, y, seed):
+    """Gentle, large-wavelength undulation so facets aren't perfectly smooth."""
+    return 0.06 * math.sin(x * 2.3 + seed) * math.cos(y * 2.9 - seed * 0.7) + 0.03 * math.sin((x + y) * 4.1 + seed * 1.3)
+
+
+def heightfield(h, extent, snow_z, step=0.075):
+    """Triangle-lattice terrain z = h(x, y) over |x|, |y| <= extent, faceted and
+    lit like the cones (3 tones by facing), snow above snow_z."""
+    p = PAL["features"]
+    bm = bmesh.new()
+    rows = []
+    ny = int(extent / (step * 0.866)) + 1
+    nx = int(extent / step) + 1
+    for j in range(-ny, ny + 1):
+        y = j * step * 0.866
+        row = []
+        for i in range(-nx, nx + 1):
+            x = i * step + (step / 2 if j % 2 else 0)
+            z = max(0.0, h(x, y))
+            row.append(bm.verts.new((x, y, z)))
+        rows.append(row)
+    tris = []
+    for j in range(len(rows) - 1):
+        a, b = rows[j], rows[j + 1]
+        odd = (j - ny) % 2 != 0
+        for i in range(len(a) - 1):
+            if not odd:
+                tris.append((a[i], a[i + 1], b[i]))
+                tris.append((a[i + 1], b[i + 1], b[i]))
+            else:
+                tris.append((a[i], b[i + 1], b[i]))
+                tris.append((a[i], a[i + 1], b[i + 1]))
+    eps = 0.03
+    for t in tris:
+        if max(v.co.z for v in t) <= eps:
+            continue
+        f = bm.faces.new(t)
+    bm.normal_update()
+    for f in bm.faces:
+        if f.normal.z < 0:
+            f.normal_flip()
+        n = f.normal
+        lit = n.x * -0.6 + n.y * -0.5 + n.z * 0.6
+        tone = 1 if lit > 0.62 else (0 if lit > 0.45 else 2)
+        snow = sum(v.co.z for v in f.verts) / 3 > snow_z
+        f.material_index = (3 if snow else 0) + tone
+    for v in [v for v in bm.verts if not v.link_faces]:
+        bm.verts.remove(v)
+    return link(bm, "mtn", [mat(p["rock"]), mat(p["rock_light"]), mat(p["rock_dark"]),
+                            mat(p["snow"]), mat(p["snow"]), mat(p["snow_dark"])])
 
 
 def feat_mountain(snow, v=0):
-    p = PAL["features"]
+    swells = PEAK_SHAPES[v]
 
-    def build(W):
-        for (x, y, r, h0) in MOUNTAIN_SHAPES[v]:
-            h = h0 * PEAK_HEIGHT
-            cone((x, y, 0), r, h, p["rock"], segs=5, rot=0.3 + 0.4 * v, shade=(p["rock_light"], p["rock_dark"]))
-            if snow:
-                k = 0.38
-                cone((x, y, h * (1 - k) + 0.01), r * k + 0.02, h * k, p["snow"], segs=5, rot=0.3 + 0.4 * v,
-                     shade=(p["snow"], p["snow_dark"]))
-    return build
+    def h(x, y):
+        z = sum(hh * math.exp(-((x - px) ** 2 + (y - py) ** 2) / (2 * sg * sg)) for (px, py, sg, hh) in swells)
+        # keep the massif on its own hex: fade out toward the rim
+        r = math.hypot(x, y)
+        fade = 1.0 if r < 0.7 else max(0.0, 1 - (r - 0.7) / 0.3)
+        return (z + lowfreq(x, y, v + 3 * snow)) * fade - 0.04
+    return lambda W: heightfield(h, 1.0, SNOW_Z[snow])
 
 
 def feat_hills(v=0):
@@ -563,38 +616,6 @@ for _v in (1, 2):
     FEATURES[f"hills_v{_v}"] = feat_hills(_v)
 
 
-def feat_jag(deg, snow, v=0):
-    """A jagged ridge on the edge between two mountain hexes, so a range reads
-    as one wall of peaks. The origin is the midpoint of the shared edge; the
-    ridge runs from the back hex (A) toward the front one (B) at `deg`."""
-    p = PAL["features"]
-    rng = random.Random(f"jag{deg}:{snow}:{v}")
-    ux, uy = math.cos(math.radians(deg)), math.sin(math.radians(deg))
-    n = 4 + rng.randrange(2)
-    teeth = []
-    for k in range(n):
-        t = -0.62 + 1.24 * (k + rng.uniform(0.25, 0.75)) / n
-        # tallest in the middle of the pass, lower toward the two peaks
-        h = (0.55 + 0.55 * (1 - abs(t) / 0.7)) * rng.uniform(0.8, 1.2) * PEAK_HEIGHT * 0.7
-        teeth.append((t * ux + rng.uniform(-0.08, 0.08), t * uy + rng.uniform(-0.08, 0.08), rng.uniform(0.22, 0.32), h))
-    teeth.sort(key=lambda q: -q[1])  # back to front
-
-    def build(W):
-        for (x, y, r, h) in teeth:
-            rot = rng.uniform(0, 1.2)
-            cone((x, y, 0), r, h, p["rock"], segs=5, rot=rot, shade=(p["rock_light"], p["rock_dark"]))
-            if snow:
-                k = 0.36
-                cone((x, y, h * (1 - k) + 0.01), r * k + 0.02, h * k, p["snow"], segs=5, rot=rot, shade=(p["snow"], p["snow_dark"]))
-    return build
-
-
-# jags toward the three front neighbours (S, SE, SW), two shapes each, plain and snowy
-for _d, _deg in (("s", 270), ("se", 330), ("sw", 210)):
-    for _v in (0, 1):
-        FEATURES[f"jag_{_d}_{_v}"] = feat_jag(_deg, False, _v)
-        FEATURES[f"jag_snow_{_d}_{_v}"] = feat_jag(_deg, True, _v)
-
 
 def main():
     a = args()
@@ -634,7 +655,7 @@ def main():
             H = face + (MAX_TIER + 1) * tier
             ax, ay = W // 2, face // 2
         else:
-            H = W * 2 if name in CREATURE_SCALE or name.startswith(("mountain", "jag")) else W * 3 // 2
+            H = W * 2 if name in CREATURE_SCALE or name.startswith("mountain") else W * 3 // 2
             ax, ay = W // 2, H - face // 2
         setup_camera(W, H, ax, ay)
         render(os.path.join(out, kind, name + ".png"))

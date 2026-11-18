@@ -12,6 +12,7 @@
  */
 import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } from 'pixi.js'
 import { Ambient } from './ambient'
+import { Mountains } from './mountains'
 import { hexToPixel, neighbours, pixelToHex } from '../world/hex'
 import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
@@ -56,6 +57,8 @@ export class MapView {
   traders!: Traders
   /** surf, glints, swaying trees, shimmering fields */
   ambient!: Ambient
+  /** mountain ranges drawn from one height map (cached per world) */
+  private mountains: Mountains | null = null
   zoom = typeof window !== "undefined" && window.innerWidth < 700 ? 1 : 2
   /** CSS upscale of the canvas (zoom >= 1) */
   private get cssScale() { return Math.max(1, this.zoom) }
@@ -245,6 +248,7 @@ export class MapView {
     const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes()])
     for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy({ children: true })
     this.ambient ??= new Ambient(W)
+    if (!this.mountains || (this.mountains as unknown as { world: World }).world !== world) this.mountains = new Mountains(world, W, TP)
     this.ambient.reset()
     // choosing a site shows the whole world at once: keep that screen still (and quick)
     const animate = !input.showAll
@@ -355,6 +359,19 @@ export class MapView {
       else if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
       else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
       for (const l of layers) {
+        if (l.name.startsWith('f_mountain')) {
+          // ranges come from the height map, not a sprite
+          const m = this.mountains!.slice(i)
+          if (m) {
+            const s = new Sprite(m.texture)
+            s.cullable = true
+            s.x = cx + m.ox
+            s.y = cy + m.oy
+            s.zIndex = z(i, 3)
+            this.cells.addChild(s)
+          }
+          continue
+        }
         const f = this.atlas.tex(l.name)
         if (!f) continue
         const s = new Sprite(f.texture)
@@ -373,32 +390,7 @@ export class MapView {
       }
     }
 
-    // Mountain ranges: a jagged ridge on the edge between each pair of
-    // neighbouring mountain hexes, drawn just before the front hex (so its
-    // peak and anything in front still cover it), at the lower hex's ground.
-    for (const i of order) {
-      const a = world.cells[i]
-      if (!revealed.has(i) || !MOUNTAINS.has(a.feature ?? '')) continue
-      const pa = hexToPixel(a.col, a.row, W)
-      neighbours(a.col, a.row).forEach(([nc, nr], k) => {
-        if (k < 1 || k > 3 || nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
-        const j = idx(nc, nr)
-        const b = world.cells[j]
-        if (!revealed.has(j) || !MOUNTAINS.has(b.feature ?? '') || rank[j] < 0) return
-        const snow = a.feature === 'mountain_snow' || b.feature === 'mountain_snow'
-        const v = ((i * 73856093) ^ (j * 19349663)) >>> 0
-        const f = this.atlas.tex(`f_jag${snow ? '_snow' : ''}_${JAG_DIR[k]}_${v % 2}`)
-        if (!f) return
-        const pb = hexToPixel(nc, nr, W)
-        const sp = new Sprite(f.texture)
-        sp.cullable = true
-        sp.anchor.set(f.frame.ax / f.frame.w, f.frame.ay / f.frame.h)
-        sp.x = Math.round((pa.x + pb.x) / 2)
-        sp.y = Math.round((pa.y + pb.y) / 2 - Math.min(a.tier, b.tier) * TP)
-        sp.zIndex = z(j, -0.1)
-        this.cells.addChild(sp)
-      })
-    }
+    this.mountains!.flush()
 
     // Territory borders: dashed, Civilization-style, and part of the painter's
     // order. Each border hex draws its outside edges at its own height just
@@ -763,9 +755,6 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */
 const WATER = new Set(['deep', 'ocean', 'shallow'])
-const MOUNTAINS = new Set(['mountain', 'mountain_snow'])
-/** neighbour index (hex.ts order NE, SE, S, SW, NW, N) -> jag sprite direction */
-const JAG_DIR: Record<number, string> = { 1: 'se', 2: 's', 3: 'sw' }
 
 /** A hex's slightly off-centre middle, so roads and rivers bend a little (stable per hex). */
 function bendPoint(seed: number, cx: number, cy: number, W: number): [number, number] {
