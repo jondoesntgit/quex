@@ -65,6 +65,12 @@ export function territoryCells(world: World, v: Village): number[] {
 
 /** Village territory radius, and the empty hexes required between a new
  *  village's territory and anyone else's. */
+/** Rules that changed on 2026-11-18 apply only to events from this moment on,
+ *  so replaying older events still gives everyone the villages they had:
+ *  - half-done (½) action tokens can no longer be spent;
+ *  - unspent tokens last until the end of winter (Saturday night) instead of a day. */
+export const WEEKLY_TOKENS_FROM = '2026-11-18T22:00:00.000Z'
+
 export const VILLAGE_RADIUS = 2
 export const FOUNDING_GAP = 2
 
@@ -263,6 +269,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
 function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extract<GameEvent, { t: 'act' }>): string | null {
   const tok = p.tokens.find((t) => t.id === ev.tokenId)
   if (!tok) return 'That action token has been used'
+  if (tok.strength < 1 && ev.at >= WEEKLY_TOKENS_FROM) return 'Finish the task to use this action'
   const need = ACTIONS[ev.action].size
   if (ev.action === 'build') {
     const def = ev.building && BUILDINGS[ev.building]
@@ -793,8 +800,10 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
     v.winterForecast = keeps >= needWinter * 1.5 ? 'stocked' : keeps >= needWinter ? 'tight' : 'hungry'
   }
 
-  // 8. tokens are for spending: unspent ones expire a day later
-  p.tokens = p.tokens.filter((t) => t.date >= ev.date)
+  // 8. tokens are for spending: unspent ones expire at the end of winter
+  // (before the weekly rule: a day after they were earned)
+  if (ev.at < WEEKLY_TOKENS_FROM) p.tokens = p.tokens.filter((t) => t.date >= ev.date)
+  else if (winter) p.tokens = []
   d.ticked = true
   p.lastTick = ev.date
 

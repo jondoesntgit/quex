@@ -212,6 +212,30 @@ describe('nightly tick', () => {
     apply(s, world, ev('tick', 'ann', `${addDays(SUN, 2)}T00:05:00Z`, { date: addDays(SUN, 1) }))
     expect(s.players.ann.tokens).toHaveLength(0)
   })
+  it('from the weekly rule on, tokens last until the end of winter (Saturday night)', () => {
+    const s = setup()
+    const SUN2 = addDays(SUN, 7) // after WEEKLY_TOKENS_FROM
+    apply(s, world, ev('progress', 'ann', `${SUN2}T12:00:00Z`, { date: SUN2, slot: 5, status: 'full' }))
+    for (let k = 0; k < 6; k++) {
+      apply(s, world, ev('tick', 'ann', `${addDays(SUN2, k + 1)}T00:05:00Z`, { date: addDays(SUN2, k) }))
+      expect(s.players.ann.tokens).toHaveLength(1) // Sunday's token survives every weekday night
+    }
+    apply(s, world, ev('tick', 'ann', `${addDays(SUN2, 7)}T00:05:00Z`, { date: addDays(SUN2, 6) })) // Saturday: winter ends
+    expect(s.players.ann.tokens).toHaveLength(0)
+  })
+  it('from the weekly rule on, a half-done task gives a token that cannot be spent until finished', () => {
+    const s = setup()
+    const SUN2 = addDays(SUN, 7)
+    const at = `${SUN2}T10:00:00Z`
+    const v = s.villages[s.players.ann.villageId]
+    apply(s, world, ev('progress', 'ann', at, { date: SUN2, slot: 3, status: 'half' }))
+    const tok = s.players.ann.tokens[0]
+    expect(tok.strength).toBe(0.5)
+    const scout = { tokenId: tok.id, action: 'scout' as const, col: v.col + 4, row: v.row }
+    expect(validate(s, world, ev('act', 'ann', at, scout))).toMatch(/Finish the task/)
+    apply(s, world, ev('progress', 'ann', at, { date: SUN2, slot: 3, status: 'full' }))
+    expect(validate(s, world, ev('act', 'ann', at, scout))).toBeNull()
+  })
   it('pendingTicks lists missed days but never today', () => {
     const s = setup()
     expect(pendingTicks(s.players.ann, addDays(SUN, 3), SUN)).toEqual([SUN, addDays(SUN, 1), addDays(SUN, 2)])

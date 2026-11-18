@@ -40,16 +40,20 @@ export function Help({ onClose }: { onClose: () => void }) {
         <details>
           <summary>Actions: spending what you earn</summary>
           <p>
-            Every task you finish earns an action of the same size, shown at the bottom of the map. Half-done
-            tasks earn a half-strength action (marked ½) that builds or gathers half as much. A bigger action can
-            pay for a smaller one. Tap a hex on the map to see what you can do there.
+            Every task you finish earns an action of the same size, shown at the bottom of the map as <b>B</b>,{' '}
+            <b>M</b> or <b>S</b>. A half-done task shows a half-filled action: it still counts toward your score,
+            but the action can only be spent once you finish the task. A bigger action can pay for a smaller one.
+            Tap a hex on the map to see what you can do there.
           </p>
           <ul>
             <li><b>Small:</b> {bySize('small').map((a) => a.name).join(', ')}.</li>
             <li><b>Medium:</b> {bySize('medium').map((a) => a.name).join(', ')}.</li>
             <li><b>Big:</b> {bySize('big').map((a) => a.name).join(', ')}.</li>
           </ul>
-          <p>Actions are for spending: unused ones fade at the end of the next day.</p>
+          <p>
+            Unspent actions last all week and fade when winter ends on Saturday night. There's nothing to gain by
+            saving them: buildings start producing the night they're finished, and monster lairs only grow stronger.
+          </p>
         </details>
 
         <details>

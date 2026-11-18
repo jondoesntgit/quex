@@ -268,11 +268,12 @@ function Main({ game }: { game: Game }) {
       {p && p.tokens.length > 0 && !sel && (
         <div className="tray" style={{ bottom: collapsed ? 54 : 'calc(52% + 8px)' }}>
           {p.tokens.map((t) => (
-            <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''}`}>
-              {SIZE_LABEL[t.size]} action{t.strength < 1 ? ' ½' : ''}
+            <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''}`}
+              title={t.strength < 1 ? `Half-done ${t.size} task: finish it to use this action` : `${SIZE_LABEL[t.size]} action`}>
+              {t.size === 'big' ? 'B' : t.size === 'medium' ? 'M' : 'S'}
             </span>
           ))}
-          <span className="token" style={{ background: 'var(--ink)' }}>tap a hex to spend</span>
+          <span className="token hint">{p.tokens.some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>
         </div>
       )}
 

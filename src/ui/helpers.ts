@@ -14,10 +14,10 @@ export function useGame(game: Game | null) {
   }, [game])
 }
 
-/** Smallest sufficient token, full-strength preferred. */
+/** Smallest sufficient whole token (half-done ones can't be spent). */
 export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Token | null {
-  const ok = p.tokens.filter((t) => SIZE_RANK[t.size] >= SIZE_RANK[need])
-  ok.sort((a, b) => b.strength - a.strength || SIZE_RANK[a.size] - SIZE_RANK[b.size])
+  const ok = p.tokens.filter((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
+  ok.sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size])
   return ok[0] ?? null
 }
 
@@ -29,7 +29,11 @@ export function actEvent(game: Game, p: Player, tok: Token, action: ActionKind, 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
   extra: { building?: BuildingId; to?: string; goods?: Record<string, number> } = {}, needOverride?: 'big' | 'medium' | 'small') {
   const tok = bestToken(p, needOverride ?? ACTIONS[action].size)
-  if (!tok) return { ev: null, error: `Finish a ${needOverride ?? ACTIONS[action].size} task to unlock this` }
+  if (!tok) {
+    const need = needOverride ?? ACTIONS[action].size
+    const half = p.tokens.some((t) => t.strength < 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
+    return { ev: null, error: half ? `Finish your half-done ${need} task to unlock this` : `Finish a ${need} task to unlock this` }
+  }
   const ev = actEvent(game, p, tok, action, col, row, extra)
   const error = validate(game.state, game.world, ev)
   return { ev: error ? null : ev, error, tok }

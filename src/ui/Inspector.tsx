@@ -124,7 +124,7 @@ function ActionButton({ game, p, action, col, row, onRun }: { game: Game; p: Pla
   const a = ACTIONS[action]
   return (
     <button className={`btn ${a.size} action`} disabled={!r.ev} onClick={onRun} title={r.error ?? a.blurb}>
-      {a.name}{r.tok && r.tok.strength < 1 ? ' (½)' : ''}
+      {a.name}
       <small>{r.error ?? a.blurb}</small>
     </button>
   )

@@ -104,9 +104,14 @@ input { -webkit-user-select: text; user-select: text; }
 
 /* tokens tray */
 .tray { position: absolute; left: 8px; right: 8px; z-index: 3; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
-.token { pointer-events: auto; border: 2px solid var(--ink); border-radius: 12px; padding: 2px 9px; color: white; box-shadow: var(--shadow); }
-.token.big { background: var(--big); } .token.medium { background: var(--medium); } .token.small { background: var(--small); }
-.token.half { background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.35) 4px 8px); }
+.token {
+  --c: var(--ink); pointer-events: auto; border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
+  min-width: 2em; padding: 2px 6px 4px; text-align: center; color: white; background: var(--c);
+}
+.token.big { --c: var(--big); } .token.medium { --c: var(--medium); } .token.small { --c: var(--small); }
+/* half done: only the bottom half is filled, and it can't be spent yet */
+.token.half { color: var(--ink); background: linear-gradient(to top, var(--c) 50%, var(--paper) 50%); }
+.token.hint { background: var(--ink); min-width: 0; }
 
 /* today slots */
 .slot { display: grid; grid-template-columns: 46px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--paper-2); }
