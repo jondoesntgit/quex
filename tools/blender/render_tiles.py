@@ -268,11 +268,15 @@ HILL_SHAPES = [
 ]
 
 
+PEAK_HEIGHT = 1.6  # mountains tower over the land around them
+
+
 def feat_mountain(snow, v=0):
     p = PAL["features"]
 
     def build(W):
-        for (x, y, r, h) in MOUNTAIN_SHAPES[v]:
+        for (x, y, r, h0) in MOUNTAIN_SHAPES[v]:
+            h = h0 * PEAK_HEIGHT
             cone((x, y, 0), r, h, p["rock"], segs=5, rot=0.3 + 0.4 * v, shade=(p["rock_light"], p["rock_dark"]))
             if snow:
                 k = 0.38
@@ -559,6 +563,39 @@ for _v in (1, 2):
     FEATURES[f"hills_v{_v}"] = feat_hills(_v)
 
 
+def feat_jag(deg, snow, v=0):
+    """A jagged ridge on the edge between two mountain hexes, so a range reads
+    as one wall of peaks. The origin is the midpoint of the shared edge; the
+    ridge runs from the back hex (A) toward the front one (B) at `deg`."""
+    p = PAL["features"]
+    rng = random.Random(f"jag{deg}:{snow}:{v}")
+    ux, uy = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    n = 4 + rng.randrange(2)
+    teeth = []
+    for k in range(n):
+        t = -0.62 + 1.24 * (k + rng.uniform(0.25, 0.75)) / n
+        # tallest in the middle of the pass, lower toward the two peaks
+        h = (0.55 + 0.55 * (1 - abs(t) / 0.7)) * rng.uniform(0.8, 1.2) * PEAK_HEIGHT * 0.7
+        teeth.append((t * ux + rng.uniform(-0.08, 0.08), t * uy + rng.uniform(-0.08, 0.08), rng.uniform(0.22, 0.32), h))
+    teeth.sort(key=lambda q: -q[1])  # back to front
+
+    def build(W):
+        for (x, y, r, h) in teeth:
+            rot = rng.uniform(0, 1.2)
+            cone((x, y, 0), r, h, p["rock"], segs=5, rot=rot, shade=(p["rock_light"], p["rock_dark"]))
+            if snow:
+                k = 0.36
+                cone((x, y, h * (1 - k) + 0.01), r * k + 0.02, h * k, p["snow"], segs=5, rot=rot, shade=(p["snow"], p["snow_dark"]))
+    return build
+
+
+# jags toward the three front neighbours (S, SE, SW), two shapes each, plain and snowy
+for _d, _deg in (("s", 270), ("se", 330), ("sw", 210)):
+    for _v in (0, 1):
+        FEATURES[f"jag_{_d}_{_v}"] = feat_jag(_deg, False, _v)
+        FEATURES[f"jag_snow_{_d}_{_v}"] = feat_jag(_deg, True, _v)
+
+
 def main():
     a = args()
     W = a["size"]
@@ -597,7 +634,7 @@ def main():
             H = face + (MAX_TIER + 1) * tier
             ax, ay = W // 2, face // 2
         else:
-            H = W * 2 if name in CREATURE_SCALE else W * 3 // 2
+            H = W * 2 if name in CREATURE_SCALE or name.startswith(("mountain", "jag")) else W * 3 // 2
             ax, ay = W // 2, H - face // 2
         setup_camera(W, H, ax, ay)
         render(os.path.join(out, kind, name + ".png"))

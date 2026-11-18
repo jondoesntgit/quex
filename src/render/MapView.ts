@@ -343,13 +343,15 @@ export class MapView {
       const thing = things.get(i)
       // forests, mountains and hills come in three shapes, picked per hex so ranges don't look stamped
       const variant = ((i * 2654435761) >>> 16) % 3
-      const natural = land!.feature
+      // hills are the raised ground itself: no mounds drawn on top
+      const natural = land!.feature && land!.feature !== 'hills'
         ? (variant && this.atlas.tex(`f_${land!.feature}_v${variant}`) ? `f_${land!.feature}_v${variant}` : `f_${land!.feature}`)
         : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
       const layers: { name: string; alpha: number; dy: number }[] = []
-      if (dug) layers.push({ name: natural!, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
+      if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
+      else if (dug) layers.push({ name: 'f_mine', alpha: thing!.alpha ?? 1, dy: 0 })
       else if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
       else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
       for (const l of layers) {
@@ -369,6 +371,33 @@ export class MapView {
           if (animate) this.ambient.add(cx, cy, () => [[this.ambient.field(cx, cy, i + 0.5), zf]])
         }
       }
+    }
+
+    // Mountain ranges: a jagged ridge on the edge between each pair of
+    // neighbouring mountain hexes, drawn just before the front hex (so its
+    // peak and anything in front still cover it), at the lower hex's ground.
+    for (const i of order) {
+      const a = world.cells[i]
+      if (!revealed.has(i) || !MOUNTAINS.has(a.feature ?? '')) continue
+      const pa = hexToPixel(a.col, a.row, W)
+      neighbours(a.col, a.row).forEach(([nc, nr], k) => {
+        if (k < 1 || k > 3 || nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
+        const j = idx(nc, nr)
+        const b = world.cells[j]
+        if (!revealed.has(j) || !MOUNTAINS.has(b.feature ?? '') || rank[j] < 0) return
+        const snow = a.feature === 'mountain_snow' || b.feature === 'mountain_snow'
+        const v = ((i * 73856093) ^ (j * 19349663)) >>> 0
+        const f = this.atlas.tex(`f_jag${snow ? '_snow' : ''}_${JAG_DIR[k]}_${v % 2}`)
+        if (!f) return
+        const pb = hexToPixel(nc, nr, W)
+        const sp = new Sprite(f.texture)
+        sp.cullable = true
+        sp.anchor.set(f.frame.ax / f.frame.w, f.frame.ay / f.frame.h)
+        sp.x = Math.round((pa.x + pb.x) / 2)
+        sp.y = Math.round((pa.y + pb.y) / 2 - Math.min(a.tier, b.tier) * TP)
+        sp.zIndex = z(j, -0.1)
+        this.cells.addChild(sp)
+      })
     }
 
     // Territory borders: dashed, Civilization-style, and part of the painter's
@@ -734,6 +763,9 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */
 const WATER = new Set(['deep', 'ocean', 'shallow'])
+const MOUNTAINS = new Set(['mountain', 'mountain_snow'])
+/** neighbour index (hex.ts order NE, SE, S, SW, NW, N) -> jag sprite direction */
+const JAG_DIR: Record<number, string> = { 1: 'se', 2: 's', 3: 'sw' }
 
 /** A hex's slightly off-centre middle, so roads and rivers bend a little (stable per hex). */
 function bendPoint(seed: number, cx: number, cy: number, W: number): [number, number] {
