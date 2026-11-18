@@ -242,26 +242,54 @@ export class MapView {
       }
     }
 
-    // territory borders + selection on top
-    const g = new Graphics()
+    // Territory borders: dashed, Civilization-style, and part of the painter's
+    // order. Each border hex draws its outside edges at its own height just
+    // above its ground (z = rank*4 + 0.5), so its own trees, mountains and
+    // houses, nearer hexes and villagers all cover the line. Where border hexes
+    // of different heights meet at a corner, a dashed stroke runs down the
+    // cliff corner between them; it sorts with the hex further back, so it
+    // shows on a visible cliff face and hides behind a taller hex in front.
     for (const v of Object.values(state.villages)) {
-      const mine = v.playerId === viewer
+      const color = v.playerId === viewer ? 0xfff070 : 0xff90c0
       const terr = new Set(territoryCells(world, v))
+      const ends = new Map<string, { x: number; y: number; cell: number }[]>() // ground-plane corner -> drawn ends
       for (const i of terr) {
         const cell = world.cells[i]
-        if (!revealed.has(i)) continue
+        if (!revealed.has(i) || rank[i] < 0) continue
         const p = hexToPixel(cell.col, cell.row, W)
-        const cy = p.y - cell.tier * TP
-        const corners = hexCorners(p.x, cy, W)
+        const lift = cell.tier * TP
+        const corners = hexCorners(p.x, p.y - lift, W)
+        let bg: Graphics | null = null
         neighbours(cell.col, cell.row).forEach(([nc, nr], k) => {
           const ni = nr * world.width + nc
           if (terr.has(ni)) return
           const [a, b] = EDGE_CORNERS[k]
-          g.moveTo(corners[a][0] + 0.5, corners[a][1] + 0.5).lineTo(corners[b][0] + 0.5, corners[b][1] + 0.5)
+          bg ??= new Graphics()
+          dashed(bg, corners[a][0], corners[a][1], corners[b][0], corners[b][1], color)
+          for (const c of [corners[a], corners[b]]) {
+            const key = `${Math.round(c[0])},${Math.round(c[1] + lift)}`
+            const list = ends.get(key)
+            const e = { x: c[0], y: c[1], cell: i }
+            if (list) list.push(e)
+            else ends.set(key, [e])
+          }
         })
+        if (bg) { (bg as Graphics).zIndex = z(i, 0.5); this.cells.addChild(bg) }
       }
-      g.stroke({ width: 1, color: mine ? 0xfff070 : 0xff90c0, alpha: 1 })
+      for (const list of ends.values()) {
+        if (list.length < 2) continue
+        const ys = list.map((e) => e.y)
+        const top = Math.min(...ys), bottom = Math.max(...ys)
+        if (bottom - top < 0.5) continue
+        const back = list.reduce((m, e) => (rank[e.cell] < rank[m.cell] ? e : m))
+        const cg = new Graphics()
+        dashed(cg, list[0].x, top, list[0].x, bottom, color)
+        cg.zIndex = z(back.cell, 0.5)
+        this.cells.addChild(cg)
+      }
     }
+    // selection and highlights stay on top of everything
+    const g = new Graphics()
     // highlighted hexes (e.g. the spot chosen for a new village): gold wash + bold outline;
     // a linked hex gets the same treatment in pink
     const marks: [number, number, number][] = [...hl].map((i) => [i, 0xffe040, 0xfff6c0])
@@ -497,6 +525,23 @@ export class MapView {
 function visibleSet(s: SceneInput): Set<number> {
   if (s.showAll || !s.viewer) return new Set(s.world.cells.map((_, i) => i))
   return new Set(s.state.revealed)
+}
+
+/** A chunky 2 px dashed line (3 on, 2 off), pixel-snapped, with a dark
+ *  1 px shadow under each dash so it reads on light and dark ground. */
+function dashed(g: Graphics, x0: number, y0: number, x1: number, y1: number, color: number) {
+  const len = Math.hypot(x1 - x0, y1 - y0)
+  if (len < 0.5) return
+  const ux = (x1 - x0) / len, uy = (y1 - y0) / len
+  const ON = 3, OFF = 2
+  for (let d = 0; d < len; d += ON + OFF) {
+    const e = Math.min(len, d + ON)
+    for (let t = d; t < e; t += 1) {
+      const x = Math.round(x0 + ux * t), y = Math.round(y0 + uy * t)
+      g.rect(x, y + 1, 2, 1).fill({ color: 0x141424, alpha: 0.45 })
+      g.rect(x, y, 2, 1).fill(color)
+    }
+  }
 }
 
 /** Zoom levels: below 1 shrinks the scene to see the whole continent. */
