@@ -336,10 +336,34 @@ export class MapView {
       g.ellipse(cx, cy, w + 1, Math.ceil(w / 2) + 1).fill(edge).ellipse(cx, cy, w, Math.ceil(w / 2)).fill(dirt)
       return g
     }
-    for (const [x, y] of ends) g.moveTo(cx, cy).lineTo(x, y)
-    g.stroke({ width: w + 2, color: edge, cap: 'round', join: 'round' })
-    for (const [x, y] of ends) g.moveTo(cx, cy).lineTo(x, y)
-    g.stroke({ width: w, color: dirt, cap: 'round', join: 'round' })
+    // Each hex draws its half of every road segment, from its centre to the
+    // shared edge, with flat (butt) ends: a round cap there would paint its
+    // dark rim across the neighbour's dirt. Halves run 2 px past the edge so
+    // the next hex's tile outline never shows through the join (that overlap is
+    // the same dirt colour). All rims go down first, then all dirt, so no rim
+    // ever lands on dirt. The centre gets a round patch so bends look smooth,
+    // and a dead end gets a rounded tip.
+    const rim = (w + 2) / 2, core = w / 2
+    const OVER = 2
+    const segs = ends.map(([x, y]) => {
+      const len = Math.hypot(x - cx, y - cy) || 1
+      return [x + ((x - cx) / len) * OVER, y + ((y - cy) / len) * OVER] as [number, number]
+    })
+    let tip: [number, number] | null = null
+    if (ends.length === 1 && !hubs.has(i)) {
+      const [x, y] = ends[0]
+      const len = Math.hypot(x - cx, y - cy) || 1
+      tip = [cx - ((x - cx) / len) * core * 0.6, cy - ((y - cy) / len) * core * 0.6]
+    }
+    const paint = (width: number, r: number, color: number) => {
+      for (const [x, y] of segs) g.moveTo(cx, cy).lineTo(x, y)
+      if (tip) g.moveTo(tip[0], tip[1]).lineTo(cx, cy)
+      g.stroke({ width, color, cap: 'butt' })
+      g.circle(cx, cy, r).fill(color)
+      if (tip) g.circle(tip[0], tip[1], r).fill(color)
+    }
+    paint(w + 2, rim, edge)
+    paint(w, core, dirt)
     for (const st of steps) {
       g.rect(st.x - 2, st.y0, 5, st.y1 - st.y0).fill(edge)
       for (let y = st.y0 + 1; y < st.y1; y += 2) g.rect(st.x - 1, y, 3, 1).fill(dirt)
@@ -448,10 +472,22 @@ export class MapView {
     }
     c.addEventListener('pointerup', up)
     c.addEventListener('pointercancel', up)
+    // Wheel and trackpad: a Mac trackpad sends dozens of small wheel events per
+    // swipe, so collect them and zoom one level per notch-sized amount, at most
+    // every 260 ms. Pinch (ctrlKey) gives small deltas, so it needs less.
+    let wheelAcc = 0, lastStep = 0
     c.addEventListener('wheel', (e) => {
       e.preventDefault()
+      const px = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
+      const NOTCH = e.ctrlKey ? 30 : 160
+      if (Math.sign(px) !== Math.sign(wheelAcc)) wheelAcc = 0
+      wheelAcc += px
+      const now = performance.now()
+      if (Math.abs(wheelAcc) < NOTCH || now - lastStep < 260) return
       const r = c.getBoundingClientRect()
-      this.zoomStep(e.deltaY < 0 ? 1 : -1, { x: e.clientX - r.left, y: e.clientY - r.top })
+      this.zoomStep(wheelAcc < 0 ? 1 : -1, { x: e.clientX - r.left, y: e.clientY - r.top })
+      wheelAcc = 0
+      lastStep = now
     }, { passive: false })
   }
 }
