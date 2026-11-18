@@ -327,9 +327,16 @@ export class MapView {
       }
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
         this.cells.addChild(this.road(world, i, cx, cy, roadSet, hubs)).zIndex = z(i, 1)
-      if (cell.riverTo !== -1 && cell.tier > 0) this.cells.addChild(this.river(world, i, cx, cy)).zIndex = z(i, 1)
+      if (cell.riverTo !== -1 && cell.tier > 0) {
+        this.cells.addChild(this.river(world, i, cx, cy)).zIndex = z(i, 1)
+        this.riverLife(world, i, cx, cy, revealed, z)
+      }
       const thing = things.get(i)
-      const natural = land!.feature ? `f_${land!.feature}` : null
+      // forests, mountains and hills come in three shapes, picked per hex so ranges don't look stamped
+      const variant = ((i * 2654435761) >>> 16) % 3
+      const natural = land!.feature
+        ? (variant && this.atlas.tex(`f_${land!.feature}_v${variant}`) ? `f_${land!.feature}_v${variant}` : `f_${land!.feature}`)
+        : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
       const layers: { name: string; alpha: number; dy: number }[] = []
@@ -348,7 +355,6 @@ export class MapView {
         s.alpha = l.alpha
         s.zIndex = z(i, 3)
         this.cells.addChild(s)
-        if (TREES.test(l.name) && l.alpha === 1) this.ambient.tree(s, cx, cy, i)
         if (l.name === 'f_farm' && l.alpha === 1) {
           const g = this.ambient.field(cx, cy, i + 0.5)
           g.zIndex = z(i, 3.2); this.cells.addChild(g)
@@ -485,23 +491,23 @@ export class MapView {
     // the same dirt colour). All rims go down first, then all dirt, so no rim
     // ever lands on dirt. The centre gets a round patch so bends look smooth,
     // and a dead end gets a rounded tip.
+    // Legs bend gently through a slightly off-centre middle (hubs keep the
+    // true centre so roads meet the building).
     const rim = (w + 2) / 2, core = w / 2
     const OVER = 2
-    const segs = ends.map(([x, y]) => {
-      const len = Math.hypot(x - cx, y - cy) || 1
-      return [x + ((x - cx) / len) * OVER, y + ((y - cy) / len) * OVER] as [number, number]
-    })
+    const mid = hubs.has(i) ? [cx, cy] as [number, number] : bendPoint(i, cx, cy, W)
+    const legs = ends.map((e) => curvedLeg(mid, [cx, cy], e, OVER))
     let tip: [number, number] | null = null
     if (ends.length === 1 && !hubs.has(i)) {
       const [x, y] = ends[0]
-      const len = Math.hypot(x - cx, y - cy) || 1
-      tip = [cx - ((x - cx) / len) * core * 0.6, cy - ((y - cy) / len) * core * 0.6]
+      const len = Math.hypot(x - mid[0], y - mid[1]) || 1
+      tip = [mid[0] - ((x - mid[0]) / len) * core * 0.6, mid[1] - ((y - mid[1]) / len) * core * 0.6]
     }
     const paint = (width: number, r: number, color: number) => {
-      for (const [x, y] of segs) g.moveTo(cx, cy).lineTo(x, y)
-      if (tip) g.moveTo(tip[0], tip[1]).lineTo(cx, cy)
-      g.stroke({ width, color, cap: 'butt' })
-      g.circle(cx, cy, r).fill(color)
+      for (const leg of legs) polyline(g, leg)
+      if (tip) g.moveTo(tip[0], tip[1]).lineTo(mid[0], mid[1])
+      g.stroke({ width, color, cap: 'butt', join: 'round' })
+      g.circle(mid[0], mid[1], r).fill(color)
       if (tip) g.circle(tip[0], tip[1], r).fill(color)
     }
     paint(w + 2, rim, edge)
@@ -513,35 +519,71 @@ export class MapView {
     return g
   }
 
-  private river(world: World, i: number, cx: number, cy: number): Graphics {
-    const W = this.W
-    const TP = this.atlas.meta.tier
+  /** A river hex's shape: its width, the edge where it leaves (the lip), and
+   *  its legs as curves through a slightly off-centre middle. Each leg runs from
+   *  an edge (upstream legs first, then the downstream one from the middle). */
+  private riverShape(world: World, i: number, cx: number, cy: number) {
+    const W = this.W, TP = this.atlas.meta.tier
     const cell = world.cells[i]
-    const g = new Graphics()
     const width = Math.max(2, Math.round(W / 24) + Math.min(3, Math.floor(cell.riverFlow / 6)))
-    const pts: [number, number][] = []
-    // segment toward the downstream hex, ending at the shared edge
     const down = world.cells[cell.riverTo]
     const dp = hexToPixel(down.col, down.row, W)
-    pts.push([(cx + dp.x) / 2, (cy + dp.y - cell.tier * TP) / 2])
-    // segments from upstream hexes
+    const p = hexToPixel(cell.col, cell.row, W)
+    const lip: [number, number] = [Math.round((p.x + dp.x) / 2), Math.round((p.y + dp.y) / 2 - cell.tier * TP)]
     const ups: [number, number][] = []
     for (const [nc, nr] of neighbours(cell.col, cell.row)) {
       if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
       const ni = nr * world.width + nc
       if (world.cells[ni].riverTo === i) {
         const up = hexToPixel(nc, nr, W)
-        ups.push([(cx + up.x) / 2, (cy + up.y - cell.tier * TP) / 2])
+        ups.push([Math.round((p.x + up.x) / 2), Math.round((p.y + up.y) / 2 - cell.tier * TP)])
       }
     }
-    const draw = (color: number, w: number) => {
-      g.moveTo(cx, cy).lineTo(pts[0][0], pts[0][1])
-      for (const u of ups) g.moveTo(u[0], u[1]).lineTo(cx, cy)
-      g.stroke({ width: w, color, cap: 'round', join: 'round' })
+    const mid = bendPoint(i + 0.5, cx, cy, W)
+    const OVER = 2
+    const downLeg = curvedLeg(mid, [cx, cy], lip, OVER)
+    const upLegs = ups.map((u) => curvedLeg(mid, [cx, cy], u, OVER).reverse())
+    return { width, lip, mid, downLeg, upLegs }
+  }
+
+  private river(world: World, i: number, cx: number, cy: number): Graphics {
+    const { width, mid, downLeg, upLegs } = this.riverShape(world, i, cx, cy)
+    const g = new Graphics()
+    // Flat ends that run 2 px past each edge, round only in the middle, and all
+    // of the dark banks before any water: no dark line where hexes meet.
+    const paint = (color: number, w: number) => {
+      for (const leg of [downLeg, ...upLegs]) polyline(g, leg)
+      g.stroke({ width: w, color, cap: 'butt', join: 'round' })
+      g.circle(mid[0], mid[1], w / 2).fill(color)
     }
-    draw(0x2868b8, width + 2)
-    draw(0x50a8f0, width)
+    paint(0x2868b8, width + 2)
+    paint(0x50a8f0, width)
     return g
+  }
+
+  /** Flowing current on a river hex, and a waterfall where it drops off a cliff toward the viewer. */
+  private riverLife(world: World, i: number, cx: number, cy: number, revealed: Set<number>, z: (i: number, layer: number) => number) {
+    const TP = this.atlas.meta.tier
+    const cell = world.cells[i]
+    const down = world.cells[cell.riverTo]
+    const { width, lip, downLeg, upLegs } = this.riverShape(world, i, cx, cy)
+    // trim the 2 px overlap so the current stops at the edge and picks up in the next hex
+    const trimEnd = (pts: [number, number][]) => [...pts.slice(0, -1), lip] as [number, number][]
+    const main = trimEnd(downLeg)
+    const legs: [number, number][][] = upLegs.length
+      ? upLegs.map((u, k) => (k === 0 ? [...u.slice(1, -1), ...main] : u.slice(1)))
+      : [main]
+    legs.forEach((pts, k) => {
+      for (const n of this.ambient.stream(pts, width, i * 7 + k)) { n.zIndex = z(i, 1.1); this.cells.addChild(n) }
+    })
+    // a waterfall shows only on the cliff faces facing us (the hex below is SE, S or SW)
+    const drop = cell.tier - down.tier
+    const k = neighbours(cell.col, cell.row).findIndex(([nc, nr]) => nr * world.width + nc === cell.riverTo)
+    if (drop > 0 && k >= 1 && k <= 3 && revealed.has(cell.riverTo)) {
+      const [col, splash] = this.ambient.fall(lip[0], lip[1], drop * TP, width, i)
+      for (const n of col) { n.zIndex = z(i, 1.2); this.cells.addChild(n) }
+      for (const n of splash) { n.zIndex = z(cell.riverTo, 1.2); this.cells.addChild(n) }
+    }
   }
 
   // ---------------------------------------------------------------- input
@@ -673,7 +715,35 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */
 const WATER = new Set(['deep', 'ocean', 'shallow'])
-const TREES = /^f_(pine|oak)/
+
+/** A hex's slightly off-centre middle, so roads and rivers bend a little (stable per hex). */
+function bendPoint(seed: number, cx: number, cy: number, W: number): [number, number] {
+  const h1 = Math.sin(seed * 12.9898) * 43758.5453, h2 = Math.sin(seed * 78.233) * 12543.123
+  const a = h1 - Math.floor(h1), b = h2 - Math.floor(h2)
+  return [cx + (a - 0.5) * W * 0.16, cy + (b - 0.5) * W * 0.08]
+}
+
+/** From the bent middle `m` out to edge midpoint `e`: a quadratic curve that
+ *  meets the edge heading straight across it (along centre -> edge), so the
+ *  neighbour's half lines up; then `over` px past the edge. Returns points. */
+function curvedLeg(m: [number, number], c: [number, number], e: [number, number], over: number): [number, number][] {
+  const dx = e[0] - c[0], dy = e[1] - c[1]
+  const len = Math.hypot(dx, dy) || 1
+  const q: [number, number] = [e[0] - dx * 0.5, e[1] - dy * 0.5]
+  const out: [number, number][] = []
+  const N = 6
+  for (let k = 0; k <= N; k++) {
+    const t = k / N, u = 1 - t
+    out.push([u * u * m[0] + 2 * u * t * q[0] + t * t * e[0], u * u * m[1] + 2 * u * t * q[1] + t * t * e[1]])
+  }
+  out.push([e[0] + (dx / len) * over, e[1] + (dy / len) * over])
+  return out
+}
+
+function polyline(g: Graphics, pts: [number, number][]) {
+  g.moveTo(pts[0][0], pts[0][1])
+  for (let k = 1; k < pts.length; k++) g.lineTo(pts[k][0], pts[k][1])
+}
 
 function hexCorners(cx: number, cy: number, W: number): [number, number][] {
   const hw = W / 2, qw = W / 4, hh = W / 4

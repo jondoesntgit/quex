@@ -10,7 +10,7 @@ tall as it is wide (W x W/2) and each elevation tier is W/8 px of cliff.
 Geometry is built from primitives in code (no .blend files needed) so the whole
 art set is reproducible from this script + palette.json.
 """
-import bpy, bmesh, json, math, os, sys
+import bpy, bmesh, json, math, os, random, sys
 from mathutils import Vector, Matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -224,41 +224,68 @@ def terrain(name):
     return lambda W: hex_column(t["top"], t["sides"], (MAX_TIER + 1) * 0.30619)
 
 
-def feat_trees(kind, n):
+def feat_trees(kind, n, v=0):
+    """v = 0 is the original layout; v > 0 shuffles spacing, sizes and (in bigger
+    stands) slips in a tree of the other kind, so forests don't repeat."""
     p = PAL["features"]
     spots = {1: [(0, 0)], 2: [(-0.35, 0.1), (0.3, -0.15)],
              3: [(-0.45, 0.15), (0.4, 0.2), (0.0, -0.3)],
              5: [(-0.5, 0.2), (0.05, 0.35), (0.5, 0.15), (-0.25, -0.3), (0.3, -0.35)]}[n]
+    rng = random.Random(f"{kind}{n}:{v}")
+    trees = []
+    for k, (x, y) in enumerate(spots):
+        if v:
+            x += rng.uniform(-0.13, 0.13)
+            y += rng.uniform(-0.1, 0.1)
+        s = rng.uniform(0.78, 1.18) if v else 1.0
+        other = v == 2 and n >= 3 and k == rng.randrange(n)
+        trees.append((x, y, s, ("oak" if kind == "pine" else "pine") if other else kind))
+    trees.sort(key=lambda t: -t[1])  # back to front
 
     def build(W):
-        for (x, y) in spots:
-            box((x, y, 0), (0.08, 0.08, 0.15), p["trunk"], (p["trunk"], p["trunk_dark"], p["trunk_dark"]))
-            if kind == "pine":
-                cone((x, y, 0.12), 0.26, 0.75, p["pine"], segs=6, shade=(p["pine_light"], p["pine_dark"]))
+        for (x, y, s, kd) in trees:
+            box((x, y, 0), (0.08, 0.08, 0.15 * s), p["trunk"], (p["trunk"], p["trunk_dark"], p["trunk_dark"]))
+            if kd == "pine":
+                cone((x, y, 0.12 * s), 0.26 * s, 0.75 * s, p["pine"], segs=6, rot=0.2 * v, shade=(p["pine_light"], p["pine_dark"]))
             else:
-                cone((x, y, 0.12), 0.3, 0.25, p["leaf"], segs=6, r_top=0.32, shade=(p["leaf_light"], p["leaf_dark"]))
-                cone((x, y, 0.37), 0.32, 0.25, p["leaf"], segs=6, shade=(p["leaf_light"], p["leaf_dark"]))
+                cone((x, y, 0.12 * s), 0.3 * s, 0.25 * s, p["leaf"], segs=6, r_top=0.32 * s, rot=0.3 * v, shade=(p["leaf_light"], p["leaf_dark"]))
+                cone((x, y, 0.37 * s), 0.32 * s, 0.25 * s, p["leaf"], segs=6, rot=0.3 * v, shade=(p["leaf_light"], p["leaf_dark"]))
     return build
 
 
-def feat_mountain(snow):
+MOUNTAIN_SHAPES = [
+    # one big peak with two shoulders (the original)
+    [(0.05, 0.15, 0.7, 1.4), (-0.5, -0.15, 0.45, 0.8), (0.55, -0.2, 0.42, 0.75)],
+    # twin peaks with a small foothill in front
+    [(-0.28, 0.12, 0.58, 1.2), (0.33, 0.05, 0.55, 1.02), (0.05, -0.38, 0.32, 0.5)],
+    # a tall sharp spire over a long low ridge
+    [(-0.1, 0.18, 0.6, 1.6), (0.45, 0.05, 0.45, 0.65), (-0.6, -0.1, 0.32, 0.45), (0.2, -0.35, 0.3, 0.4)],
+]
+HILL_SHAPES = [
+    [(-0.35, 0.15, 0.45, 0.35), (0.35, -0.1, 0.5, 0.4)],
+    [(-0.45, 0.05, 0.38, 0.28), (0.1, 0.25, 0.42, 0.38), (0.42, -0.22, 0.36, 0.3)],
+    [(0.0, 0.08, 0.68, 0.45), (-0.55, -0.2, 0.3, 0.22)],
+]
+
+
+def feat_mountain(snow, v=0):
     p = PAL["features"]
 
     def build(W):
-        for (x, y, r, h) in [(0.05, 0.15, 0.7, 1.4), (-0.5, -0.15, 0.45, 0.8), (0.55, -0.2, 0.42, 0.75)]:
-            cone((x, y, 0), r, h, p["rock"], segs=5, rot=0.3, shade=(p["rock_light"], p["rock_dark"]))
+        for (x, y, r, h) in MOUNTAIN_SHAPES[v]:
+            cone((x, y, 0), r, h, p["rock"], segs=5, rot=0.3 + 0.4 * v, shade=(p["rock_light"], p["rock_dark"]))
             if snow:
                 k = 0.38
-                cone((x, y, h * (1 - k) + 0.01), r * k + 0.02, h * k, p["snow"], segs=5, rot=0.3,
+                cone((x, y, h * (1 - k) + 0.01), r * k + 0.02, h * k, p["snow"], segs=5, rot=0.3 + 0.4 * v,
                      shade=(p["snow"], p["snow_dark"]))
     return build
 
 
-def feat_hills():
+def feat_hills(v=0):
     p = PAL["features"]
 
     def build(W):
-        for (x, y, r, h) in [(-0.35, 0.15, 0.45, 0.35), (0.35, -0.1, 0.5, 0.4)]:
+        for (x, y, r, h) in HILL_SHAPES[v]:
             cone((x, y, 0), r, h, p["hill"], segs=8, r_top=r * 0.45, shade=(p["hill_light"], p["hill_dark"]))
     return build
 
@@ -522,6 +549,14 @@ FEATURES = {
     "lair": feat_lair(), "mine": feat_mine(), "farm": feat_farm(), "dock": feat_dock(),
     "reeds": feat_reeds(), "cactus": feat_cactus(),
 }
+# variants (f_<name>_v1, f_<name>_v2) so forests and ranges don't look stamped
+for _v in (1, 2):
+    for _k in ("pine", "oak"):
+        for _n in (1, 3, 5):
+            FEATURES[f"{_k}{_n}_v{_v}"] = feat_trees(_k, _n, _v)
+    FEATURES[f"mountain_v{_v}"] = feat_mountain(False, _v)
+    FEATURES[f"mountain_snow_v{_v}"] = feat_mountain(True, _v)
+    FEATURES[f"hills_v{_v}"] = feat_hills(_v)
 
 
 def main():

@@ -1,5 +1,5 @@
-/** Ambient life on the map: surf on the shores, glints on open water, trees
- *  swaying and fields shimmering as gusts of wind roll across the land.
+/** Ambient life on the map: surf on the shores, ripples and glints on open water,
+ *  flowing streams and waterfalls, and fields shimmering as gusts of wind roll across the land.
  *  Everything is drawn with plain sprites and Graphics, so it looks the same
  *  on every renderer, and it's skipped when zoomed far out, off screen, or
  *  when the player has asked for reduced motion. Purely cosmetic. */
@@ -9,6 +9,8 @@ const FOAM = 0xf4fbff
 const GLINT = 0xffffff
 const RIPPLE_SHALLOW = 0xc8ecff
 const RIPPLE_DEEP = 0x8cc4f4
+const STREAM_FLECK = 0xc8ecff
+const FALL_STREAK = 0xe4f6ff
 const SHIMMER = 0xfff2b8
 
 /** 0..1: how hard the wind blows at x (world px) at time t (s). Gusts travel east. */
@@ -48,9 +50,12 @@ function pixelLine(g: Graphics, x0: number, y0: number, x1: number, y1: number) 
 interface Ripple { s: Sprite; cx: number; y: number; half: number; x0: number; speed: number; phase: number; len: number }
 /** top layer: a small bright spot that grows and shrinks by a pixel */
 interface Spark { s: Sprite; x: number; y: number; phase: number; period: number }
+/** a fleck of current flowing down a stream, along a polyline */
+interface Fleck { s: Sprite; pts: [number, number][]; cum: number[]; len: number; off: number; speed: number; side: number }
+/** a streak of water dropping down a waterfall */
+interface Drop { s: Sprite; x: number; top: number; h: number; off: number; speed: number }
 /** foam rising off the surf like smoke */
 interface Puff { s: Sprite; x: number; y: number; dx: number; phase: number; period: number }
-interface Tree { s: Sprite; x: number; y: number; amp: number; phase: number }
 interface Field { g: Graphics; x: number; y: number }
 
 export class Ambient {
@@ -58,8 +63,10 @@ export class Ambient {
   private ripples: Ripple[] = []
   private sparks: Spark[] = []
   private puffs: Puff[] = []
+  private flecks: Fleck[] = []
+  private drops: Drop[] = []
+  private splash: Puff[] = []
   private puffSurf = new Map<Surf, Puff[]>()
-  private trees: Tree[] = []
   private fields: Field[] = []
   private reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   private on = true
@@ -74,7 +81,51 @@ export class Ambient {
   }
 
   /** The scene is being rebuilt: forget the old pieces (their owner destroys them). */
-  reset() { this.surf = []; this.trees = []; this.fields = []; this.ripples = []; this.sparks = []; this.puffs = []; this.puffSurf.clear() }
+  reset() { this.surf = []; this.fields = []; this.ripples = []; this.sparks = []; this.puffs = []; this.puffSurf.clear(); this.flecks = []; this.drops = []; this.splash = [] }
+
+  /** Current on a stream: light flecks drifting downstream along `pts` (upstream first). */
+  stream(pts: [number, number][], width: number, seed: number): Sprite[] {
+    const cum = [0]
+    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]))
+    const len = cum[cum.length - 1]
+    if (len < 4) return []
+    const n = Math.max(1, Math.round(len / 9))
+    const out: Sprite[] = []
+    const speed = 5 + hash(seed, 150) * 2
+    for (let k = 0; k < n; k++) {
+      const s = this.dot(STREAM_FLECK, 0.9)
+      s.width = 2
+      this.flecks.push({ s, pts, cum, len, off: (k + hash(seed, k + 160) * 0.5) * (len / n), speed, side: width > 3 ? (k % 2 ? 1 : -1) : 0 })
+      out.push(s)
+    }
+    return out
+  }
+
+  /** A waterfall down a cliff face: x at the lip, from y `top` down `h` pixels. Returns [column nodes, splash nodes]. */
+  fall(x: number, top: number, h: number, width: number, seed: number): [Container[], Sprite[]] {
+    const w = Math.max(2, width)
+    const x0 = Math.round(x - w / 2), y0 = Math.round(top)
+    const col = new Graphics()
+    col.rect(x0 - 1, y0, w + 2, h).fill({ color: 0x2868b8 })
+    col.rect(x0, y0, w, h).fill({ color: 0x50a8f0 })
+    col.cullable = true
+    const nodes: Container[] = [col]
+    // streaks falling down the column, a pixel at a time
+    for (let k = 0; k < Math.max(2, Math.round(w * h / 24)); k++) {
+      const s = this.dot(FALL_STREAK, 0.9)
+      s.height = 2
+      this.drops.push({ s, x: x0 + Math.floor(hash(seed, k + 170) * w), top: y0, h, off: hash(seed, k + 180) * h, speed: 14 + hash(seed, k + 190) * 8 })
+      nodes.push(s)
+    }
+    // foam where it lands
+    const splash: Sprite[] = []
+    for (let k = 0; k < 3; k++) {
+      const s = this.dot(FOAM, 0)
+      this.splash.push({ s, x: x0 + Math.floor(hash(seed, k + 200) * w), y: y0 + h, dx: k === 0 ? -1 : k === 1 ? 1 : 0, phase: hash(seed, k + 210), period: 0.9 + hash(seed, k + 220) * 0.6 })
+      splash.push(s)
+    }
+    return [nodes, splash]
+  }
 
   private dot(color: number, alpha = 1): Sprite {
     const s = new Sprite(Texture.WHITE)
@@ -159,11 +210,6 @@ export class Ambient {
     return [rim, ...waves, ...puffs]
   }
 
-  /** A tree sprite (anchored at its foot) that sways in the wind. */
-  tree(s: Sprite, x: number, y: number, seed: number) {
-    this.trees.push({ s, x, y, amp: 0.05 + hash(seed, 8.8) * 0.03, phase: hash(seed, 4.4) * 6.28 })
-  }
-
   /** Light catching a field or meadow as a gust passes. Returns the node to add. */
   field(cx: number, cy: number, seed: number, rows = 3): Graphics {
     const g = new Graphics()
@@ -190,7 +236,9 @@ export class Ambient {
         for (const r of this.ripples) r.s.visible = false
         for (const sp of this.sparks) sp.s.visible = false
         for (const p of this.puffs) p.s.visible = false
-        for (const tr of this.trees) tr.s.skew.x = 0
+        for (const f of this.flecks) f.s.visible = false
+        for (const d of this.drops) d.s.visible = false
+        for (const p of this.splash) p.s.visible = false
         for (const f of this.fields) f.g.visible = false
         this.on = false
       }
@@ -201,6 +249,9 @@ export class Ambient {
       for (const r of this.ripples) r.s.visible = true
       for (const sp of this.sparks) sp.s.visible = true
       for (const p of this.puffs) p.s.visible = true
+      for (const f of this.flecks) f.s.visible = true
+      for (const d of this.drops) d.s.visible = true
+      for (const p of this.splash) p.s.visible = true
       for (const f of this.fields) f.g.visible = true
       this.on = true
     }
@@ -264,11 +315,35 @@ export class Ambient {
       sp.s.width = size * 2 - (size === 1 ? 0 : 1); sp.s.height = size === 2 ? 2 : 1
       sp.s.alpha = 0.95
     }
-    for (const tr of this.trees) {
-      if (tr.s.culled) continue
-      const w = gust(tr.x, tr.y, t)
-      // lean with the gust, plus a little flutter
-      tr.s.skew.x = -tr.amp * (0.25 + 0.75 * w) * (0.75 + 0.25 * Math.sin(t * 2.6 + tr.phase)) + tr.amp * 0.2 * Math.sin(t * 1.3 + tr.phase)
+    for (const f of this.flecks) {
+      if (f.s.culled) continue
+      // follow the stream downstream, landing on whole pixels
+      const a = (f.off + t * f.speed) % f.len
+      let k = 1
+      while (k < f.cum.length - 1 && f.cum[k] < a) k++
+      const [x0, y0] = f.pts[k - 1], [x1, y1] = f.pts[k]
+      const seg = f.cum[k] - f.cum[k - 1] || 1
+      const u = (a - f.cum[k - 1]) / seg
+      f.s.x = Math.round(x0 + (x1 - x0) * u - 1)
+      f.s.y = Math.round(y0 + (y1 - y0) * u) + f.side
+      // fade in and out at the ends so the current runs on into the next hex
+      f.s.alpha = 0.9 * Math.min(1, a / 3, (f.len - a) / 3)
+    }
+    for (const d of this.drops) {
+      if (d.s.culled) continue
+      const y = Math.floor((d.off + t * d.speed) % d.h)
+      d.s.x = d.x
+      d.s.y = d.top + y
+      d.s.height = Math.min(2, d.h - y)
+    }
+    for (const p of this.splash) {
+      if (p.s.culled) continue
+      // a little spray at the foot of the fall, puffing up and out
+      const v = ((t / p.period + p.phase) % 1 + 1) % 1
+      const step = Math.floor(v * 3)
+      p.s.x = p.x + p.dx * step
+      p.s.y = p.y - 1 - step
+      p.s.alpha = 0.9 * (1 - v)
     }
     for (const f of this.fields) {
       if (f.g.culled) continue
