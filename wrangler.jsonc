@@ -1,0 +1,11 @@
+// Cloudflare Workers static-assets deploy (Workers Builds, connected to GitHub).
+// Build: npm run build   Deploy: npx wrangler deploy   Preview: npx wrangler versions upload
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quex",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
