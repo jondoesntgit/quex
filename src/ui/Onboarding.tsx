@@ -108,7 +108,7 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
           )}
         </>
       )}
-      <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}>You can abandon your village any time and settle somewhere new, but that resets your progress.</p>
+      <p className="muted" style={{ margin: '8px 0 0' }}>You can abandon your village any time and settle somewhere new, but that resets your progress.</p>
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn" onClick={() => setStep('about')}>← Back</button>
         <button className="btn primary" disabled={!site || !!problem || !role} onClick={go}>Found village</button>

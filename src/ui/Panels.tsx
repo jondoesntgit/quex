@@ -173,7 +173,7 @@ function WaterTracker({ game, p, habit, date, editable }: { game: Game; p: Playe
               </span>
             ))}
           </div>
-          <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
+          <p className="muted" style={{ margin: '2px 0 0' }}>
             {(() => {
               const met = hist.filter((x) => x.n + 1e-9 >= goal.target).length
               return `Last 14 days: target met ${met === 1 ? 'once' : `${met} times`}${logged.length ? `, about ${fmt(avg)} ${goal.unit} a day on days you logged` : ''}.`

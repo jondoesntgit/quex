@@ -95,7 +95,7 @@ export function SignIn() {
               <input type="text" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
               {mode === 'code' ? (
                 <>
-                  <p className="muted" style={{ fontSize: 13 }}>We’ll email you a 6-digit code. New here? The same step creates your account.</p>
+                  <p className="muted">We’ll email you a 6-digit code. New here? The same step creates your account.</p>
                   <div className="row" style={{ justifyContent: 'flex-end' }}>
                     <button type="submit" className="btn primary" disabled={busy || !emailOk}>Email me a code</button>
                   </div>
@@ -104,7 +104,7 @@ export function SignIn() {
                 <>
                   <label>Password</label>
                   <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                  <p className="muted" style={{ fontSize: 13 }}>Forgot it, or never set one? Sign in with an email code, then set a password under Account.</p>
+                  <p className="muted">Forgot it, or never set one? Sign in with an email code, then set a password under Account.</p>
                   <div className="row" style={{ justifyContent: 'flex-end' }}>
                     <button type="button" className="btn" disabled={busy || !emailOk || !password} onClick={signUpPw}>Create account</button>
                     <button type="submit" className="btn primary" disabled={busy || !emailOk || !password}>Sign in</button>
@@ -187,7 +187,7 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
             <label>Parents & guardians</label>
             {guardians.length
               ? <p style={{ margin: '0 0 6px' }}>👪 {guardians.join(', ')} set and check off your tasks.</p>
-              : <p className="muted" style={{ margin: '0 0 6px', fontSize: 13 }}>Nobody yet. A parent or grandparent you add sets and checks off your tasks; you still choose your own actions and explore.</p>}
+              : <p className="muted" style={{ margin: '0 0 6px' }}>Nobody yet. A parent or grandparent you add sets and checks off your tasks; you still choose your own actions and explore.</p>}
             <button className="btn" onClick={parentLink}>+ Add a parent or guardian</button>
           </>
         )}
@@ -205,7 +205,7 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
             <input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} style={{ flex: 1 }} />
             <button type="submit" className="btn" disabled={!pw}>Save</button>
           </div>
-          {msg && <p className="muted" style={{ fontSize: 13 }}>{msg}</p>}
+          {msg && <p className="muted">{msg}</p>}
         </form>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, flexWrap: 'wrap' }}>
           <button className="btn" onClick={() => signOutAndClear(game)} title="Sign out and sign in as someone else on this device">Switch account</button>
@@ -246,7 +246,7 @@ export function ManageWard({ game, pid, onClose }: { game: Game; pid: string; on
             <input type="text" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} style={{ flex: 1 }} />
             <button type="submit" className="btn" disabled={!name.trim() || name.trim() === w.name}>Rename</button>
           </div>
-          {msg && <p className="muted" style={{ fontSize: 13 }}>{msg}</p>}
+          {msg && <p className="muted">{msg}</p>}
         </form>
       </div>
     </div>
