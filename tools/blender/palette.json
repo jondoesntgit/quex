@@ -196,6 +196,17 @@
   "cargo": "#e8c070",
   "cargo_light": "#f8e0a0",
   "cargo_dark": "#b89048",
-  "eye": "#f8f040"
+  "eye": "#f8f040",
+  "robe": "#8a4cc0",
+  "robe_light": "#b070e0",
+  "robe_dark": "#5a2e80",
+  "canvas": "#efe4cc",
+  "canvas_light": "#fff6e2",
+  "canvas_dark": "#c4b292",
+  "donkey": "#9a8878",
+  "donkey_light": "#b8a898",
+  "donkey_dark": "#6a5c4e",
+  "wheel": "#5a3a20",
+  "stripe": "#d04838"
  }
 }

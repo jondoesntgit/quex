@@ -470,13 +470,51 @@ def unit_caravan():
     return build
 
 
+def unit_trader(flip=False):
+    """Travelling merchant: a robed trader leading a donkey that pulls a covered
+    wagon. Built facing -x (screen left); flip=True builds the mirror image so
+    the right-facing sprite is lit from the same side, not just flipped."""
+    p = PAL["creatures"]
+    f = PAL["features"]
+    sx = -1 if flip else 1
+
+    def build(W):
+        X = lambda x: x * sx
+        # merchant, out in front, with a wide-brimmed hat and a walking staff
+        for dy in (-0.05, 0.05):
+            box((X(-0.92), dy, 0), (0.07, 0.07, 0.12), p["boots"], (p["boots"],) * 3)
+        cone((X(-0.92), 0, 0.08), 0.15, 0.3, p["robe"], segs=6, r_top=0.09, shade=(p["robe_light"], p["robe_dark"]))
+        blob((X(-0.92), 0, 0.38), 0.09, 0.16, p["skin"], (p["skin_light"], p["skin_dark"]))
+        cone((X(-0.92), 0, 0.5), 0.2, 0.02, p["robe_dark"], segs=8, r_top=0.2, shade=(p["robe_dark"], p["robe_dark"]))
+        cone((X(-0.92), 0, 0.52), 0.1, 0.12, p["robe"], segs=6, r_top=0.05, shade=(p["robe_light"], p["robe_dark"]))
+        box((X(-1.06), -0.06, 0), (0.035, 0.035, 0.62), p["club"], (p["club_light"], p["club"], p["club_dark"]))
+        # donkey
+        for dx in (-0.6, -0.36):
+            for dy in (-0.06, 0.06):
+                box((X(dx), dy, 0), (0.05, 0.05, 0.13), p["donkey_dark"], (p["donkey_dark"],) * 3)
+        box((X(-0.48), 0, 0.12), (0.34, 0.17, 0.15), p["donkey"], (p["donkey_light"], p["donkey"], p["donkey_dark"]))
+        box((X(-0.7), 0, 0.2), (0.13, 0.11, 0.12), p["donkey"], (p["donkey_light"], p["donkey"], p["donkey_dark"]))
+        for dy in (-0.035, 0.035):
+            box((X(-0.66), dy, 0.32), (0.03, 0.03, 0.09), p["donkey_dark"], (p["donkey_dark"],) * 3)
+        box((X(-0.3), 0, 0.14), (0.24, 0.025, 0.025), f["plank_dark"], (f["plank_dark"],) * 3)  # shafts
+        # covered wagon
+        box((X(0.18), 0, 0.12), (0.56, 0.36, 0.08), f["plank"], (f["plank"], f["plank_dark"], f["plank_dark"]))
+        box((X(0.18), 0, 0.2), (0.5, 0.32, 0.16), p["canvas"], (p["canvas_light"], p["canvas"], p["canvas_dark"]))
+        roof((X(0.18), 0, 0.36), (0.52, 0.34, 0.14), p["canvas_light"], p["canvas_dark"])
+        box((X(0.18), 0, 0.27), (0.5, 0.33, 0.035), p["stripe"], (p["stripe"],) * 3)
+        for dx in (-0.04, 0.4):
+            cone((X(dx), -0.2, 0.0), 0.12, 0.02, p["wheel"], segs=8, r_top=0.12)
+    return build
+
+
 # Real-world scale rules (hex = 2 units wide; pine 0.87 tall, oak 0.62):
 #   goblin < oak, human ~0.6, orc ~ tree, troll slightly > pine, dragon fits one hex.
-CREATURE_SCALE = {"troll": 0.95, "orcs": 0.9, "goblins": 1.0, "dragon": 1.1, "scout": 0.8, "caravan": 0.9}
+CREATURE_SCALE = {"troll": 0.95, "orcs": 0.9, "goblins": 1.0, "dragon": 1.1, "scout": 0.8, "caravan": 0.9,
+                  "trader": 0.85, "trader_r": 0.85}
 
 FEATURES = {
     "troll": creature_troll(), "goblins": creature_goblins(), "orcs": creature_orcs(), "dragon": creature_dragon(),
-    "scout": unit_scout(), "caravan": unit_caravan(),
+    "scout": unit_scout(), "caravan": unit_caravan(), "trader": unit_trader(), "trader_r": unit_trader(flip=True),
     "pine1": feat_trees("pine", 1), "pine3": feat_trees("pine", 3), "pine5": feat_trees("pine", 5),
     "oak1": feat_trees("oak", 1), "oak3": feat_trees("oak", 3), "oak5": feat_trees("oak", 5),
     "mountain": feat_mountain(False), "mountain_snow": feat_mountain(True),
@@ -501,6 +539,11 @@ def main():
         for name, fn in FEATURES.items():
             jobs.append(("features", name, fn))
     meta = {"size": W, "face": face, "tier": tier, "maxTier": MAX_TIER, "sprites": {}}
+    # rendering a subset (--names / --only) adds to the existing set instead of replacing it
+    old = os.path.join(out, "meta.json")
+    if (a["names"] or a["only"]) and os.path.exists(old):
+        with open(old) as fh:
+            meta["sprites"] = json.load(fh).get("sprites", {})
     for kind, name, build in jobs:
         if a["names"] and name not in a["names"]:
             continue

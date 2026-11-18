@@ -17,6 +17,7 @@ import type { BuildingId } from '../game/data'
 import type { GameState } from '../game/types'
 import { landAt, territoryCells } from '../game/reducer'
 import { People } from './people'
+import { Traders } from './traders'
 import type { Atlas } from './atlas'
 
 export interface SceneInput {
@@ -49,6 +50,7 @@ export class MapView {
   cells = new Container()
   overlay = new Container()
   people!: People
+  traders!: Traders
   zoom = typeof window !== "undefined" && window.innerWidth < 700 ? 1 : 2
   /** CSS upscale of the canvas (zoom >= 1) */
   private get cssScale() { return Math.max(1, this.zoom) }
@@ -65,6 +67,7 @@ export class MapView {
   constructor(atlas: Atlas) {
     this.atlas = atlas
     this.people = new People(atlas.meta.size, atlas.meta.tier)
+    this.traders = new Traders(atlas)
   }
 
   get W() { return this.atlas.meta.size }
@@ -82,7 +85,10 @@ export class MapView {
     // villagers live inside `cells` so they sort into the painter's order with trees and houses
     this.cells.sortableChildren = true
     this.root.addChild(this.cells, this.overlay)
-    this.app.ticker.add((t) => this.people.update(Math.min(0.1, t.deltaMS / 1000)))
+    this.app.ticker.add((t) => {
+      this.people.update(Math.min(0.1, t.deltaMS / 1000))
+      this.traders.update(Date.now())
+    })
     this.app.stage.addChild(this.root)
     this.ro = new ResizeObserver(() => this.resize())
     this.ro.observe(host)
@@ -146,7 +152,7 @@ export class MapView {
     const { world, state, viewer } = input
     const { tier: TP } = this.atlas.meta
     const W = this.W
-    const walkers = new Set<unknown>(this.people.nodes())
+    const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes()])
     for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy()
     this.overlay.removeChildren().forEach((c) => c.destroy())
 
@@ -297,6 +303,8 @@ export class MapView {
     this.overlay.addChildAt(g, 0)
     this.people.sync(world, state, revealed)
     this.people.attach(this.cells, rank)
+    this.traders.sync(world, state, revealed)
+    this.traders.attach(this.cells, rank)
   }
 
   /** Dirt track across the hex top toward neighbouring roads/buildings; where it
