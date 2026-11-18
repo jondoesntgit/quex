@@ -84,9 +84,13 @@ export class SupabaseStore implements EventStore {
 
 export interface AccountInfo { email: string | null; guest: boolean }
 
-/** Email sign-in: the email carries a link and a 6-digit code ({{ .Token }}). */
+const here = () => location.origin + location.pathname + location.search
+
+/** Sign-in: emailed code/link, password, or Google (when enabled in Supabase
+ *  and VITE_AUTH_GOOGLE=1). Emails carry a link and a 6-digit {{ .Token }}. */
 export const account = {
   enabled: supabaseEnabled,
+  google: import.meta.env.VITE_AUTH_GOOGLE === '1',
 
   async info(): Promise<AccountInfo | null> {
     if (!supabaseEnabled) return null
@@ -100,12 +104,42 @@ export const account = {
   /** Email a sign-in link + 6-digit code (creates the account if new). */
   async sendCode(email: string): Promise<'email'> {
     const sb = await getClient()
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname + location.search, shouldCreateUser: true } })
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: here(), shouldCreateUser: true } })
     if (error) throw error
     return 'email'
   },
 
-  async verify(email: string, code: string, type: 'email' = 'email') {
+  async signInPassword(email: string, password: string) {
+    const sb = await getClient()
+    const { error } = await sb.auth.signInWithPassword({ email, password })
+    if (error) throw error
+  },
+
+  /** New account with a password. 'confirm' = check your email for a code first. */
+  async signUpPassword(email: string, password: string): Promise<'signedIn' | 'confirm'> {
+    const sb = await getClient()
+    const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: here() } })
+    if (error) throw error
+    // an existing address comes back with no identities (Supabase hides whether it exists)
+    if (data.user && data.user.identities?.length === 0) throw new Error('That email already has an account: sign in, or use an email code.')
+    return data.session ? 'signedIn' : 'confirm'
+  },
+
+  /** Set or change the password on the signed-in account. */
+  async setPassword(password: string) {
+    const sb = await getClient()
+    const { error } = await sb.auth.updateUser({ password })
+    if (error) throw error
+  },
+
+  /** Redirects to Google and back to this page, signed in. */
+  async signInGoogle() {
+    const sb = await getClient()
+    const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: here() } })
+    if (error) throw error
+  },
+
+  async verify(email: string, code: string, type: 'email' | 'signup' = 'email') {
     const sb = await getClient()
     const { error } = await sb.auth.verifyOtp({ email, token: code.trim(), type })
     if (error) throw error
