@@ -168,6 +168,10 @@ atlas = Image.new("RGBA", (AW, AH), (0, 0, 0, 0))
 for img, x, y in placed:
     atlas.alpha_composite(img, (x, y))
 atlas.save(os.path.join(DST, "atlas.png"))
+# the image's fingerprint: the game requests atlas.png?v=<hash>, so a cached old
+# image can never be paired with a new frame list
+import hashlib
+png_hash = hashlib.sha1(open(os.path.join(DST, "atlas.png"), "rb").read()).hexdigest()[:12]
 json.dump({"size": meta["size"], "face": meta["face"], "tier": meta["tier"], "maxTier": meta["maxTier"],
-           "variants": VARIANTS, "frames": frames}, open(os.path.join(DST, "atlas.json"), "w"))
+           "variants": VARIANTS, "hash": png_hash, "frames": frames}, open(os.path.join(DST, "atlas.json"), "w"))
 print(DST, len(frames), "frames", atlas.size)

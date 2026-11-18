@@ -1,7 +1,12 @@
 import { ImageSource, Rectangle, Texture } from 'pixi.js'
 
 export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number }
-export interface AtlasMeta { size: number; face: number; tier: number; maxTier: number; variants: number; frames: Record<string, Frame> }
+export interface AtlasMeta {
+  size: number; face: number; tier: number; maxTier: number; variants: number
+  /** fingerprint of atlas.png, so the image and this frame list always match */
+  hash?: string
+  frames: Record<string, Frame>
+}
 
 export interface Atlas {
   meta: AtlasMeta
@@ -54,7 +59,9 @@ export async function loadAtlas(size = TILE_SIZE): Promise<Atlas> {
   const base = `${import.meta.env.BASE_URL}art/${size}/`
   const meta: AtlasMeta = await (await fetch(base + 'atlas.json', { cache: 'no-cache' })).json()
   const probe = meta.frames['t_grass_0']
-  let img = await loadImage(base + 'atlas.png').catch(() => null)
+  // versioned by the image's fingerprint: a stale cached image can't pair with new frames
+  const png = `${base}atlas.png${meta.hash ? `?v=${meta.hash}` : `?t=${Date.now()}`}`
+  let img = await loadImage(png).catch(() => null)
   if (!img || !looksRight(img, probe)) {
     // try a fresh copy, past every cache (service worker and browser)
     console.warn('tile image looked wrong; fetching a fresh copy')
