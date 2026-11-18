@@ -62,6 +62,21 @@ export class SupabaseStore implements EventStore {
     if (error) console.warn('event not synced', error.message)
   }
 
+  /** Private task names for these players, last 30 days. */
+  async loadLabels(playerIds: string[]) {
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+    const { data, error } = await this.sb.from('task_labels').select('player_id, date, slot, text')
+      .in('player_id', playerIds).gte('date', since)
+    if (error) { console.warn('task_labels', error.message); return [] }
+    return data as { player_id: string; date: string; slot: number; text: string }[]
+  }
+
+  async saveLabel(playerId: string, date: string, slot: number, text: string) {
+    const { error } = await this.sb.from('task_labels')
+      .upsert({ player_id: playerId, date, slot, text, updated_at: new Date().toISOString() }, { onConflict: 'user_id,player_id,date,slot' })
+    if (error) throw new Error(error.message)
+  }
+
   /** Player ids in this world owned by the signed-in user (for a new device). */
   async ownedPlayers(): Promise<string[]> {
     const { data: u } = await this.sb.auth.getUser()

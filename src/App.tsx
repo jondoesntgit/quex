@@ -35,6 +35,7 @@ export default function App() {
           meta.localPlayers = owned
           if (!meta.activePlayer || !owned.includes(meta.activePlayer)) meta.activePlayer = owned[0] ?? null
           saveMeta(meta)
+          await g.syncLabels()
         }
         setGame(g)
       } catch (e) {

@@ -17,7 +17,12 @@ export interface EventStore {
   load(): Promise<GameEvent[]>
   append(ev: GameEvent): Promise<void>
   subscribe(cb: (ev: GameEvent) => void): () => void
+  /** private task names synced to the owner's account (online only) */
+  loadLabels?(playerIds: string[]): Promise<{ player_id: string; date: string; slot: number; text: string }[]>
+  saveLabel?(playerId: string, date: string, slot: number, text: string): Promise<void>
 }
+
+export type LabelStatus = 'saving' | 'saved' | 'error'
 
 export interface Meta {
   worldSeed: string
@@ -161,10 +166,56 @@ export class Game {
   label(pid: string, date: string, slot: number) {
     return this.meta.labels[pid]?.[date]?.[slot] ?? ''
   }
-  setLabel(pid: string, date: string, slot: number, text: string) {
+
+  private labelState = new Map<string, LabelStatus>()
+  private labelTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  labelStatus(pid: string, date: string, slot: number): LabelStatus | undefined {
+    const st = this.labelState.get(`${pid}|${date}|${slot}`)
+    // offline, anything already stored on this device is saved
+    return st ?? (!this.store.saveLabel && this.label(pid, date, slot) ? 'saved' : undefined)
+  }
+
+  /** Saved on this device at once; synced to the account after a short pause
+   *  in typing (or straight away with `now`, e.g. on blur). */
+  setLabel(pid: string, date: string, slot: number, text: string, now = false) {
     const byDate = (this.meta.labels[pid] ??= {})
     const arr = (byDate[date] ??= ['', '', '', '', '', ''])
+    const changed = arr[slot] !== text
     arr[slot] = text
+    const key = `${pid}|${date}|${slot}`
+    if (!this.store.saveLabel) {
+      this.labelState.set(key, 'saved')
+      this.saveMeta()
+      return
+    }
+    const pending = this.labelTimers.has(key)
+    const retry = now && (pending || this.labelState.get(key) === 'error')
+    if (!changed && !retry) return
+    this.labelState.set(key, 'saving')
+    this.saveMeta()
+    clearTimeout(this.labelTimers.get(key))
+    this.labelTimers.set(key, setTimeout(async () => {
+      this.labelTimers.delete(key)
+      try {
+        await this.store.saveLabel!(pid, date, slot, arr[slot])
+        if (!this.labelTimers.has(key)) this.labelState.set(key, 'saved')
+      } catch (e) {
+        console.warn('label not saved', e)
+        this.labelState.set(key, 'error')
+      }
+      this.emit()
+    }, now ? 0 : 700))
+  }
+
+  /** Pull this account's task names (online) into the local copy. */
+  async syncLabels() {
+    if (!this.store.loadLabels || !this.meta.localPlayers.length) return
+    const rows = await this.store.loadLabels(this.meta.localPlayers)
+    for (const r of rows) {
+      const arr = ((this.meta.labels[r.player_id] ??= {})[r.date] ??= ['', '', '', '', '', ''])
+      arr[r.slot] = r.text
+      this.labelState.set(`${r.player_id}|${r.date}|${r.slot}`, 'saved')
+    }
     this.saveMeta()
   }
 }

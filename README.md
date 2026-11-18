@@ -32,7 +32,7 @@ The game runs entirely offline by default (state lives in `localStorage`). The *
 
 ### Privacy
 
-Task **text** never leaves the device: labels live only in local storage. Events carry only task sizes and none/half/full status, so neighbours see *whether* you did your tasks, never *what* they were. The database also rejects any event containing a `label` field.
+Task **text** is private to you. It lives on the device and, when signed in, in a `task_labels` table that only your own account can read (row-level security), so it follows you between devices. It is never in the shared event log: events carry only task sizes and none/half/full status, so neighbours see *whether* you did your tasks, never *what* they were. The database also rejects any event containing a `label` field.
 
 ## Art pipeline
 

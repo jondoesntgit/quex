@@ -87,7 +87,12 @@ input { -webkit-user-select: text; user-select: text; }
 .slot { display: grid; grid-template-columns: 46px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--paper-2); }
 .size { border: 2px solid var(--ink); border-radius: var(--radius); color: white; text-align: center; font-size: 12px; padding: 2px 0; }
 .size.big { background: var(--big); } .size.medium { background: var(--medium); } .size.small { background: var(--small); }
-.slot input { width: 100%; border: 2px solid var(--paper-2); background: white; border-radius: var(--radius); padding: 5px 6px; font-size: 15px; }
+.slot input { width: 100%; border: 2px solid var(--paper-2); background: white; border-radius: var(--radius); padding: 5px 26px 5px 6px; font-size: 15px; }
+.labelbox { position: relative; display: block; min-width: 0; }
+.labelmark { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: 15px; pointer-events: none; }
+.labelmark.saved { color: #287828; }
+.labelmark.saving { color: var(--muted, #888); }
+.labelmark.error { color: var(--danger); pointer-events: auto; }
 .tri { display: flex; border: 2px solid var(--ink); border-radius: var(--radius); overflow: hidden; }
 .tri button { border: none; background: white; width: 34px; height: 32px; cursor: pointer; font-size: 15px; border-right: 2px solid var(--ink); }
 .tri button:last-child { border-right: none; }

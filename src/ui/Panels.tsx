@@ -21,16 +21,13 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
     <div>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h3 style={{ margin: 0 }}>Today · {dayScore(day)}/100</h3>
-        <span className="muted">Labels stay on this device</span>
+        <span className="muted">Task names are private to you</span>
       </div>
       {slots.map((s, i) => (
         <div className="slot" key={i}>
           <span className={`size ${s.size}`}>{SIZE_LABEL[s.size as keyof typeof SIZE_LABEL]} {SIZE_POINTS[s.size as keyof typeof SIZE_POINTS]}</span>
-          <input
-            placeholder={s.size === 'big' ? 'The one big thing…' : s.size === 'medium' ? 'A medium task…' : 'A small task…'}
-            value={game.label(p.id, date, i)}
-            onChange={(e) => game.setLabel(p.id, date, i, e.target.value)}
-          />
+          <LabelInput game={game} pid={p.id} date={date} slot={i}
+            placeholder={s.size === 'big' ? 'The one big thing…' : s.size === 'medium' ? 'A medium task…' : 'A small task…'} />
           <div className="tri" role="group" aria-label="progress">
             {(['none', 'half', 'full'] as TaskStatus[]).map((st) => (
               <button key={st} className={`${st} ${s.status === st ? 'on' : ''}`} onClick={() => set(i, st)} title={st}>
@@ -74,6 +71,22 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
         </button>
       </div>
     </div>
+  )
+}
+
+/** Task name box with a save indicator: … saving, ✓ saved, ! failed (retries on blur). */
+function LabelInput({ game, pid, date, slot, placeholder }: { game: Game; pid: string; date: string; slot: number; placeholder: string }) {
+  const text = game.label(pid, date, slot)
+  const st = game.labelStatus(pid, date, slot)
+  const mark = st === 'saving' ? '…' : st === 'error' ? '!' : st === 'saved' && text ? '✓' : ''
+  const title = st === 'saving' ? 'Saving…' : st === 'error' ? 'Not saved: tap away to retry' : mark ? 'Saved' : undefined
+  return (
+    <span className="labelbox">
+      <input placeholder={placeholder} value={text} maxLength={200}
+        onChange={(e) => game.setLabel(pid, date, slot, e.target.value)}
+        onBlur={(e) => game.setLabel(pid, date, slot, e.target.value, true)} />
+      {mark && <span className={`labelmark ${st}`} title={title} aria-label={title}>{mark}</span>}
+    </span>
   )
 }
 
