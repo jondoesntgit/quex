@@ -320,3 +320,19 @@ describe('role fit stars', () => {
   })
 })
 
+
+describe('renaming', () => {
+  it('renames the player and a village still named after them', () => {
+    const s = setup()
+    const before = s.villages.v_ann.name
+    expect(before).toMatch(/^Ann’s /)
+    apply(s, world, ev('rename', 'ann', `${SUN}T09:00:00Z`, { name: '  Jonathan ' }))
+    expect(s.players.ann.name).toBe('Jonathan')
+    expect(s.villages.v_ann.name).toBe(before.replace('Ann', 'Jonathan'))
+  })
+  it('refuses empty or overlong names', () => {
+    const s = setup()
+    expect(validate(s, world, ev('rename', 'ann', `${SUN}T09:00:00Z`, { name: '  ' }))).toBeTruthy()
+    expect(validate(s, world, ev('rename', 'ann', `${SUN}T09:00:00Z`, { name: 'x'.repeat(21) }))).toBeTruthy()
+  })
+})

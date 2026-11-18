@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore } from './app/supabase'
-import { Account, SignIn } from './ui/Account'
+import { Account, ManageWard, SignIn } from './ui/Account'
+import { rememberAccount } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
@@ -36,7 +37,26 @@ export default function App() {
           meta.dayOffset = 0 // the testing day-skip never applies to the shared world
           if (!meta.activePlayer || !owned.includes(meta.activePlayer)) meta.activePlayer = owned[0] ?? null
           saveMeta(meta)
+          g.setAccess(await remote.access())
+          // opened from a parent link: become this child's guardian
+          const params = new URLSearchParams(location.search)
+          const token = params.get('guardian')
+          if (token) {
+            try {
+              const pid = await remote.acceptParentLink(token)
+              g.setAccess(await remote.access())
+              g.flash = `You now look after ${g.state.players[pid]?.name ?? 'your child'}: set and check off their tasks from the Party tab.`
+            } catch (e) {
+              g.flash = e instanceof Error ? e.message : String(e)
+            }
+            params.delete('guardian')
+            history.replaceState(null, '', location.pathname + (params.size ? `?${params}` : ''))
+          }
           await g.syncLabels()
+          const r = remote
+          r.watch((row) => g!.remoteLabel(row), async () => { g!.setAccess(await r.access()); await g!.syncLabels() })
+          const info = await account.info()
+          if (info?.email) rememberAccount(info.email)
         }
         setGame(g)
       } catch (e) {
@@ -66,9 +86,20 @@ function Main({ game }: { game: Game }) {
   const [placing, setPlacing] = useState(false)
   const placingRef = useRef(false)
   useEffect(() => { placingRef.current = placing }, [placing])
-  const [onboard, setOnboard] = useState<'first' | 'friend' | null>(game.meta.activePlayer ? null : 'first')
+  // a parent with no village of their own goes straight to looking after their children
+  const [onboard, setOnboard] = useState<'first' | 'friend' | null>(game.meta.activePlayer || game.wards().length ? null : 'first')
+  const [managing, setManaging] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showAccount, setShowAccount] = useState(false)
+  // one-off message from startup (e.g. accepting a parent link)
+  useEffect(() => {
+    if (!game.flash) return
+    const m = game.flash
+    game.flash = null
+    setToast(m)
+    const t = setTimeout(() => setToast((x) => (x === m ? null : x)), 6000)
+    return () => clearTimeout(t)
+  }, [game])
 
   const pid = game.meta.activePlayer
   const p = pid ? game.state.players[pid] : null
@@ -205,7 +236,7 @@ function Main({ game }: { game: Game }) {
           <div className="sheet-body">
             {tab === 'today' && <TodayPanel game={game} p={p} />}
             {tab === 'village' && <VillagePanel game={game} p={p} onAbandon={abandon} notify={notify} />}
-            {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} />}
+            {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} onManage={setManaging} />}
             {tab === 'log' && <LogPanel game={game} p={p} />}
           </div>
         </div>
@@ -216,7 +247,23 @@ function Main({ game }: { game: Game }) {
           onCancel={onboard === 'friend' ? () => { setOnboard(null); setPlacing(false); setPreview(null) } : undefined}
           onDone={() => { setOnboard(null); setPlacing(false); setPreview(null); centred.current = null }} />
       )}
-      {showAccount && <Account game={game} onClose={() => setShowAccount(false)} />}
+      {showAccount && <Account game={game} onClose={() => setShowAccount(false)} notify={notify} />}
+      {managing && game.state.players[managing] && <ManageWard game={game} pid={managing} onClose={() => setManaging(null)} />}
+      {!p && !onboard && (
+        // a parent/guardian without a village of their own
+        <div className="sheet">
+          <div className="sheet-body">
+            <h3 style={{ marginTop: 0 }}>Your children</h3>
+            {game.wards().map((id) => (
+              <div key={id} className="row" style={{ justifyContent: 'space-between', padding: '6px 0' }}>
+                <b>{game.state.players[id].name}</b>
+                <button className="btn primary" onClick={() => setManaging(id)}>Set & check tasks</button>
+              </div>
+            ))}
+            <p className="muted">You can also <button className="btn" onClick={() => setOnboard('first')}>found your own village</button></p>
+          </div>
+        </div>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

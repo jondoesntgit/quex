@@ -12,6 +12,7 @@ import type { World } from '../world/types'
 import { addDays, playerDate } from '../game/calendar'
 import { apply, newGame, pendingTicks } from '../game/reducer'
 import type { GameEvent, GameState, ISODate } from '../game/types'
+import type { Access } from './supabase'
 
 export interface EventStore {
   load(): Promise<GameEvent[]>
@@ -207,10 +208,53 @@ export class Game {
     }, now ? 0 : 700))
   }
 
-  /** Pull this account's task names (online) into the local copy. */
+  // ---------------------------------------------------------- guardians
+
+  /** Online only: who is signed in, and who guards / plays which player. */
+  access: Access | null = null
+  /** a message to show once the game opens */
+  flash: string | null = null
+  setAccess(a: Access | null) { this.access = a; this.emit() }
+
+  /** Player ids this account looks after as a parent/guardian. */
+  wards(): string[] {
+    const a = this.access
+    if (!a?.me) return []
+    return a.guardians.filter((g) => g.user === a.me && this.state.players[g.player]).map((g) => g.player)
+  }
+  isSupervised(pid: string) { return !!this.access?.guardians.some((g) => g.player === pid) }
+  isGuardianOf(pid: string) { return !!this.access?.me && this.access.guardians.some((g) => g.player === pid && g.user === this.access!.me) }
+  /** Tasks and habits: guardians set them for supervised players; otherwise the player does. */
+  canEditTasks(pid: string) {
+    if (this.isGuardianOf(pid)) return true
+    return this.meta.localPlayers.includes(pid) && !this.isSupervised(pid)
+  }
+  /** Names of a player's guardians, by the villages those accounts play. */
+  guardianNames(pid: string): string[] {
+    const a = this.access
+    if (!a) return []
+    const users = a.guardians.filter((g) => g.player === pid).map((g) => g.user)
+    return users.map((u) => {
+      const names = a.owners.filter((o) => o.user === u).map((o) => this.state.players[o.player]?.name).filter(Boolean)
+      return names[0] ?? (u === a.me ? 'you' : 'a parent')
+    })
+  }
+
+  /** A task name changed elsewhere (a parent, or the child's other device). */
+  remoteLabel(r: { player_id: string; date: string; slot: number; text: string }) {
+    const key = `${r.player_id}|${r.date}|${r.slot}`
+    if (this.labelTimers.has(key)) return // we're mid-edit here: ours wins
+    const arr = ((this.meta.labels[r.player_id] ??= {})[r.date] ??= ['', '', '', '', '', ''])
+    arr[r.slot] = r.text
+    this.labelState.set(key, 'saved')
+    this.saveMeta()
+  }
+
+  /** Pull task names (online) for this account's players and wards into the local copy. */
   async syncLabels() {
-    if (!this.store.loadLabels || !this.meta.localPlayers.length) return
-    const rows = await this.store.loadLabels(this.meta.localPlayers)
+    const ids = [...new Set([...this.meta.localPlayers, ...this.wards()])]
+    if (!this.store.loadLabels || !ids.length) return
+    const rows = await this.store.loadLabels(ids)
     for (const r of rows) {
       const arr = ((this.meta.labels[r.player_id] ??= {})[r.date] ??= ['', '', '', '', '', ''])
       arr[r.slot] = r.text

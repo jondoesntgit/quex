@@ -130,5 +130,7 @@ export type GameEvent =
   | (Base & { t: 'act'; tokenId: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
+  /** change the player's display name (themselves, or a guardian for them) */
+  | (Base & { t: 'rename'; name: string })
   /** give up this village entirely; the player can found a new one */
   | (Base & { t: 'abandon' })

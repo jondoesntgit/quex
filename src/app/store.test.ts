@@ -56,3 +56,43 @@ describe('task labels', () => {
     expect(g.labelStatus('p1', '2026-11-18', 0)).toBe('saved')
   })
 })
+
+describe('parents and guardians', () => {
+  const store: EventStore = { load: async () => [], append: async () => {}, subscribe: () => () => {} }
+  function family() {
+    const meta = newMeta('test-seed')
+    const g = new Game(meta, store)
+    // two players in the world: the parent's and the child's
+    g.state.players.dad = { id: 'dad', name: 'Dad' } as never
+    g.state.players.kid = { id: 'kid', name: 'Matthew' } as never
+    g.setAccess({
+      me: 'u-dad',
+      guardians: [{ player: 'kid', user: 'u-dad' }, { player: 'kid', user: 'u-gran' }],
+      owners: [{ player: 'dad', user: 'u-dad' }, { player: 'kid', user: 'u-kid' }],
+    })
+    return g
+  }
+  it('a parent can set and check off their child\'s tasks', () => {
+    const g = family()
+    g.meta.localPlayers = ['dad']
+    expect(g.wards()).toEqual(['kid'])
+    expect(g.canEditTasks('kid')).toBe(true)
+    expect(g.canEditTasks('dad')).toBe(true)
+    expect(g.guardianNames('kid')).toEqual(['Dad', 'a parent'])
+  })
+  it('a supervised child cannot edit their own tasks; an unsupervised player can', () => {
+    const g = family()
+    g.access!.me = 'u-kid'
+    g.meta.localPlayers = ['kid']
+    expect(g.isSupervised('kid')).toBe(true)
+    expect(g.canEditTasks('kid')).toBe(false)
+    expect(g.wards()).toEqual([])
+    g.setAccess({ me: 'u-kid', guardians: [], owners: [] })
+    expect(g.canEditTasks('kid')).toBe(true)
+  })
+  it('offline (no accounts) everything local is editable', () => {
+    const g = new Game(newMeta('test-seed'), store)
+    g.meta.localPlayers = ['p1']
+    expect(g.canEditTasks('p1')).toBe(true)
+  })
+})

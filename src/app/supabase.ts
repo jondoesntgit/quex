@@ -73,7 +73,7 @@ export class SupabaseStore implements EventStore {
 
   async saveLabel(playerId: string, date: string, slot: number, text: string) {
     const { error } = await this.sb.from('task_labels')
-      .upsert({ player_id: playerId, date, slot, text, updated_at: new Date().toISOString() }, { onConflict: 'user_id,player_id,date,slot' })
+      .upsert({ player_id: playerId, date, slot, text }, { onConflict: 'player_id,date,slot' })
     if (error) throw new Error(error.message)
   }
 
@@ -93,9 +93,69 @@ export class SupabaseStore implements EventStore {
       .subscribe()
     return () => { this.sb.removeChannel(ch) }
   }
+
+  // -------------------------------------------------------------- guardians
+
+  /** Who is signed in, who guards which player, and which user plays which player. */
+  async access(): Promise<Access> {
+    const { data: u } = await this.sb.auth.getUser()
+    const [g, o] = await Promise.all([
+      this.sb.from('player_guardians').select('player_id, guardian_id').eq('world', this.world),
+      this.sb.from('player_owners').select('player_id, user_id').eq('world', this.world),
+    ])
+    if (g.error) console.warn('player_guardians', g.error.message)
+    if (o.error) console.warn('player_owners', o.error.message)
+    return {
+      me: u.user?.id ?? null,
+      guardians: (g.data ?? []).map((r) => ({ player: r.player_id as string, user: r.guardian_id as string })),
+      owners: (o.data ?? []).map((r) => ({ player: r.player_id as string, user: r.user_id as string })),
+    }
+  }
+
+  /** A one-time link a parent opens (signed in to their own account) to become a guardian. */
+  async createParentLink(playerId: string): Promise<string> {
+    const bytes = crypto.getRandomValues(new Uint8Array(18))
+    const token = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, (c) => (c === '+' ? '-' : c === '/' ? '_' : ''))
+    const { error } = await this.sb.from('guardian_invites').insert({ token, world: this.world, player_id: playerId })
+    if (error) throw new Error(error.message)
+    const u = new URL(location.origin + location.pathname)
+    if (this.world !== 'quex-season-1') u.searchParams.set('seed', this.world)
+    u.searchParams.set('guardian', token)
+    return u.toString()
+  }
+
+  async acceptParentLink(token: string): Promise<string> {
+    const { data, error } = await this.sb.rpc('accept_guardian', { p_token: token })
+    if (error) throw new Error(error.message)
+    return (data as { player_id: string }[])[0]?.player_id ?? ''
+  }
+
+  async stopGuarding(playerId: string) {
+    const { data: u } = await this.sb.auth.getUser()
+    const { error } = await this.sb.from('player_guardians').delete()
+      .eq('world', this.world).eq('player_id', playerId).eq('guardian_id', u.user?.id ?? '')
+    if (error) throw new Error(error.message)
+  }
+
+  /** Live task-name edits (from a parent or child) and guardian changes. */
+  watch(onLabel: (r: { player_id: string; date: string; slot: number; text: string }) => void, onAccess: () => void) {
+    const ch = this.sb.channel(`private:${this.world}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_labels' },
+        (msg) => { if (msg.new && 'player_id' in msg.new) onLabel(msg.new as { player_id: string; date: string; slot: number; text: string }) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_guardians', filter: `world=eq.${this.world}` }, () => onAccess())
+      .subscribe()
+    return () => { this.sb.removeChannel(ch) }
+  }
 }
 
 // ------------------------------------------------------------------ account
+
+/** Online roles in a world (see Game.access). */
+export interface Access {
+  me: string | null
+  guardians: { player: string; user: string }[]
+  owners: { player: string; user: string }[]
+}
 
 export interface AccountInfo { email: string | null; guest: boolean }
 

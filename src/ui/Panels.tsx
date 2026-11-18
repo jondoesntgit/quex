@@ -17,21 +17,28 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
     game.dispatch({ t: 'habit', id: eventId(), at: game.now().toISOString(), playerId: p.id, date, habitId, done })
   const [adding, setAdding] = useState(false)
   const free = p.habitSlots - p.habits.length
+  // supervised players see their tasks; their parents/guardians set and check them off
+  const editable = game.canEditTasks(p.id)
+  const guardians = game.guardianNames(p.id)
+  const mine = game.meta.localPlayers.includes(p.id)
 
   return (
     <div>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h3 style={{ margin: 0 }}>Today · {dayScore(day)}/100</h3>
-        <span className="muted">Task names are private to you</span>
+        <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>
       </div>
+      {mine && !editable && (
+        <p className="supervised">👪 Your tasks are set and checked off by {guardians.join(' & ') || 'your parent'}. Spend the actions you earn on the map!</p>
+      )}
       {slots.map((s, i) => (
         <div className="slot" key={i}>
           <span className={`size ${s.size}`}>{SIZE_LABEL[s.size as keyof typeof SIZE_LABEL]} {SIZE_POINTS[s.size as keyof typeof SIZE_POINTS]}</span>
-          <LabelInput game={game} pid={p.id} date={date} slot={i}
-            placeholder={s.size === 'big' ? 'The one big thing…' : s.size === 'medium' ? 'A medium task…' : 'A small task…'} />
+          <LabelInput game={game} pid={p.id} date={date} slot={i} readOnly={!editable}
+            placeholder={!editable ? '—' : s.size === 'big' ? 'The one big thing…' : s.size === 'medium' ? 'A medium task…' : 'A small task…'} />
           <div className="tri" role="group" aria-label="progress">
             {(['none', 'half', 'full'] as TaskStatus[]).map((st) => (
-              <button key={st} className={`${st} ${s.status === st ? 'on' : ''}`} onClick={() => set(i, st)} title={st}>
+              <button key={st} className={`${st} ${s.status === st ? 'on' : ''}`} disabled={!editable} onClick={() => set(i, st)} title={st}>
                 {st === 'none' ? '·' : st === 'half' ? '½' : '✓'}
               </button>
             ))}
@@ -45,13 +52,13 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
       </p>
       {p.habits.map((h) => (
         <label className="habit" key={h.id}>
-          <input type="checkbox" checked={!!day?.habitsDone.includes(h.id)} onChange={(e) => toggleHabit(h.id, e.target.checked)} />
+          <input type="checkbox" disabled={!editable} checked={!!day?.habitsDone.includes(h.id)} onChange={(e) => toggleHabit(h.id, e.target.checked)} />
           {h.effect === 'rain' && <Icon name="water" size={16} />}
           <span>{h.name}</span>
           <span className="muted">{HABIT_PRESETS.find((x) => x.id === h.id)?.blurb}</span>
         </label>
       ))}
-      {free > 0 && !adding && <button className="btn" onClick={() => setAdding(true)}>+ Add habit</button>}
+      {editable && free > 0 && !adding && <button className="btn" onClick={() => setAdding(true)}>+ Add habit</button>}
       {adding && (
         <div className="row">
           {HABIT_PRESETS.filter((h) => !p.habits.some((x) => x.id === h.id)).map((h) => (
@@ -66,7 +73,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
       <h3><Icon name="freeze" size={16} /> Freezes</h3>
       <div className="row">
         <span className="muted">{p.freezes} left this week. A frozen day is shown to neighbours.</span>
-        <button className="btn" disabled={p.freezes <= 0 || day?.frozen}
+        <button className="btn" disabled={!editable || p.freezes <= 0 || day?.frozen}
           onClick={() => game.dispatch({ t: 'freeze', id: eventId(), at: game.now().toISOString(), playerId: p.id, date })}>
           {day?.frozen ? 'Frozen ❄' : 'Freeze today'}
         </button>
@@ -76,14 +83,14 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
 }
 
 /** Task name box with a save indicator: … saving, ✓ saved, ! failed (retries on blur). */
-function LabelInput({ game, pid, date, slot, placeholder }: { game: Game; pid: string; date: string; slot: number; placeholder: string }) {
+function LabelInput({ game, pid, date, slot, placeholder, readOnly }: { game: Game; pid: string; date: string; slot: number; placeholder: string; readOnly?: boolean }) {
   const text = game.label(pid, date, slot)
   const st = game.labelStatus(pid, date, slot)
-  const mark = st === 'saving' ? '…' : st === 'error' ? '!' : st === 'saved' && text ? '✓' : ''
+  const mark = readOnly ? '' : st === 'saving' ? '…' : st === 'error' ? '!' : st === 'saved' && text ? '✓' : ''
   const title = st === 'saving' ? 'Saving…' : st === 'error' ? 'Not saved: tap away to retry' : mark ? 'Saved' : undefined
   return (
     <span className="labelbox">
-      <input placeholder={placeholder} value={text} maxLength={200}
+      <input placeholder={placeholder} value={text} maxLength={200} readOnly={readOnly}
         onChange={(e) => game.setLabel(pid, date, slot, e.target.value)}
         onBlur={(e) => game.setLabel(pid, date, slot, e.target.value, true)} />
       {mark && <span className={`labelmark ${st}`} title={title} aria-label={title}>{mark}</span>}
@@ -143,7 +150,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
   )
 }
 
-export function PartyPanel({ game, p, onAddFriend }: { game: Game; p: Player; onAddFriend: () => void }) {
+export function PartyPanel({ game, p, onAddFriend, onManage }: { game: Game; p: Player; onAddFriend: () => void; onManage: (pid: string) => void }) {
   const players = Object.values(game.state.players)
   return (
     <div>
@@ -156,7 +163,7 @@ export function PartyPanel({ game, p, onAddFriend }: { game: Game; p: Player; on
         return (
           <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px dashed var(--paper-2)' }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
-              <b>{o.name}{o.id === p.id ? ' (you)' : ''}</b>
+              <b>{o.name}{o.id === p.id ? ' (you)' : ''}{game.isSupervised(o.id) && <span className="muted" title={`Looked after by ${game.guardianNames(o.id).join(' & ')}`}> 👪</span>}</b>
               <span className="muted">{ROLE_INFO[v.role]?.name} · habits {o.habits.length}/{o.habitSlots}</span>
             </div>
             <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -166,6 +173,9 @@ export function PartyPanel({ game, p, onAddFriend }: { game: Game; p: Player; on
               </span>
               {local && o.id !== p.id && (
                 <button className="btn" onClick={() => { game.meta.activePlayer = o.id; game.saveMeta() }}>Play as</button>
+              )}
+              {game.isGuardianOf(o.id) && (
+                <button className="btn primary" onClick={() => onManage(o.id)}>Set & check tasks</button>
               )}
             </div>
           </div>

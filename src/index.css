@@ -143,6 +143,11 @@ input { -webkit-user-select: text; user-select: text; }
 .btn.danger { background: var(--danger); color: white; }
 /* role buttons while settling: suited roles stand out, the rest stay available */
 .btn.fit-ok:not(.primary) { opacity: 0.75; }
+.supervised { background: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 14px; }
+.slot input[readonly] { background: var(--paper); }
+.chipbtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding-right: 4px; }
+.chipbtn .x { border: 0; background: transparent; cursor: pointer; font-size: 15px; padding: 0 4px; color: inherit; }
+.card.manage { width: min(560px, 100%); }
 .account { position: absolute; inset: 0; z-index: 12; }
 .toast { position: absolute; left: 50%; transform: translateX(-50%); top: 64px; z-index: 20; background: var(--ink); color: var(--paper); padding: 8px 12px; border-radius: 6px; font-size: 14px; max-width: 90%; }
 

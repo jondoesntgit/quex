@@ -226,6 +226,12 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       return null
     case 'abandon':
       return null
+    case 'rename': {
+      const n = ev.name.trim()
+      if (!n) return 'Pick a name'
+      if (n.length > 20) return 'Names are at most 20 letters'
+      return n === p.name ? 'That is already the name' : null
+    }
     case 'resetHour':
       if (p.resetChangedAt && daysBetween(p.resetChangedAt.slice(0, 10), ev.at.slice(0, 10)) < 7)
         return 'Bedtime can only change once a week'
@@ -379,6 +385,15 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'act': return act(s, world, p, ev)
     case 'tick': return tick(s, world, p, ev)
     case 'abandon': return abandon(s, p, ev.at)
+    case 'rename': {
+      const v = s.villages[p.villageId]
+      const name = ev.name.trim()
+      // a village still called after its founder follows the new name
+      if (v.name === `${p.name}’s ${ROLE_TOWN[v.role]}`) v.name = `${name}’s ${ROLE_TOWN[v.role]}`
+      log(s, ev.at, p.id, `${p.name} is now known as ${name}.`, 'info')
+      p.name = name
+      return s
+    }
   }
 }
 
