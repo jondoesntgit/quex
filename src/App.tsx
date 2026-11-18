@@ -1,122 +1,175 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
+import { createSupabaseStore } from './app/supabase'
+import { loadAtlas } from './render/atlas'
+import { MapView } from './render/MapView'
+import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
+import { dayScore } from './game/reducer'
+import type { VillageSite } from './world/types'
+import { Inspector } from './ui/Inspector'
+import { Onboarding } from './ui/Onboarding'
+import { LogPanel, PartyPanel, TodayPanel, VillagePanel } from './ui/Panels'
+import { SIZE_LABEL, useGame } from './ui/helpers'
 
-function App() {
-  const [count, setCount] = useState(0)
+type Tab = 'today' | 'village' | 'party' | 'log'
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+export default function App() {
+  const [game, setGame] = useState<Game | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let g: Game | null = null
+    ;(async () => {
+      try {
+        const meta = loadMeta() ?? newMeta(new URLSearchParams(location.search).get('seed') ?? 'quex-season-1')
+        saveMeta(meta)
+        const store: EventStore = (await createSupabaseStore(meta.worldSeed)) ?? new LocalStore()
+        g = new Game(meta, store)
+        await g.init()
+        setGame(g)
+      } catch (e) {
+        console.error(e)
+        setError(String(e))
+      }
+    })()
+    return () => g?.dispose()
+  }, [])
+  if (error) return <div className="modal"><div className="card"><h1>Oops</h1><p>{error}</p></div></div>
+  if (!game) return <div className="modal"><div className="card"><h1>QUEX</h1><p className="muted">Generating the world…</p></div></div>
+  return <Main game={game} />
 }
 
-export default App
+function Main({ game }: { game: Game }) {
+  useGame(game)
+  const host = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<MapView | null>(null)
+  const [ready, setReady] = useState(false)
+  const [tab, setTab] = useState<Tab>('today')
+  const [collapsed, setCollapsed] = useState(false)
+  const [sel, setSel] = useState<{ col: number; row: number } | null>(null)
+  const [preview, setPreview] = useState<VillageSite | null>(null)
+  const [onboard, setOnboard] = useState<'first' | 'friend' | null>(game.meta.activePlayer ? null : 'first')
+  const [toast, setToast] = useState<string | null>(null)
+
+  const pid = game.meta.activePlayer
+  const p = pid ? game.state.players[pid] : null
+
+  // mount Pixi once
+  useEffect(() => {
+    let view: MapView | null = null
+    let alive = true
+    ;(async () => {
+      const atlas = await loadAtlas()
+      if (!alive || !host.current) return
+      view = new MapView(atlas)
+      await view.mount(host.current)
+      view.onSelect = (col, row) => setSel({ col, row })
+      viewRef.current = view
+      setReady(true)
+    })()
+    return () => { alive = false; view?.destroy(); viewRef.current = null }
+  }, [])
+
+  // keep "now" moving: ticks for finished days, caravans on the road
+  useEffect(() => {
+    const t = setInterval(() => { game.catchUp() }, 30_000)
+    return () => clearInterval(t)
+  }, [game])
+
+  const today = game.today()
+  const highlight = useMemo(() => (preview ? [preview.row * game.world.width + preview.col] : []), [preview, game.world.width])
+
+  // redraw on any state change
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !ready) return
+    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: sel, highlight, today })
+  })
+
+  // centre the camera on the village (or the starter region) once
+  const centred = useRef<string | null>(null)
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !ready) return
+    const key = p?.id ?? (preview ? `${preview.col},${preview.row}` : 'region')
+    if (centred.current === key) return
+    centred.current = key
+    if (p) {
+      const v = game.state.villages[p.villageId]
+      view.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)
+    } else if (preview) {
+      view.centreOn(preview.col, preview.row + 2, 2)
+    } else {
+      const rg = game.world.regions[game.world.startRegion]
+      view.centreOn((rg.col0 + rg.col1) >> 1, (rg.row0 + rg.row1) >> 1, 2)
+    }
+  }, [ready, p, preview, game])
+
+  const notify = (s: string) => {
+    setToast(s)
+    setTimeout(() => setToast((t) => (t === s ? null : t)), 3500)
+  }
+
+  const season = weekSeason(today)
+  const week = seasonWeek(game.meta.seasonStart, today)
+  const score = p ? dayScore(p.days[today]) : 0
+  const v = p ? game.state.villages[p.villageId] : null
+
+  return (
+    <div className="app">
+      <div className="map" ref={host} />
+
+      <div className="topbar">
+        <span className="chip title">QUEX</span>
+        <span className="chip">{SEASON_ICON[season]} {season} · wk {Math.min(week, SEASON_WEEKS)}/{SEASON_WEEKS}</span>
+        {p && <span className="chip score">⭐ <b>{score}</b>/100</span>}
+        {v && <span className="chip">👥 {Math.floor(v.population)} · 🙂 {v.morale}</span>}
+        <span className="spacer" />
+        {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
+      </div>
+
+      <div className="zoom">
+        <button className="btn icon" onClick={() => viewRef.current?.setZoom((viewRef.current?.zoom ?? 2) + 1)}>＋</button>
+        <button className="btn icon" onClick={() => viewRef.current?.setZoom((viewRef.current?.zoom ?? 2) - 1)}>－</button>
+      </div>
+
+      {p && p.tokens.length > 0 && !sel && (
+        <div className="tray" style={{ bottom: collapsed ? 54 : 'calc(52% + 8px)' }}>
+          {p.tokens.map((t) => (
+            <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''}`}>
+              {SIZE_LABEL[t.size]} action{t.strength < 1 ? ' ½' : ''}
+            </span>
+          ))}
+          <span className="token" style={{ background: 'var(--ink)' }}>tap a hex to spend</span>
+        </div>
+      )}
+
+      {p && sel && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} onClose={() => setSel(null)} notify={notify} />}
+
+      {p && (
+        <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>
+          <div className="tabs">
+            {(['today', 'village', 'party', 'log'] as Tab[]).map((t) => (
+              <button key={t} className={`tab ${tab === t && !collapsed ? 'on' : ''}`}
+                onClick={() => { if (tab === t) setCollapsed(!collapsed); else { setTab(t); setCollapsed(false) } }}>
+                {t === 'today' ? `Today ${score}` : t[0].toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="sheet-body">
+            {tab === 'today' && <TodayPanel game={game} p={p} />}
+            {tab === 'village' && <VillagePanel game={game} p={p} />}
+            {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} />}
+            {tab === 'log' && <LogPanel game={game} p={p} />}
+          </div>
+        </div>
+      )}
+
+      {onboard && (
+        <Onboarding game={game} first={onboard === 'first'} onPreview={setPreview}
+          onCancel={onboard === 'friend' ? () => setOnboard(null) : undefined}
+          onDone={() => { setOnboard(null); setPreview(null); centred.current = null }} />
+      )}
+      {toast && <div className="toast">{toast}</div>}
+    </div>
+  )
+}

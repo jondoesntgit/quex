@@ -40,7 +40,7 @@ export class MapView {
   root = new Container()
   cells = new Container()
   overlay = new Container()
-  zoom = 2
+  zoom = typeof window !== "undefined" && window.innerWidth < 700 ? 1 : 2
   camX = 0
   camY = 0
   private host!: HTMLElement
@@ -48,7 +48,10 @@ export class MapView {
   private last: SceneInput | null = null
   onSelect: (col: number, row: number) => void = () => {}
 
-  constructor(public atlas: Atlas) {}
+  atlas: Atlas
+  constructor(atlas: Atlas) {
+    this.atlas = atlas
+  }
 
   get W() { return this.atlas.meta.size }
 
@@ -96,10 +99,12 @@ export class MapView {
     this.resize()
   }
 
-  centreOn(col: number, row: number, tier = 0) {
+  /** yFrac: where on screen the hex should land (0 = top). Phones keep it
+   *  above the bottom sheet. */
+  centreOn(col: number, row: number, tier = 0, yFrac = this.host.clientWidth < 900 ? 0.27 : 0.5) {
     const p = hexToPixel(col, row, this.W)
     this.camX = p.x - this.app.renderer.width / 2
-    this.camY = p.y - tier * this.atlas.meta.tier - this.app.renderer.height / 2
+    this.camY = p.y - tier * this.atlas.meta.tier - this.app.renderer.height * yFrac
     this.applyCamera()
   }
 

@@ -11,7 +11,7 @@ const SUN = '2026-11-15' // a Sunday
 
 let n = 0
 function ev<T extends GameEvent['t']>(t: T, playerId: string, at: string, rest: Omit<Extract<GameEvent, { t: T }>, 't' | 'id' | 'at' | 'playerId'>): GameEvent {
-  return { t, id: `e${++n}`, at, playerId, ...rest } as GameEvent
+  return { t, id: `e${++n}`, at, playerId, ...rest } as unknown as GameEvent
 }
 
 function setup(): GameState {
