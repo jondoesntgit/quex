@@ -33,6 +33,7 @@ export default function App() {
           // online, you play exactly this account's villages (new device, or a different account)
           const owned = (await remote.ownedPlayers()).filter((id) => g!.state.players[id])
           meta.localPlayers = owned
+          meta.dayOffset = 0 // the testing day-skip never applies to the shared world
           if (!meta.activePlayer || !owned.includes(meta.activePlayer)) meta.activePlayer = owned[0] ?? null
           saveMeta(meta)
           await g.syncLabels()

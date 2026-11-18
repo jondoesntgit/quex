@@ -4,6 +4,7 @@ import { dayScore, defence, foodStock, popCap, storageCap } from '../game/reduce
 import type { Player, TaskStatus } from '../game/types'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
+import { supabaseEnabled } from '../app/supabase'
 import { Icon } from './Icon'
 
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
@@ -170,12 +171,17 @@ export function PartyPanel({ game, p, onAddFriend }: { game: Game; p: Player; on
           </div>
         )
       })}
-      <h3>Testing</h3>
-      <div className="row">
-        <button className="btn" onClick={onAddFriend}>+ Local friend (hot-seat)</button>
-        <button className="btn" onClick={async () => { game.meta.dayOffset++; game.saveMeta(); await game.catchUp() }}>Skip to tomorrow ⏭</button>
-      </div>
-      <p className="muted">Day offset: {game.meta.dayOffset}. Hot-seat players share this device so you can try co-op before Supabase is set up.</p>
+      {!supabaseEnabled && (
+        // offline builds only (local dev and e2e tests): never on the live, shared world
+        <>
+          <h3>Testing</h3>
+          <div className="row">
+            <button className="btn" onClick={onAddFriend}>+ Local friend (hot-seat)</button>
+            <button className="btn" onClick={async () => { game.meta.dayOffset++; game.saveMeta(); await game.catchUp() }}>Skip to tomorrow ⏭</button>
+          </div>
+          <p className="muted">Day offset: {game.meta.dayOffset}. Hot-seat players share this device so you can try co-op offline.</p>
+        </>
+      )}
     </div>
   )
 }
