@@ -11,7 +11,10 @@
  *  houses and cliffs in front of them hide them.
  *
  *  A newly built road pops a puff of dust; villagers nearby give a startled
- *  hop, and those whose village it belongs to wander over for a look. */
+ *  hop, and those whose village it belongs to wander over for a look.
+ *
+ *  Villagers who cross paths sometimes stop for a natter: they face each
+ *  other, gesture, and take turns with a little speech bubble, then carry on. */
 import { Container, Graphics } from 'pixi.js'
 import { distance, hexToPixel, neighbours } from '../world/hex'
 import { mulberry32, hashString } from '../world/rng'
@@ -38,6 +41,19 @@ const MAX_STEP = 3 // tiers a villager will climb or drop in one go
 const ROAD_COST = 0.4 // a road hex costs this much to cross, vs 1 for open land
 const REACT_RANGE = 4 // hexes: villagers this close notice a new road
 const PUFF_TIME = 0.9 // seconds
+const CHAT_RANGE: [number, number] = [5, 11] // px apart (same height) to stop and talk
+const CHAT_CHANCE = 0.6 // of stopping when two villagers meet
+const CHAT_TIME: [number, number] = [2.5, 5] // seconds
+const CHAT_COOLDOWN: [number, number] = [18, 40] // seconds before chatting again
+// talking: one hand out, then raised; mirrored when the other villager is on the left
+const TALK_A = ['.oooo..', '.oHHo..', '.oHHo..', 'ooSSoo.', 'oSSSSoH', 'ooSSoo.', '.oLLo..', '.oLLo..', '.oooo..']
+const TALK_B = ['.oooo..', '.oHHo.H', '.oHHooS', 'ooSSSo.', 'oSSSSo.', 'ooSSoo.', '.oLLo..', '.oLLo..', '.oooo..']
+// speech bubbles above the speaker: "..." then a little "!" or heart
+const BUBBLES = [
+  ['.ooooooo.', 'oWWWWWWWo', 'oWkWkWkWo', 'oWWWWWWWo', '.oooooWo.', '......o..'],
+  ['.ooooo.', 'oWWWWWo', 'oWWkWWo', 'oWWkWWo', 'oWWWWWo', 'oWWkWWo', 'oWWWWWo', '.oooWo.', '....o..'],
+  ['.ooooooo.', 'oWrrWrrWo', 'oWrrrrrWo', 'oWWrrrWWo', 'oWWWrWWWo', '.oooooWo.', '......o..'],
+]
 
 interface Walker {
   g: Graphics
@@ -53,6 +69,9 @@ interface Walker {
   skin: number
   idle: number // time accumulator for the work animation
   react: number | null // a new road (cell) to react to at the next safe moment
+  chat: { with: Walker; until: number; first: boolean; topic: number } | null
+  chatAgain: number // clock time before which this villager won't stop to talk
+  pose: Pose | null // last pose (for meeting checks)
 }
 
 interface Puff { g: Graphics; cell: number; x: number; y: number; t: number }
@@ -70,6 +89,7 @@ export class People {
   private roads = new Set<number>()
   private roadsSeen = false
   private puffs: Puff[] = []
+  private clock = 0
   private parent: Container | null = null
 
   constructor(W: number, TP: number) {
@@ -138,7 +158,7 @@ export class People {
     for (let k = 0; k < n; k++) {
       const r = mulberry32(hashString(`${v.id}-${k}`))
       const w: Walker = {
-        g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null,
+        g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null, chat: null, chatAgain: r() * 10, pose: null,
         at: { cell: home, p: this.spot(home, blocked.has(home), r) }, rng: r,
         shirt: SHIRT[v.role] ?? 0xd0d0d0, skin: SKIN[Math.floor(r() * SKIN.length)],
       }
@@ -270,8 +290,38 @@ export class People {
     }
   }
 
+  /** Two villagers on the ground, close together at the same height, may stop to talk. */
+  private meetings() {
+    const free = this.walkers.filter((w) => !w.chat && w.pose && w.chatAgain <= this.clock &&
+      (w.pose.kind === 'walk' || w.pose.kind === 'stand') && w.react === null)
+    for (let i = 0; i < free.length; i++) {
+      const a = free[i]
+      if (a.chat) continue
+      for (let j = i + 1; j < free.length; j++) {
+        const b = free[j]
+        if (b.chat) continue
+        const pa = a.pose!, pb = b.pose!
+        if (pa.kind === 'stand' && pb.kind === 'stand') continue // someone has to be passing by
+        if (this.world.cells[pa.cell].tier !== this.world.cells[pb.cell].tier) continue
+        const d = Math.hypot(pa.x - pb.x, pa.y - pb.y)
+        if (d < CHAT_RANGE[0] || d > CHAT_RANGE[1]) continue
+        // either way they're not stopping again for a while after this meeting
+        const later = this.clock + CHAT_COOLDOWN[0] + a.rng() * (CHAT_COOLDOWN[1] - CHAT_COOLDOWN[0])
+        a.chatAgain = b.chatAgain = later
+        if (a.rng() > CHAT_CHANCE) continue
+        const until = this.clock + CHAT_TIME[0] + a.rng() * (CHAT_TIME[1] - CHAT_TIME[0])
+        const topic = Math.floor(a.rng() * BUBBLES.length)
+        a.chat = { with: b, until, first: true, topic }
+        b.chat = { with: a, until, first: false, topic: (topic + 1) % BUBBLES.length }
+        a.chatAgain = b.chatAgain = until + (later - this.clock)
+        break
+      }
+    }
+  }
+
   update(dt: number) {
     if (!this.world) return
+    this.clock += dt
     for (const p of this.puffs) { p.t += dt; this.drawPuff(p) }
     for (const p of this.puffs.filter((x) => x.t >= PUFF_TIME)) p.g.destroy()
     this.puffs = this.puffs.filter((x) => x.t < PUFF_TIME)
@@ -285,10 +335,23 @@ export class People {
           const p = now ?? { x: w.at.p.x, y: w.at.p.y - h.tier * this.TP, cell: w.at.cell, front: true, kind: 'stand' as const, dist: 0 }
           const road = w.react
           w.react = null
+          // a new road beats a chat: both break off
+          if (w.chat) { if (w.chat.with.chat?.with === w) w.chat.with.chat = null; w.chat = null }
           this.reactTo(w, road, p)
           w.wait = 0
         }
       }
+      if (w.chat && this.clock < w.chat.until && w.react === null) {
+        // stopped mid-route for a chat: hold the spot, the route waits
+        const at = w.pose ?? sample(w.route, w.t, this.TP)
+        pose = { ...at, kind: 'stand' }
+        w.idle += dt
+        w.pose = pose
+        this.place(w, pose)
+        this.draw(w, Math.round(pose.x), Math.round(pose.y), 'stand', 0, this.talking(w))
+        continue
+      }
+      if (w.chat) w.chat = null
       if (w.t < w.end) {
         w.t = Math.min(w.end, w.t + dt)
         pose = sample(w.route, w.t, this.TP)
@@ -302,33 +365,60 @@ export class People {
         this.plan(w)
         pose = sample(w.route, 0, this.TP)
       }
-      const r = this.rank[pose.cell] ?? -1
-      const zi = r * 4 + (pose.front ? 3.5 : 2)
-      if (w.g.zIndex !== zi) w.g.zIndex = zi
+      w.pose = pose
+      this.place(w, pose)
       // feet step every 3 px walked; hands alternate every 2 px climbed; tools swing twice a second
       const step = pose.kind === 'walk' ? Math.floor(pose.dist / 3) & 1
         : pose.kind === 'climb' ? Math.floor(pose.dist / 2) & 1
         : Math.floor(w.idle * 2) & 1
       this.draw(w, Math.round(pose.x), Math.round(pose.y), pose.kind, step)
     }
+    this.meetings()
+  }
+
+  private place(w: Walker, pose: Pose) {
+    const r = this.rank[pose.cell] ?? -1
+    const zi = r * 4 + (pose.front ? 3.5 : 2)
+    if (w.g.zIndex !== zi) w.g.zIndex = zi
+  }
+
+  /** Who's speaking right now: partners take turns every ~0.9 s. */
+  private talking(w: Walker): { mirror: boolean; speaking: boolean; topic: number; gesture: number } {
+    const c = w.chat!
+    const turn = Math.floor((c.until - this.clock) / 0.9) & 1
+    const speaking = c.first ? turn === 0 : turn === 1
+    const other = c.with.pose
+    const mirror = !!other && !!w.pose && other.x < w.pose.x
+    return { mirror, speaking, topic: c.topic, gesture: speaking ? Math.floor(this.clock * 3) & 1 : 0 }
   }
 
   /** 6×9 px villager, feet at (x, y). Rows top to bottom; o outline, H skin,
    *  S shirt, L legs, T tool. */
-  private draw(w: Walker, x: number, y: number, kind: Pose['kind'], step: number) {
-    const fig = kind === 'work' ? (step ? WORK_UP : WORK_DOWN)
+  private draw(w: Walker, x: number, y: number, kind: Pose['kind'], step: number,
+    talk?: { mirror: boolean; speaking: boolean; topic: number; gesture: number }) {
+    let fig = talk ? (talk.gesture ? TALK_B : TALK_A)
+      : kind === 'work' ? (step ? WORK_UP : WORK_DOWN)
       : kind === 'walk' ? (step ? WALK : STAND)
       : kind === 'climb' ? (step ? CLIMB_B : CLIMB_A)
       : kind === 'hop' ? HOP : kind === 'land' ? LAND : STAND
-    const col: Record<string, number> = { o: 0x1c1828, H: w.skin, S: w.shirt, L: 0x5a4630, T: 0xa08050, D: 0x4a3020 }
+    // mirrored talk poses are 7 wide with the body on the right: shift left one
+    let dx = -3
+    if (talk?.mirror) { fig = fig.map((r) => r.padEnd(7, '.').split('').reverse().join('')); dx = -4 }
+    const col: Record<string, number> = { o: 0x1c1828, H: w.skin, S: w.shirt, L: 0x5a4630, T: 0xa08050, D: 0x4a3020, W: 0xffffff, k: 0x1c1828, r: 0xe04858 }
     const g = w.g
     g.clear()
     const top = y - fig.length + 1
-    fig.forEach((rowStr, r) => {
+    const paint = (rows: string[], ox: number, oy: number) => rows.forEach((rowStr, r) => {
       for (let c = 0; c < rowStr.length; c++) {
         const ch = rowStr[c]
-        if (ch !== '.') g.rect(x - 3 + c, top + r, 1, 1).fill(col[ch])
+        if (ch !== '.') g.rect(ox + c, oy + r, 1, 1).fill(col[ch])
       }
     })
+    paint(fig, x + dx, top)
+    if (talk?.speaking) {
+      const b = BUBBLES[talk.topic % BUBBLES.length]
+      // above the head, leaning toward the listener
+      paint(b, x + (talk.mirror ? -b[0].length + 1 : 0), top - b.length - 1)
+    }
   }
 }

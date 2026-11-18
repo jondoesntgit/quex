@@ -143,3 +143,38 @@ describe('villagers and a new road', async () => {
     expect(people.puffs).toHaveLength(0) // the puff has drifted away
   })
 })
+
+describe('villagers stop to chat', async () => {
+  const { People } = await import('./people')
+  const { generateWorld } = await import('../world/generate')
+  const { newGame, apply } = await import('../game/reducer')
+  it('two villagers passing close by sometimes stop, take turns talking, then carry on', () => {
+    const world = generateWorld('test-seed')
+    const s = newGame(world, '2026-11-15')
+    const site = world.regions[world.startRegion].sites[0]
+    apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
+    s.villages.v_a.population = 12 // a busy village
+    type W = { chat: { with: unknown; until: number } | null; t: number; chatAgain: number }
+    const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[] }
+    people.sync(world, s, new Set(s.revealed))
+    let chats = 0, frozen = true, mutual = true
+    const seen = new Set<unknown>()
+    for (let k = 0; k < 20 * 60 * 10; k++) { // ten simulated minutes at 20 fps
+      people.update(0.05)
+      for (const w of people.walkers) {
+        if (!w.chat) continue
+        if (!seen.has(w.chat)) { seen.add(w.chat); chats++ }
+        const other = w.chat.with as W
+        if (other.chat && other.chat.with !== w) mutual = false
+      }
+      // while chatting, the route clock doesn't move
+      const talker = people.walkers.find((w) => w.chat)
+      if (talker) { const t = talker.t; people.update(0.05); if (talker.chat && talker.t !== t) frozen = false }
+    }
+    expect(chats).toBeGreaterThan(1)
+    expect(mutual).toBe(true)
+    expect(frozen).toBe(true)
+    // after chatting, a cooldown keeps them from stopping again straight away
+    expect(people.walkers.some((w) => w.chatAgain > 0)).toBe(true)
+  })
+})
