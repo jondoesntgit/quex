@@ -28,12 +28,28 @@
   --good: #38a838;
   --radius: 4px;
   --shadow: 0 3px 0 var(--ink);
-  font-family: 'Pixelify Sans', ui-monospace, monospace;
-  font-size: 18px;
   line-height: 1.35;
   color: var(--ink);
   -webkit-font-smoothing: none;
   font-smooth: never;
+}
+
+/* Text size follows the player's settings: on iPhone/iPad the system body
+   font carries the Dynamic Type size (Settings > Display > Text Size, 17px
+   by default);
+   elsewhere the browser's default font size applies. Everything below is
+   sized in rem relative to it. */
+html {
+  font-family: 'Pixelify Sans', ui-monospace, monospace;
+  line-height: 1.35;
+}
+/* iPhone/iPad only (on a Mac the system body font is a small 13px) */
+@supports (-webkit-touch-callout: none) {
+  html {
+    font: -apple-system-body;
+    font-family: 'Pixelify Sans', ui-monospace, monospace;
+    line-height: 1.35;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -196,29 +212,33 @@ input { -webkit-user-select: text; user-select: text; }
 }
 
 /* ---------------------------------------------------------------- type */
-/* reading text (Pixelify Sans) */
-.muted, .log p, .goods, .supervised, .action small, .toast, .card p, .help li { font-size: 16px; }
-.slot input, .water input, .card input[type='text'], .card input[type='password'] { font-size: 18px; }
-.size { font-size: 14px; }
-.token { font-size: 15px; }
-.tri button, .labelmark { font-size: 18px; }
-.water-hist small { font-size: 11px; }
-.btn small { font-family: 'Pixelify Sans', monospace; font-size: 14px; line-height: 1.25; word-spacing: normal; }
+/* reading text (Pixelify Sans), relative to the player's text size */
+body { font-size: 1rem; }
+.muted, .log p, .goods, .supervised, .action small, .toast, .card p, .help li { font-size: 0.9rem; }
+/* inputs never below 16px, or iPhones zoom in when you tap them */
+.slot input, .water input, .card input[type='text'], .card input[type='password'] { font-size: max(16px, 1rem); }
+.size { font-size: 0.8rem; }
+.token { font-size: 0.85rem; }
+.tri button, .labelmark { font-size: 1rem; }
+.water-hist small { font-size: 0.65rem; }
+.btn small { font-family: 'Pixelify Sans', monospace; font-size: 0.8rem; line-height: 1.25; word-spacing: normal; }
 
-/* labels, buttons and titles (m5x7 at a crisp 32px). m5x7 has no bold, so
-   bold here is thickened by exactly one font pixel (2px) to stay sharp, and
-   its extra-wide spaces are tightened. */
+/* labels, buttons and titles: m5x7 at 1.5x the text size, rounded to whole
+   half-pixels of the font (8px steps) so it stays sharp; it still grows and
+   shrinks with the player's text-size setting. m5x7 has no bold, so bold is
+   thickened by exactly one font pixel, and its wide spaces are tightened. */
 .chip, .tab, .btn, .title, h1, h2, h3, .help summary, .card label, .sheet-body h3, .inspector h2, .water-total, .chip.score b {
   font-family: 'm5x7', 'Pixelify Sans', monospace;
-  font-size: 32px;
+  font-size: 1.5rem;
+  font-size: round(nearest, 1.5rem, 8px);
   line-height: 0.85;
   font-weight: 400;
   word-spacing: -0.15em;
   font-synthesis: none;
 }
-.card h1 { font-size: 64px; letter-spacing: 2px; }
-h1, h2, h3, .help summary, .tab.on { text-shadow: 2px 0 0 currentColor; }
-.btn { min-height: 38px; padding: 4px 10px 6px; }
+.card h1 { font-size: 3rem; font-size: round(nearest, 3rem, 16px); letter-spacing: 0.0625em; }
+h1, h2, h3, .help summary, .tab.on { text-shadow: 0.0625em 0 0 currentColor; }
+.btn { min-height: 34px; padding: 3px 10px 5px; }
 .tab { padding: 6px 4px 8px; white-space: nowrap; }
 .chip { padding: 2px 8px 4px; }
 .tri button { font-family: 'Pixelify Sans', monospace; }
