@@ -2,7 +2,9 @@
  *
  *  Chunky pixels: the canvas is rendered at *art* resolution (1 canvas px =
  *  1 sprite px) and upscaled by CSS with `image-rendering: pixelated`, so
- *  every zoom level is a clean integer scale and nothing is ever smoothed.
+ *  every zoom level >= 1 is a clean integer scale and nothing is smoothed.
+ *  Below 1 (overview zooms) the canvas is screen-sized and the scene is
+ *  scaled down instead, sampling mipmaps so the continent stays readable.
  *
  *  Painter's order: rows top to bottom, even columns before odd ones (odd
  *  columns sit half a hex lower). Each hex draws terrain column, river,
@@ -24,6 +26,8 @@ export interface SceneInput {
   selected: { col: number; row: number } | null
   highlight?: number[] // cells to tint (e.g. valid targets)
   blocked?: number[] // cells to tint red (e.g. too close to a neighbour)
+  /** a hex someone sent a link to: marked in pink */
+  focus?: number
   /** lift the fog (choosing where to found a village) */
   showAll?: boolean
   today: string
@@ -46,6 +50,10 @@ export class MapView {
   overlay = new Container()
   people!: People
   zoom = typeof window !== "undefined" && window.innerWidth < 700 ? 1 : 2
+  /** CSS upscale of the canvas (zoom >= 1) */
+  private get cssScale() { return Math.max(1, this.zoom) }
+  /** scene scale inside the canvas (zoom < 1) */
+  private get sceneScale() { return Math.min(1, this.zoom) }
   camX = 0
   camY = 0
   private host!: HTMLElement
@@ -88,14 +96,21 @@ export class MapView {
   }
 
   resize() {
-    const w = Math.max(1, Math.ceil(this.host.clientWidth / this.zoom))
-    const h = Math.max(1, Math.ceil(this.host.clientHeight / this.zoom))
+    const w = Math.max(1, Math.ceil(this.host.clientWidth / this.cssScale))
+    const h = Math.max(1, Math.ceil(this.host.clientHeight / this.cssScale))
     this.app.renderer.resize(w, h)
     this.applyCamera()
   }
 
+  /** step through ZOOMS: +1 in, -1 out */
+  zoomStep(dir: number, anchor?: { x: number; y: number }) {
+    const k = ZOOMS.indexOf(this.zoom)
+    this.setZoom(ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, k + dir))], anchor)
+  }
+
   setZoom(z: number, anchor?: { x: number; y: number }) {
-    const nz = Math.max(1, Math.min(6, Math.round(z)))
+    // snap to the nearest level (in log space, so pinches feel even)
+    const nz = ZOOMS.reduce((best, l) => (Math.abs(Math.log(l / z)) < Math.abs(Math.log(best / z)) ? l : best))
     if (nz === this.zoom) return
     // keep the art pixel under the anchor (CSS px) fixed
     const ax = anchor?.x ?? this.host.clientWidth / 2
@@ -112,14 +127,16 @@ export class MapView {
    *  above the bottom sheet. */
   centreOn(col: number, row: number, tier = 0, yFrac = this.host.clientWidth < 900 ? 0.27 : 0.5) {
     const p = hexToPixel(col, row, this.W)
-    this.camX = p.x - this.app.renderer.width / 2
-    this.camY = p.y - tier * this.atlas.meta.tier - this.app.renderer.height * yFrac
+    this.camX = p.x - this.host.clientWidth / this.zoom / 2
+    this.camY = p.y - tier * this.atlas.meta.tier - (this.host.clientHeight / this.zoom) * yFrac
     this.applyCamera()
   }
 
   private applyCamera() {
-    this.root.x = -Math.round(this.camX)
-    this.root.y = -Math.round(this.camY)
+    const s = this.sceneScale
+    this.root.scale.set(s)
+    this.root.x = -Math.round(this.camX * s)
+    this.root.y = -Math.round(this.camY * s)
   }
 
   // ---------------------------------------------------------------- scene
@@ -239,15 +256,18 @@ export class MapView {
       }
       g.stroke({ width: 1, color: mine ? 0xfff070 : 0xff90c0, alpha: 1 })
     }
-    // highlighted hexes (e.g. the spot chosen for a new village): gold wash + bold outline
-    for (const i of hl) {
+    // highlighted hexes (e.g. the spot chosen for a new village): gold wash + bold outline;
+    // a linked hex gets the same treatment in pink
+    const marks: [number, number, number][] = [...hl].map((i) => [i, 0xffe040, 0xfff6c0])
+    if (input.focus !== undefined && !hl.has(input.focus)) marks.push([input.focus, 0xff60b0, 0xffd0ec])
+    for (const [i, wash, rim] of marks) {
       const cell = world.cells[i]
       if (!cell) continue
       const p = hexToPixel(cell.col, cell.row, W)
       const cs = hexCorners(p.x, p.y - (revealed.has(i) ? cell.tier : 0) * TP, W).flat()
-      g.poly(cs, true).fill({ color: 0xffe040, alpha: 0.45 })
+      g.poly(cs, true).fill({ color: wash, alpha: 0.45 })
       g.poly(cs, true).stroke({ width: 4, color: 0x141424 })
-      g.poly(cs, true).stroke({ width: 2, color: 0xfff6c0 })
+      g.poly(cs, true).stroke({ width: 2, color: rim })
     }
     if (input.selected) {
       const { col, row } = input.selected
@@ -423,7 +443,7 @@ export class MapView {
     c.addEventListener('wheel', (e) => {
       e.preventDefault()
       const r = c.getBoundingClientRect()
-      this.setZoom(this.zoom + (e.deltaY < 0 ? 1 : -1), { x: e.clientX - r.left, y: e.clientY - r.top })
+      this.zoomStep(e.deltaY < 0 ? 1 : -1, { x: e.clientX - r.left, y: e.clientY - r.top })
     }, { passive: false })
   }
 }
@@ -434,6 +454,9 @@ function visibleSet(s: SceneInput): Set<number> {
   if (s.showAll || !s.viewer) return new Set(s.world.cells.map((_, i) => i))
   return new Set(s.state.revealed)
 }
+
+/** Zoom levels: below 1 shrinks the scene to see the whole continent. */
+export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */

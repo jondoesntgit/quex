@@ -9,7 +9,7 @@ import { dayScore, foundingBlockedCells } from './game/reducer'
 import { Inspector } from './ui/Inspector'
 import { Onboarding, type Spot } from './ui/Onboarding'
 import { LogPanel, PartyPanel, TodayPanel, VillagePanel } from './ui/Panels'
-import { SIZE_LABEL, useGame } from './ui/helpers'
+import { linkedSpot, SIZE_LABEL, useGame } from './ui/helpers'
 import { Icon } from './ui/Icon'
 
 type Tab = 'today' | 'village' | 'party' | 'log'
@@ -54,7 +54,9 @@ function Main({ game }: { game: Game }) {
   const [ready, setReady] = useState(false)
   const [tab, setTab] = useState<Tab>('today')
   const [collapsed, setCollapsed] = useState(false)
-  const [sel, setSel] = useState<{ col: number; row: number } | null>(null)
+  // a shared link (?at=col,row) centres on that hex, marks it, and opens it for existing players
+  const [linked] = useState(() => linkedSpot(game.world))
+  const [sel, setSel] = useState<{ col: number; row: number } | null>(() => (game.meta.activePlayer ? linked : null))
   const [preview, setPreview] = useState<Spot | null>(null)
   const [placing, setPlacing] = useState(false)
   const placingRef = useRef(false)
@@ -67,7 +69,11 @@ function Main({ game }: { game: Game }) {
   const p = pid ? game.state.players[pid] : null
 
   // switching player (hot-seat) clears the other player's selection
-  useEffect(() => { setSel(null) }, [pid])
+  const lastPid = useRef(pid)
+  useEffect(() => {
+    if (lastPid.current !== pid) setSel(null)
+    lastPid.current = pid
+  }, [pid])
 
   // mount Pixi once
   useEffect(() => {
@@ -93,6 +99,7 @@ function Main({ game }: { game: Game }) {
   }, [game])
 
   const today = game.today()
+  const focus = linked ? linked.row * game.world.width + linked.col : undefined
   const highlight = useMemo(() => (preview ? [preview.row * game.world.width + preview.col] : []), [preview, game.world.width])
   const blocked = useMemo(() => (placing ? foundingBlockedCells(game.world, game.state) : []), [placing, game, game.state.version]) // eslint-disable-line react-hooks/exhaustive-deps
   const onStep = useCallback((step: 'about' | 'place') => { setPlacing(step === 'place'); if (step === 'about') setPreview(null) }, [])
@@ -101,7 +108,7 @@ function Main({ game }: { game: Game }) {
   useEffect(() => {
     const view = viewRef.current
     if (!view || !ready) return
-    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: placing ? null : sel, highlight, blocked, showAll: placing, today })
+    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: placing ? null : sel, highlight, blocked, focus, showAll: placing, today })
   })
 
   // centre the camera on the village (or the starter region) once
@@ -111,15 +118,18 @@ function Main({ game }: { game: Game }) {
     if (!view || !ready) return
     const key = p?.id ?? 'region'
     if (centred.current === key) return
+    const first = centred.current === null
     centred.current = key
-    if (p) {
+    if (first && linked) {
+      view.centreOn(linked.col, linked.row, game.world.cells[linked.row * game.world.width + linked.col].tier)
+    } else if (p) {
       const v = game.state.villages[p.villageId]
       view.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)
     } else {
       const rg = game.world.regions[game.world.startRegion]
       view.centreOn((rg.col0 + rg.col1) >> 1, (rg.row0 + rg.row1) >> 1, 2)
     }
-  }, [ready, p, game])
+  }, [ready, p, game, linked])
 
   const abandon = async () => {
     if (!p) return
@@ -160,8 +170,8 @@ function Main({ game }: { game: Game }) {
       </div>
 
       <div className="zoom">
-        <button className="btn icon" onClick={() => viewRef.current?.setZoom((viewRef.current?.zoom ?? 2) + 1)}>＋</button>
-        <button className="btn icon" onClick={() => viewRef.current?.setZoom((viewRef.current?.zoom ?? 2) - 1)}>－</button>
+        <button className="btn icon" onClick={() => viewRef.current?.zoomStep(1)}>＋</button>
+        <button className="btn icon" onClick={() => viewRef.current?.zoomStep(-1)}>－</button>
       </div>
 
       {p && p.tokens.length > 0 && !sel && (
@@ -189,7 +199,7 @@ function Main({ game }: { game: Game }) {
           </div>
           <div className="sheet-body">
             {tab === 'today' && <TodayPanel game={game} p={p} />}
-            {tab === 'village' && <VillagePanel game={game} p={p} onAbandon={abandon} />}
+            {tab === 'village' && <VillagePanel game={game} p={p} onAbandon={abandon} notify={notify} />}
             {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} />}
             {tab === 'log' && <LogPanel game={game} p={p} />}
           </div>
@@ -197,7 +207,7 @@ function Main({ game }: { game: Game }) {
       )}
 
       {onboard && (
-        <Onboarding game={game} first={onboard === 'first'} site={preview} onStep={onStep}
+        <Onboarding game={game} first={onboard === 'first'} site={preview} linked={!!linked} onStep={onStep}
           onCancel={onboard === 'friend' ? () => { setOnboard(null); setPlacing(false); setPreview(null) } : undefined}
           onDone={() => { setOnboard(null); setPlacing(false); setPreview(null); centred.current = null }} />
       )}

@@ -10,7 +10,7 @@ export type { Spot }
 
 /** Found a village: name + first habit, then tap the map to pick the spot
  *  and choose a role (one is suggested from the land around it). */
-export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
+export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first }: {
   game: Game
   /** the hex last tapped on the map while choosing */
   site: Spot | null
@@ -19,6 +19,8 @@ export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
   onDone: (playerId: string) => void
   onCancel?: () => void
   first: boolean
+  /** opened from a shared link: the linked hex is marked in pink */
+  linked?: boolean
 }) {
   const [step, setStep] = useState<'about' | 'place'>('about')
   const [name, setName] = useState('')
@@ -85,6 +87,7 @@ export function Onboarding({ game, site, onStep, onDone, onCancel, first }: {
 
   return (
     <div className="placebar card">
+      {!site && linked && <p style={{ margin: '0 0 6px' }}><b>The spot from your link is marked in pink.</b> Settle near it: tap a hex just outside the red.</p>}
       {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Red land is too close to a neighbour.</span></p>}
       {site && problem && <p style={{ margin: 0 }}><b>Can’t settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
       {site && !problem && fits && (

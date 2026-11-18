@@ -25,13 +25,9 @@ Licences are in place: `LICENSE` is AGPL-3.0 for code, `LICENSE-ART.txt` is CC B
 
 > **Check first:** PixelLab's terms (https://pixellab.ai/termsofservice). I assumed your subscription lets you redistribute generated sprites and icons under CC BY-SA, but I haven't verified that. The affected files are `art/pixellab/` and `public/icons/`.
 
-## 2. Hosting (5 min): Cloudflare Pages recommended (Netlify also works)
+## 2. Hosting: Cloudflare Pages (live at quex.jamwheeler.com)
 
-Cloudflare: **Workers & Pages → Create → Import a repository**, then pick the repo. It deploys as a Worker serving static assets (`wrangler.jsonc` points it at `dist/`).
-- Build command: `npm run build`
-- Deploy command: `npx wrangler deploy`
-- Non-production branch deploy command: `npx wrangler versions upload`
-- Supabase keys go under **Settings → Build → Variables and secrets** (Vite bakes them in at build time), not runtime variables.
+The live site is the Cloudflare Pages project `quex`, deployed by direct upload: run `npm run deploy` after pushing. The domain's DNS is on Route 53, so it uses a Pages custom domain (CNAME) instead of a Worker. See `CLAUDE.md` for the full ship checklist. Production build settings are in `.env.production`.
 
 Netlify works with zero config (`netlify.toml` is included). Either way you get a static site; the game is fully playable there before Supabase exists, but each browser has its own world.
 

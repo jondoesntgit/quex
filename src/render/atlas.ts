@@ -16,7 +16,13 @@ export async function loadAtlas(size = TILE_SIZE): Promise<Atlas> {
   const base = `${import.meta.env.BASE_URL}art/${size}/`
   const meta: AtlasMeta = await (await fetch(base + 'atlas.json')).json()
   const sheet: Texture = await Assets.load(base + 'atlas.png')
-  sheet.source.scaleMode = 'nearest'
+  // crisp when shown at 1x or larger; smooth (mipmapped) when zoomed out below 1x
+  const src = sheet.source
+  src.magFilter = 'nearest'
+  src.minFilter = 'linear'
+  src.mipmapFilter = 'linear'
+  src.autoGenerateMipmaps = true
+  src.updateMipmaps()
   const cache = new Map<string, { texture: Texture; frame: Frame }>()
   return {
     meta,

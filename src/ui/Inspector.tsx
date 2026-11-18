@@ -4,7 +4,7 @@ import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, villag
 import { hasTrees } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
-import { ROLE_INFO, tryAction } from './helpers'
+import { ROLE_INFO, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
 
 const TERRAIN_NAME: Record<string, string> = {
@@ -30,6 +30,12 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const trees = hasTrees(land)
   const mine = inTerritory(v, col, row)
 
+  const share = async () => {
+    const text = village ? `Come settle near ${village.name} in Quex!` : 'Check out this spot in Quex:'
+    const msg = await shareSpot(game, { col, row }, text)
+    if (msg) notify(msg)
+  }
+
   const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
     const r = tryAction(game, p, action, col, row, extra, need)
     if (!r.ev) return notify(r.error ?? 'Not possible')
@@ -41,7 +47,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
 
   if (!known) {
     return (
-      <Shell onClose={onClose} title="Unexplored">
+      <Shell onClose={onClose} title="Unexplored" onShare={share}>
         <p className="muted">Mist hides this hex.</p>
         <ActionButton game={game} p={p} action="scout" col={col} row={row} onRun={() => run('scout')} />
       </Shell>
@@ -82,7 +88,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   }
 
   return (
-    <Shell onClose={onClose} title={title}>
+    <Shell onClose={onClose} title={title} onShare={share}>
       <p className="muted" style={{ margin: 0 }}>{sub}</p>
       {village && <p style={{ margin: '4px 0' }}>{ROLE_INFO[village.role]?.name} · 👥 {Math.floor(village.population)} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
@@ -102,10 +108,11 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   )
 }
 
-function Shell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Shell({ title, children, onClose, onShare }: { title: string; children: React.ReactNode; onClose: () => void; onShare?: () => void }) {
   return (
     <div className="inspector" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
       <button className="btn ghost close" onClick={onClose} aria-label="close">✕</button>
+      {onShare && <button className="btn ghost share" onClick={onShare} title="Send someone a link to this hex">🔗 Share</button>}
       <h2>{title}</h2>
       {children}
     </div>

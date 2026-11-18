@@ -119,11 +119,12 @@ input { -webkit-user-select: text; user-select: text; }
   position: absolute; left: 8px; right: 8px; z-index: 4; background: var(--paper); border: 3px solid var(--ink);
   border-radius: 6px; box-shadow: 0 4px 0 var(--ink); padding: 10px 12px; max-height: 55%; overflow-y: auto;
 }
-.inspector h2 { margin: 0 0 4px; font-size: 17px; font-family: 'Silkscreen', monospace; font-weight: 400; }
+.inspector h2 { margin: 0 0 4px; padding-right: 110px; font-size: 17px; font-family: 'Silkscreen', monospace; font-weight: 400; }
 .actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 8px; }
 .action { text-align: left; }
 .action small { display: block; font-size: 12px; opacity: 0.85; }
 .close { position: absolute; right: 6px; top: 6px; }
+.share { position: absolute; right: 44px; top: 6px; font-size: 13px; }
 
 /* modal / onboarding */
 .modal { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(20, 20, 36, 0.55); padding: 16px; }

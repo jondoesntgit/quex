@@ -83,3 +83,32 @@ export function roleFits(world: World, s: GameState, at: Spot): Record<Role, { f
     explorer: { fit: grade(danger * 2 + (nearest >= 14 ? 2 : 0), 4, 2), why: danger ? 'toward the frontier' : 'far from neighbours' },
   }
 }
+
+const DEFAULT_SEED = 'quex-season-1'
+
+/** A link that opens the game centred on one hex (and its world, if not the default). */
+export function spotLink(game: Game, at: Spot): string {
+  const u = new URL(location.origin + location.pathname)
+  if (game.meta.worldSeed !== DEFAULT_SEED) u.searchParams.set('seed', game.meta.worldSeed)
+  u.searchParams.set('at', `${at.col},${at.row}`)
+  return u.toString()
+}
+
+/** `?at=col,row` from the current URL, if valid for this world. */
+export function linkedSpot(world: World): Spot | null {
+  const m = /^(\d+),(\d+)$/.exec(new URLSearchParams(location.search).get('at') ?? '')
+  if (!m) return null
+  const col = Number(m[1]), row = Number(m[2])
+  return col < world.width && row < world.height ? { col, row } : null
+}
+
+/** Share sheet on phones, clipboard elsewhere. Returns a message for a toast. */
+export async function shareSpot(game: Game, at: Spot, text: string): Promise<string> {
+  const url = spotLink(game, at)
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Quex', text, url }); return 'Shared!' }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return ''
+  }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); return 'Link copied: paste it into a text.' } catch { return url }
+}

@@ -3,7 +3,7 @@ import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER
 import { dayScore, defence, foodStock, popCap, storageCap } from '../game/reducer'
 import type { Player, TaskStatus } from '../game/types'
 import { eventId, type Game } from '../app/store'
-import { ROLE_INFO, SIZE_LABEL } from './helpers'
+import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
 import { Icon } from './Icon'
 
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
@@ -77,7 +77,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   )
 }
 
-export function VillagePanel({ game, p, onAbandon }: { game: Game; p: Player; onAbandon: () => void }) {
+export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Player; onAbandon: () => void; notify: (s: string) => void }) {
   const v = game.state.villages[p.villageId]
   const [confirm, setConfirm] = useState(false)
   const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) > 0.05) as [Good, number][]
@@ -95,6 +95,10 @@ export function VillagePanel({ game, p, onAbandon }: { game: Game; p: Player; on
         <span className="muted">Morale {v.morale}</span>
         <div className="bar"><i style={{ width: `${v.morale}%`, background: v.morale < 35 ? 'var(--danger)' : undefined }} /></div>
       </div>
+      <button className="btn" style={{ marginBottom: 4 }} onClick={async () => {
+        const msg = await shareSpot(game, v, `Come settle near ${v.name} in Quex!`)
+        if (msg) notify(msg)
+      }}>🔗 Invite someone to settle nearby</button>
       <h3>Goods</h3>
       {goods.length ? (
         <div className="goods">{goods.map(([g, n]) => <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{Math.round(n * 10) / 10}</b></span></span>)}</div>
