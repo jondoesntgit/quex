@@ -119,7 +119,11 @@ export class MapView {
     this.app.ticker.add((t) => {
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
-      this.ambient?.update(performance.now() / 1000, this.sceneScale)
+      if (this.ambient && this.host) {
+        const z = this.zoom
+        this.ambient.view(this.cells, this.camX, this.camY, this.camX + this.host.clientWidth / z, this.camY + this.host.clientHeight / z, this.sceneScale)
+        this.ambient.update(performance.now() / 1000, this.sceneScale)
+      }
     })
     this.app.stage.addChild(this.root)
     this.resize()
@@ -242,6 +246,8 @@ export class MapView {
     for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy({ children: true })
     this.ambient ??= new Ambient(W)
     this.ambient.reset()
+    // choosing a site shows the whole world at once: keep that screen still (and quick)
+    const animate = !input.showAll
     this.overlay.removeChildren().forEach((c) => c.destroy())
 
     const revealed = visibleSet(input)
@@ -319,11 +325,14 @@ export class MapView {
           const [a, b] = EDGE_CORNERS[k]
           edges.push([corners[a][0], corners[a][1], corners[b][0], corners[b][1]])
         })
-        for (const n of this.ambient.water(cx, cy, i, land!.terrain !== 'shallow', edges.length > 0)) { n.zIndex = z(i, 0.4); this.cells.addChild(n) }
-        if (edges.length) for (const n of this.ambient.shore(cx, cy, edges, i)) { n.zIndex = z(i, 0.5); this.cells.addChild(n) }
+        const deep = land!.terrain !== 'shallow', zw = z(i, 0.4), zs = z(i, 0.5)
+        if (animate) this.ambient.add(cx, cy, () => [
+          ...this.ambient.water(cx, cy, i, deep, edges.length > 0).map((n) => [n, zw] as [Container, number]),
+          ...(edges.length ? this.ambient.shore(cx, cy, edges, i).map((n) => [n, zs] as [Container, number]) : []),
+        ])
       } else if ((land!.terrain === 'meadow' || land!.terrain === 'savannah') && !land!.feature && !things.has(i) && ((i * 2654435761) >>> 0) % 3 === 0) {
-        const g = this.ambient.field(cx, cy, i, 2)
-        g.zIndex = z(i, 0.5); this.cells.addChild(g)
+        const zf = z(i, 0.5)
+        if (animate) this.ambient.add(cx, cy, () => [[this.ambient.field(cx, cy, i, 2), zf]])
       }
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
         this.cells.addChild(this.road(world, i, cx, cy, roadSet, hubs)).zIndex = z(i, 1)
@@ -356,8 +365,8 @@ export class MapView {
         s.zIndex = z(i, 3)
         this.cells.addChild(s)
         if (l.name === 'f_farm' && l.alpha === 1) {
-          const g = this.ambient.field(cx, cy, i + 0.5)
-          g.zIndex = z(i, 3.2); this.cells.addChild(g)
+          const zf = z(i, 3.2)
+          if (animate) this.ambient.add(cx, cy, () => [[this.ambient.field(cx, cy, i + 0.5), zf]])
         }
       }
     }
@@ -573,16 +582,26 @@ export class MapView {
     const legs: [number, number][][] = upLegs.length
       ? upLegs.map((u, k) => (k === 0 ? [...u.slice(1, -1), ...main] : u.slice(1)))
       : [main]
-    legs.forEach((pts, k) => {
-      for (const n of this.ambient.stream(pts, width, i * 7 + k)) { n.zIndex = z(i, 1.1); this.cells.addChild(n) }
-    })
+    const zr = z(i, 1.1)
+    const animate = !this.last?.showAll
+    if (animate) this.ambient.add(cx, cy, () => legs.flatMap((pts, k) => this.ambient.stream(pts, width, i * 7 + k).map((n) => [n, zr] as [Container, number])))
     // a waterfall shows only on the cliff faces facing us (the hex below is SE, S or SW)
     const drop = cell.tier - down.tier
     const k = neighbours(cell.col, cell.row).findIndex(([nc, nr]) => nr * world.width + nc === cell.riverTo)
     if (drop > 0 && k >= 1 && k <= 3 && revealed.has(cell.riverTo)) {
-      const [col, splash] = this.ambient.fall(lip[0], lip[1], drop * TP, width, i)
-      for (const n of col) { n.zIndex = z(i, 1.2); this.cells.addChild(n) }
-      for (const n of splash) { n.zIndex = z(cell.riverTo, 1.2); this.cells.addChild(n) }
+      // the water column down the cliff (static), then its motion (animated, near the camera only)
+      const w = Math.max(2, width), x0 = Math.round(lip[0] - w / 2), y0 = Math.round(lip[1]), h = drop * TP
+      const col = new Graphics()
+      col.rect(x0 - 1, y0, w + 2, h).fill({ color: 0x2868b8 })
+      col.rect(x0, y0, w, h).fill({ color: 0x50a8f0 })
+      col.cullable = true
+      col.zIndex = z(i, 1.15)
+      this.cells.addChild(col)
+      const zc = z(i, 1.2), zd = z(cell.riverTo, 1.2)
+      if (animate) this.ambient.add(lip[0], lip[1], () => {
+        const [col, splash] = this.ambient.fall(lip[0], lip[1], drop * TP, width, i)
+        return [...col.map((n) => [n, zc] as [Container, number]), ...splash.map((n) => [n, zd] as [Container, number])]
+      })
     }
   }
 

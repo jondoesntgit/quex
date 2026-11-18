@@ -5,6 +5,8 @@
  *  when the player has asked for reduced motion. Purely cosmetic. */
 import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 
+/** animated spots built at once (each is a hex's worth of ripples, surf, current or shimmer) */
+const MAX_LIVE = 300
 const FOAM = 0xf4fbff
 const GLINT = 0xffffff
 const RIPPLE_SHALLOW = 0xc8ecff
@@ -27,23 +29,30 @@ const hash = (a: number, b: number) => {
   return s - Math.floor(s)
 }
 
-interface Surf {
-  waves: Graphics[]; drawn: number[]; rim: Graphics; phase: number; period: number
-  cx: number; cy: number; segs: [number, number, number, number][] // relative to the hex centre
-}
+interface Surf { waves: Container[]; rim: Graphics; phase: number; period: number }
 
-/** A crisp one-pixel line (Bresenham), as filled pixels: no blurry strokes. */
-function pixelLine(g: Graphics, x0: number, y0: number, x1: number, y1: number) {
-  let x = Math.round(x0), y = Math.round(y0)
-  const X = Math.round(x1), Y = Math.round(y1)
-  const dx = Math.abs(X - x), dy = -Math.abs(Y - y), sx = x < X ? 1 : -1, sy = y < Y ? 1 : -1
-  let err = dx + dy
-  for (let n = 0; n < 512; n++) {
-    g.rect(x, y, 1, 1)
-    if (x === X && y === Y) break
-    const e2 = 2 * err
-    if (e2 >= dy) { err += dy; x += sx }
-    if (e2 <= dx) { err += dx; y += sy }
+/** Crescent-shaped foam crests along an edge (relative to the hex centre):
+ *  broken into a few arcs of uneven length that bulge out toward the water,
+ *  with a little wobble, so the surf never reads as a ruled line. */
+function crests(g: Graphics, x0: number, y0: number, x1: number, y1: number, seed: number, bulge: number) {
+  const ex = x1 - x0, ey = y1 - y0
+  const len = Math.hypot(ex, ey) || 1
+  // unit normal pointing into the hex (toward the centre, which is the origin)
+  let nx = -ey / len, ny = ex / len
+  if (nx * -(x0 + x1) + ny * -(y0 + y1) < 0) { nx = -nx; ny = -ny }
+  const arcs = 2 + Math.floor(hash(seed, 1) * 2)
+  for (let k = 0; k < arcs; k++) {
+    const a0 = (k + 0.08 + hash(seed, k + 2) * 0.2) / arcs
+    const a1 = (k + 0.92 - hash(seed, k + 5) * 0.2) / arcs
+    const amp = bulge * (0.6 + hash(seed, k + 8) * 0.8)
+    const N = 8
+    for (let j = 0; j <= N; j++) {
+      const u = j / N, t = a0 + (a1 - a0) * u
+      const off = amp * Math.sin(Math.PI * u) + 0.3 * Math.sin(u * 7 + seed)
+      const x = x0 + ex * t + nx * off, y = y0 + ey * t + ny * off
+      if (j === 0) g.moveTo(x, y)
+      else g.lineTo(x, y)
+    }
   }
 }
 /** bottom layer: a one-pixel-high dash drifting right across a water hex, a pixel at a time */
@@ -69,7 +78,6 @@ export class Ambient {
   private puffSurf = new Map<Surf, Puff[]>()
   private fields: Field[] = []
   private reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
-  private on = true
 
   private W: number
 
@@ -81,7 +89,49 @@ export class Ambient {
   }
 
   /** The scene is being rebuilt: forget the old pieces (their owner destroys them). */
-  reset() { this.surf = []; this.fields = []; this.ripples = []; this.sparks = []; this.puffs = []; this.puffSurf.clear(); this.flecks = []; this.drops = []; this.splash = [] }
+  reset() { this.specs = []; this.live = []; this.win = null; this.forget() }
+
+  private forget() { this.surf = []; this.fields = []; this.ripples = []; this.sparks = []; this.puffs = []; this.puffSurf.clear(); this.flecks = []; this.drops = []; this.splash = [] }
+
+  // Only the hexes around the camera get real objects: the scene records a
+  // cheap spec per animated spot, and `view` builds the ones inside a window
+  // around what's on screen, rebuilding as the camera leaves it. The world
+  // has thousands of water hexes; drawing (and culling) them all every frame
+  // halved the frame rate on phones.
+  private specs: { x: number; y: number; build: () => [Container, number][] }[] = []
+  private live: Container[] = []
+  private win: [number, number, number, number] | null = null
+
+  /** Record an animated spot at (x, y); `build` makes its nodes with their zIndex when it comes into view. */
+  add(x: number, y: number, build: () => [Container, number][]) { this.specs.push({ x, y, build }) }
+
+  /** Keep the animated objects for the area on screen (x0..x1, y0..y1 in world px) in `parent`. */
+  view(parent: Container, x0: number, y0: number, x1: number, y1: number, scale: number) {
+    if (this.reduced || scale < 0.5) {
+      if (this.live.length) this.clearLive(parent)
+      this.win = null
+      return
+    }
+    const w = this.win
+    if (w && x0 >= w[0] && y0 >= w[1] && x1 <= w[2] && y1 <= w[3]) return
+    this.clearLive(parent)
+    const mx = (x1 - x0) * 0.25 + this.W, my = (y1 - y0) * 0.25 + this.W
+    const nw: [number, number, number, number] = [x0 - mx, y0 - my, x1 + mx, y1 + my]
+    this.win = nw
+    // at most MAX_LIVE spots, nearest the middle of the screen first
+    const mxc = (x0 + x1) / 2, myc = (y0 + y1) / 2
+    const near = this.specs.filter((sp) => sp.x >= nw[0] && sp.x <= nw[2] && sp.y >= nw[1] && sp.y <= nw[3])
+    if (near.length > MAX_LIVE) near.sort((a, b) => Math.hypot(a.x - mxc, (a.y - myc) * 2) - Math.hypot(b.x - mxc, (b.y - myc) * 2))
+    for (const sp of near.slice(0, MAX_LIVE)) {
+      for (const [n, z] of sp.build()) { n.zIndex = z; parent.addChild(n); this.live.push(n) }
+    }
+  }
+
+  private clearLive(parent: Container) {
+    for (const n of this.live) { parent.removeChild(n); n.destroy({ children: true }) }
+    this.live = []
+    this.forget()
+  }
 
   /** Current on a stream: light flecks drifting downstream along `pts` (upstream first). */
   stream(pts: [number, number][], width: number, seed: number): Sprite[] {
@@ -89,7 +139,7 @@ export class Ambient {
     for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]))
     const len = cum[cum.length - 1]
     if (len < 4) return []
-    const n = Math.max(1, Math.round(len / 9))
+    const n = Math.max(1, Math.round(len / 14))
     const out: Sprite[] = []
     const speed = 5 + hash(seed, 150) * 2
     for (let k = 0; k < n; k++) {
@@ -101,15 +151,12 @@ export class Ambient {
     return out
   }
 
-  /** A waterfall down a cliff face: x at the lip, from y `top` down `h` pixels. Returns [column nodes, splash nodes]. */
+  /** A waterfall's motion down a cliff face: x at the lip, from y `top` down `h` pixels. Returns [streaks, splash]. */
   fall(x: number, top: number, h: number, width: number, seed: number): [Container[], Sprite[]] {
     const w = Math.max(2, width)
     const x0 = Math.round(x - w / 2), y0 = Math.round(top)
-    const col = new Graphics()
-    col.rect(x0 - 1, y0, w + 2, h).fill({ color: 0x2868b8 })
-    col.rect(x0, y0, w, h).fill({ color: 0x50a8f0 })
-    col.cullable = true
-    const nodes: Container[] = [col]
+    // (the water column itself is static, drawn with the river)
+    const nodes: Container[] = []
     // streaks falling down the column, a pixel at a time
     for (let k = 0; k < Math.max(2, Math.round(w * h / 24)); k++) {
       const s = this.dot(FALL_STREAK, 0.9)
@@ -141,7 +188,7 @@ export class Ambient {
   water(cx: number, cy: number, seed: number, deep: boolean, shore: boolean): Sprite[] {
     const out: Sprite[] = []
     const hh = this.W / 4, hw = this.W / 2
-    const n = Math.max(2, Math.round(this.W / 16))
+    const n = 2
     for (let k = 0; k < n; k++) {
       // one row per ripple, spread over the hex, at least a pixel from the rim
       const dy = Math.round(((k + 0.5) / n - 0.5) * (hh * 2 - 4) + (hash(seed, k + 50) - 0.5) * 2)
@@ -165,34 +212,28 @@ export class Ambient {
 
   /** Surf for a water hex: `edges` are its shore edges as corner pairs around (cx, cy). Returns nodes to add. */
   shore(cx: number, cy: number, edges: [number, number, number, number][], seed: number): Container[] {
-    const segs: [number, number, number, number][] = []
-    for (const [x0, y0, x1, y1] of edges) {
-      // broken strokes: three pieces with small gaps, each one pixel chunk
-      const pieces = 3
-      for (let k = 0; k < pieces; k++) {
-        const h = hash(seed + k, x0 + y1)
-        const u0 = (k + 0.1 + h * 0.12) / pieces, u1 = (k + 0.9 - h * 0.12) / pieces
-        segs.push([x0 + (x1 - x0) * u0 - cx, y0 + (y1 - y0) * u0 - cy, x0 + (x1 - x0) * u1 - cx, y0 + (y1 - y0) * u1 - cy])
-      }
-    }
-    // the rim sits right at the waterline, two pixels thick
+    const rel = edges.map(([x0, y0, x1, y1]) => [x0 - cx, y0 - cy, x1 - cx, y1 - cy] as [number, number, number, number])
+    // foam at the waterline: soft, slightly wavy, a touch inside the hex
     const rim = new Graphics()
-    const f0 = 1 - 1 / (this.W / 4)
-    for (const [ax, ay, bx, by] of segs) {
-      pixelLine(rim, cx + ax * f0, cy + ay * f0, cx + bx * f0, cy + by * f0)
-      // thicken toward the water: down/up for flat edges, sideways for slanted ones (no checkerboard)
-      const flat = Math.abs(ay - by) < 1
-      const ox = flat ? 0 : -Math.sign(ax + bx), oy = flat ? -Math.sign(ay + by) : 0
-      pixelLine(rim, cx + ax * f0 + ox, cy + ay * f0 + oy, cx + bx * f0 + ox, cy + by * f0 + oy)
-    }
-    rim.fill({ color: FOAM })
+    rel.forEach(([x0, y0, x1, y1], e) => crests(rim, x0 * 0.95, y0 * 0.95, x1 * 0.95, y1 * 0.95, seed * 3 + e, 0.8))
+    rim.stroke({ width: 1.5, color: FOAM, cap: 'round', join: 'round' })
+    rim.x = cx; rim.y = cy
     rim.cullable = true
-    const waves = [new Graphics(), new Graphics()]
-    for (const w of waves) w.cullable = true
+    // two incoming crests, each its own shape, that glide in and break
+    const waves = [0, 1].map((k) => {
+      const c = new Container()
+      c.x = cx; c.y = cy
+      c.cullable = true
+      const g = new Graphics()
+      rel.forEach(([x0, y0, x1, y1], e) => crests(g, x0, y0, x1, y1, seed * 5 + e * 7 + k * 13, 2.2))
+      g.stroke({ width: 1.5, color: FOAM, cap: 'round', join: 'round' })
+      c.addChild(g)
+      return c
+    })
     // foam puffs at the waterline, rising off each breaking wave
     const puffs: Sprite[] = []
     edges.forEach(([x0, y0, x1, y1], e) => {
-      for (let k = 0; k < 2; k++) {
+      for (let k = 0; k < 1; k++) {
         const u = 0.25 + 0.5 * hash(seed + e, k + 130)
         const px = x0 + (x1 - x0) * u, py = y0 + (y1 - y0) * u
         const sp = this.dot(FOAM, 0)
@@ -202,7 +243,7 @@ export class Ambient {
         puffs.push(sp)
       }
     })
-    const s: Surf = { waves, drawn: [-1, -1], rim, cx, cy, segs, phase: hash(seed, 3.1) * 0.35 + (cx * 0.004 + cy * 0.002), period: 4.2 + hash(seed, 7) * 1.4 }
+    const s: Surf = { waves, rim, phase: hash(seed, 3.1) * 0.35 + (cx * 0.004 + cy * 0.002), period: 4.2 + hash(seed, 7) * 1.4 }
     this.surf.push(s)
     for (const p of this.puffs.slice(-puffs.length)) p.period = s.period
     // puffs follow their own surf's timing
@@ -228,55 +269,23 @@ export class Ambient {
 
   /** Per frame. `scale` is the scene scale (below 1 when zoomed out). */
   update(t: number, scale: number) {
-    const on = !this.reduced && scale >= 0.5
-    if (!on) {
-      if (this.on) {
-        // settle everything to rest once
-        for (const s of this.surf) { for (const w of s.waves) w.visible = false; s.rim.alpha = 0.7 }
-        for (const r of this.ripples) r.s.visible = false
-        for (const sp of this.sparks) sp.s.visible = false
-        for (const p of this.puffs) p.s.visible = false
-        for (const f of this.flecks) f.s.visible = false
-        for (const d of this.drops) d.s.visible = false
-        for (const p of this.splash) p.s.visible = false
-        for (const f of this.fields) f.g.visible = false
-        this.on = false
-      }
-      return
-    }
-    if (!this.on) {
-      for (const s of this.surf) for (const w of s.waves) w.visible = true
-      for (const r of this.ripples) r.s.visible = true
-      for (const sp of this.sparks) sp.s.visible = true
-      for (const p of this.puffs) p.s.visible = true
-      for (const f of this.flecks) f.s.visible = true
-      for (const d of this.drops) d.s.visible = true
-      for (const p of this.splash) p.s.visible = true
-      for (const f of this.fields) f.g.visible = true
-      this.on = true
-    }
+    if (!this.live.length || scale < 0.5) return
 
     for (const s of this.surf) {
       if (s.rim.culled) continue
       // two waves, half a cycle apart, roll in from well out, brighten,
       // break on the shore and fade back into the sea
       let brk = 0
-      const reach = Math.floor(this.W / 8) // pixels out to sea where a wave starts
       let breakU = -1
       s.waves.forEach((w, k) => {
         const u = ((t / s.period + s.phase + k * 0.5) % 1 + 1) % 1
-        // whole pixels only: the wave steps in one pixel at a time (redrawn only when it moves)
-        const d = 3 + Math.round(reach * (1 - Math.sin(u * Math.PI / 2)))
-        if (s.drawn[k] !== d) {
-          s.drawn[k] = d
-          const f = 1 - d / (this.W / 4)
-          w.clear()
-          for (const [ax, ay, bx, by] of s.segs) pixelLine(w, s.cx + ax * f, s.cy + ay * f, s.cx + bx * f, s.cy + by * f)
-          w.fill({ color: FOAM })
-        }
-        w.alpha = u < 0.8 ? 0.2 + 0.8 * (u / 0.8) : 1 - (u - 0.8) / 0.2
-        brk = Math.max(brk, 1 - Math.abs(u - 0.88) * 6)
-        if (u >= 0.8) breakU = (u - 0.8) / 0.2
+        // swash and backwash: the crest glides up to the shore, then slides back out to sea
+        const p = 0.5 - 0.5 * Math.cos(u * Math.PI * 2) // 0 out at sea, 1 at the shore (u = 0.5)
+        w.scale.set(0.62 + 0.36 * p)
+        // bright on the way in, a fainter film of foam on the way back
+        w.alpha = u < 0.5 ? 0.15 + 0.85 * p : 0.1 + 0.55 * p
+        brk = Math.max(brk, 1 - Math.abs(u - 0.5) * 6)
+        if (u >= 0.45 && u < 0.75) breakU = (u - 0.45) / 0.3
       })
       // the foam line at the waterline swells white as each wave breaks
       s.rim.alpha = 0.55 + 0.45 * Math.max(0, brk)
