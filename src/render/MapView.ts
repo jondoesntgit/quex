@@ -4,7 +4,7 @@
  *  1 sprite px) and upscaled by CSS with `image-rendering: pixelated`, so
  *  every zoom level >= 1 is a clean integer scale and nothing is smoothed.
  *  Below 1 (overview zooms) the canvas is screen-sized and the scene is
- *  scaled down instead, sampling mipmaps so the continent stays readable.
+ *  scaled down instead, so the whole continent fits on screen.
  *
  *  Painter's order: rows top to bottom, even columns before odd ones (odd
  *  columns sit half a hex lower). Each hex draws terrain column, river,
@@ -86,9 +86,18 @@ export class MapView {
   /** Create the Pixi app and canvas. Also used to rebuild after the GPU context
    *  is lost (laptop sleep, graphics switch) and the browser doesn't give it
    *  back: the scene and the tile images are still in memory, so no network. */
-  private async startRenderer() {
-    // WebGL: its context loss/restore is the best supported path in browsers
-    await this.app.init({ width: 10, height: 10, antialias: false, background: '#141424', resolution: 1, roundPixels: true, preference: 'webgl' })
+  private async startRenderer(): Promise<void> {
+    // WebGL by default (its context loss/restore is the best supported path);
+    // ?renderer=canvas|webgl|webgpu overrides, and a failed texture check
+    // below falls back to the canvas renderer.
+    await this.app.init({ width: 10, height: 10, antialias: false, background: '#141424', resolution: 1, roundPixels: true, preference: this.preference })
+    if (this.preference !== 'canvas' && !this.texturesWork()) {
+      console.warn(`Tiles render blank with ${this.preference}: switching to the canvas renderer`)
+      this.app.destroy({ removeView: true }, { children: false, texture: false, textureSource: false })
+      this.app = new Application()
+      this.preference = 'canvas'
+      return this.startRenderer()
+    }
     const c = this.app.canvas
     c.style.width = '100%'
     c.style.height = '100%'
@@ -109,6 +118,30 @@ export class MapView {
     this.app.stage.addChild(this.root)
     this.resize()
     this.bindInput()
+  }
+
+  /** Renderer to try first (see startRenderer). */
+  preference: 'webgl' | 'webgpu' | 'canvas' = (() => {
+    const r = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('renderer') : null
+    return r === 'canvas' || r === 'webgpu' ? r : 'webgl'
+  })()
+
+  /** Draw one grass tile off-screen and read it back: some phone GPUs leave
+   *  textures blank (flat white quads). A real tile has many colours. */
+  private texturesWork(): boolean {
+    const t = this.atlas.tex('t_grass_0')
+    if (!t) return true
+    try {
+      const s = new Sprite(t.texture)
+      const { pixels } = this.app.renderer.extract.pixels({ target: s })
+      s.destroy()
+      const seen = new Set<number>()
+      for (let i = 0; i < pixels.length; i += 4 * 7) if (pixels[i + 3] > 200) seen.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2])
+      return seen.size >= 3
+    } catch (e) {
+      console.warn('texture check failed', e)
+      return true // can't tell: keep the renderer we have
+    }
   }
 
   private lostTimer?: ReturnType<typeof setTimeout>

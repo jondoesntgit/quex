@@ -1,4 +1,4 @@
-import { Assets, Rectangle, Texture } from 'pixi.js'
+import { Assets, loadTextures, Rectangle, Texture } from 'pixi.js'
 
 export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number }
 export interface AtlasMeta { size: number; face: number; tier: number; maxTier: number; variants: number; frames: Record<string, Frame> }
@@ -12,17 +12,21 @@ export interface Atlas {
  *  (shorter than an oak, per the art rules) stays recognisable. */
 export const TILE_SIZE = Number(import.meta.env.VITE_TILE_SIZE ?? 64)
 
+// Decode images with a plain <img> on the main thread instead of
+// createImageBitmap in a worker: the most compatible path on iOS Safari.
+if (loadTextures.config) {
+  loadTextures.config.preferWorkers = false
+  loadTextures.config.preferCreateImageBitmap = false
+}
+
 export async function loadAtlas(size = TILE_SIZE): Promise<Atlas> {
   const base = `${import.meta.env.BASE_URL}art/${size}/`
   const meta: AtlasMeta = await (await fetch(base + 'atlas.json')).json()
   const sheet: Texture = await Assets.load(base + 'atlas.png')
-  // crisp when shown at 1x or larger; smooth (mipmapped) when zoomed out below 1x
-  const src = sheet.source
-  src.magFilter = 'nearest'
-  src.minFilter = 'linear'
-  src.mipmapFilter = 'linear'
-  src.autoGenerateMipmaps = true
-  src.updateMipmaps()
+  // Plain nearest-neighbour sampling, no mipmaps: the simplest texture setup,
+  // which every phone GPU handles (mipmapped sampling left iPhones with blank
+  // white tiles). Zoomed-out overviews shimmer a little more; that's fine.
+  sheet.source.scaleMode = 'nearest'
   const cache = new Map<string, { texture: Texture; frame: Frame }>()
   return {
     meta,
