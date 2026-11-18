@@ -74,6 +74,8 @@ export interface Village {
   outposts: { col: number; row: number }[]
   roads: number[]
   planted: { cell: number; date: ISODate }[]
+  /** hexes whose trees were felled */
+  cleared: number[]
   winterForecast: 'stocked' | 'tight' | 'hungry'
 }
 

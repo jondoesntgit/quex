@@ -71,6 +71,8 @@ export interface BuildingDef {
   resource?: Resource[]
   /** or a neighbouring hex must have one of these terrains */
   nearTerrain?: Terrain[]
+  /** may be dug into a mountain (mines, quarries); everything else needs open ground */
+  mountain?: boolean
   produces?: Goods
   consumes?: Goods
   /** seasonal crop: affected by weekday seasons + rain habit */
@@ -104,11 +106,11 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 4 }, blurb: 'Boats reach deeper water.' }),
   shipyard: B({ id: 'shipyard', name: 'Shipyard', role: 'port', size: 'big', cost: { planks: 10, iron: 3, cloth: 2 }, nearTerrain: ['shallow', 'ocean'], blurb: 'NPC trade at the best rates; ships for explorers.' }),
   // mining
-  quarry: B({ id: 'quarry', name: 'Quarry', role: 'mining', size: 'medium', cost: { timber: 2 }, nearTerrain: ['rock', 'hills'], produces: { stone: 2.5 }, blurb: 'Building stone from the hillside.' }),
+  quarry: B({ id: 'quarry', name: 'Quarry', role: 'mining', size: 'medium', cost: { timber: 2 }, nearTerrain: ['rock', 'hills'], mountain: true, produces: { stone: 2.5 }, blurb: 'Building stone from the hillside.' }),
   kiln: B({ id: 'kiln', name: 'Brick kiln', role: 'mining', size: 'medium', cost: { stone: 3 }, consumes: { clay: 2, timber: 0.5 }, produces: { bricks: 2 }, blurb: 'Fired bricks from river clay.' }),
-  copper_mine: B({ id: 'copper_mine', name: 'Copper mine', role: 'mining', size: 'big', cost: { timber: 4, stone: 2 }, resource: ['copper'], produces: { copper_ore: 2 }, blurb: 'Green-streaked ore.' }),
+  copper_mine: B({ id: 'copper_mine', name: 'Copper mine', role: 'mining', size: 'big', cost: { timber: 4, stone: 2 }, resource: ['copper'], mountain: true, produces: { copper_ore: 2 }, blurb: 'Green-streaked ore.' }),
   smelter: B({ id: 'smelter', name: 'Smelter', role: 'mining', size: 'big', cost: { stone: 6, bricks: 4 }, consumes: { copper_ore: 2, charcoal: 1 }, produces: { copper: 2 }, blurb: 'Copper: cookware, pipes, bells, coins.' }),
-  iron_mine: B({ id: 'iron_mine', name: 'Deep iron mine', role: 'mining', size: 'big', cost: { timber: 6, planks: 2 }, resource: ['iron'], produces: { iron_ore: 2 }, blurb: 'Needs timber shaft supports.' }),
+  iron_mine: B({ id: 'iron_mine', name: 'Deep iron mine', role: 'mining', size: 'big', cost: { timber: 6, planks: 2 }, resource: ['iron'], mountain: true, produces: { iron_ore: 2 }, blurb: 'Needs timber shaft supports.' }),
   bloomery: B({ id: 'bloomery', name: 'Bloomery', role: 'mining', size: 'big', cost: { stone: 6, bricks: 6 }, consumes: { iron_ore: 2, charcoal: 3 }, produces: { iron: 1 }, blurb: 'Hot work. Lots of charcoal.' }),
   bronze_foundry: B({ id: 'bronze_foundry', name: 'Bronze foundry', role: 'mining', size: 'big', cost: { bricks: 6, copper: 2 }, consumes: { copper: 1.8, tin: 0.2, charcoal: 1 }, produces: { bronze: 2 }, blurb: 'Copper plus traded tin, about 9:1.' }),
   // forestry
@@ -128,11 +130,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'plant' | 'road' | 'build' | 'caravan' | 'outpost' | 'expedition'
+export type ActionKind = 'scout' | 'gather' | 'clear' | 'plant' | 'road' | 'build' | 'caravan' | 'outpost' | 'expedition'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
   gather: { size: 'small', name: 'Gather', blurb: 'Collect a hex’s resource by hand.' },
+  clear: { size: 'small', name: 'Fell trees', blurb: 'Clear the hex for building; keep the timber.' },
   plant: { size: 'small', name: 'Plant trees', blurb: 'Grassland slowly becomes forest.' },
   road: { size: 'small', name: 'Dirt road', blurb: 'Faster caravans through this hex.' },
   build: { size: 'medium', name: 'Build', blurb: 'Raise a building in your territory.' },

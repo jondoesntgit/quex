@@ -5,7 +5,8 @@
  */
 import { distance, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
-import type { Terrain, World } from '../world/types'
+import { hasTrees, isOpen, MOUNTAIN_TERRAIN, type Land } from '../world/land'
+import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, weekSeason, weekday } from './calendar'
 import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
@@ -61,14 +62,35 @@ export function territoryCells(world: World, v: Village): number[] {
   return [...out]
 }
 
-/** Terrain after player changes (planted forests mature after 3 days). */
-export function effectiveTerrain(world: World, s: GameState, i: number, today?: ISODate): Terrain {
-  const base = world.cells[i].terrain
+export interface LandNow extends Land { resource: Resource | null }
+
+const WOOD_RESOURCES: readonly Resource[] = ['timber', 'game', 'berries']
+
+/** A hex after player changes: felled trees leave open grass (and no more
+ *  woodland resource); planted saplings grow into forest after 3 days. */
+export function landAt(world: World, s: GameState, i: number, today?: ISODate): LandNow {
+  const cell = world.cells[i]
+  let terrain: Terrain = cell.terrain
+  let feature: Feature | null = cell.feature
+  let resource = cell.resource
   for (const v of Object.values(s.villages)) {
+    if (v.cleared?.includes(i)) {
+      feature = null
+      if (terrain === 'forest') terrain = 'grass'
+      if (resource && WOOD_RESOURCES.includes(resource)) resource = null
+    }
     const p = v.planted.find((x) => x.cell === i)
-    if (p && (!today || daysBetween(p.date, today) >= 3)) return 'forest'
+    if (p) {
+      const grown = !today || daysBetween(p.date, today) >= 3
+      if (grown) terrain = 'forest'
+      feature = grown ? 'oak3' : 'oak1'
+    }
   }
-  return base
+  return { terrain, feature, resource, tier: cell.tier }
+}
+
+export function effectiveTerrain(world: World, s: GameState, i: number, today?: ISODate): Terrain {
+  return landAt(world, s, i, today).terrain
 }
 
 export function buildingAt(s: GameState, col: number, row: number) {
@@ -194,7 +216,8 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   const i = cellIndex(world, ev.col, ev.row)
   const cell = world.cells[i]
   const revealed = p.revealed.includes(i)
-  const terr = effectiveTerrain(world, s, i)
+  const land = landAt(world, s, i)
+  const terr = land.terrain
   switch (ev.action) {
     case 'scout': {
       if (revealed) return null
@@ -203,13 +226,19 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     }
     case 'gather': {
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
-      if (!cell.resource || !GATHER[cell.resource]) return 'Nothing to gather here'
+      if (!land.resource || !GATHER[land.resource]) return 'Nothing to gather here'
       return null
     }
+    case 'clear':
+      if (!hasTrees(land)) return 'No trees to fell here'
+      if (!territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Only in or next to your territory'
+      if (buildingAt(s, ev.col, ev.row) || villageAt(s, ev.col, ev.row)) return 'Something is built here'
+      return null
     case 'plant':
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
       if (!['grass', 'meadow', 'savannah', 'hills'].includes(terr)) return 'Trees need open grassland'
-      if (buildingAt(s, ev.col, ev.row) || v.planted.some((x) => x.cell === i)) return 'Something is already here'
+      if (hasTrees(land)) return 'There are trees here already'
+      if (buildingAt(s, ev.col, ev.row) || villageAt(s, ev.col, ev.row) || v.planted.some((x) => x.cell === i)) return 'Something is already here'
       return null
     case 'road':
       if (cell.tier === 0) return 'Roads need land'
@@ -226,11 +255,15 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
         if (existing.building.type === def.id && existing.building.progress < 1) return null // finishing
         return 'Something is already built here'
       }
+      const woodland = def.terrain?.includes('forest')
+      if (hasTrees(land) && !woodland) return 'Fell the trees here first'
+      if (MOUNTAIN_TERRAIN.includes(terr) && !def.mountain) return 'Too steep: only mines and quarries go on a mountain'
+      if (terr === 'swamp' && !def.terrain?.includes('swamp')) return 'Too boggy to build on'
       if (def.terrain && !def.terrain.includes(terr)) return `${def.name} needs ${def.terrain.join('/')}`
-      if (def.resource && !(cell.resource && def.resource.includes(cell.resource))) return `${def.name} needs a ${def.resource.join('/')} deposit`
+      if (def.resource && !(land.resource && def.resource.includes(land.resource))) return `${def.name} needs a ${def.resource.join('/')} deposit`
       if (def.nearTerrain && !spiral(ev, 1).some((o) => {
-        const c = world.cells[cellIndex(world, o.col, o.row)]
-        return c && def.nearTerrain!.includes(c.terrain)
+        if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
+        return def.nearTerrain!.includes(effectiveTerrain(world, s, cellIndex(world, o.col, o.row)))
       })) return `${def.name} must be next to ${def.nearTerrain.join('/')}`
       const cost = buildCost(v, def)
       if (!hasGoods(v, cost, tok.strength)) return `Needs ${fmtGoods(cost, tok.strength)}`
@@ -250,6 +283,8 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (cell.tier === 0) return 'Outposts need land'
       if (!revealed) return 'Scout there first'
       if (inTerritory(v, ev.col, ev.row)) return 'Already your territory'
+      if (hasTrees(land)) return 'Fell the trees there first'
+      if (!isOpen(land)) return 'Outposts need open ground'
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 4)) return 'Too far from your territory'
       if (Object.values(s.villages).some((o) => o.id !== v.id && inTerritory(o, ev.col, ev.row))) return 'That is a neighbour’s land'
       if (!hasGoods(v, { timber: 6, stone: 2 }, tok.strength)) return `Needs ${fmtGoods({ timber: 6, stone: 2 }, tok.strength)}`
@@ -324,7 +359,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   const v: Village = {
     id: vid, playerId: p.id, name: `${ev.name}’s ${ROLE_TOWN[ev.role]}`, role: ev.role,
     col: ev.site.col, row: ev.site.row, population: 5, morale: 60,
-    goods: { grain: 12, timber: 8, stone: 3, berries: 4 }, buildings: [], outposts: [], roads: [], planted: [],
+    goods: { grain: 12, timber: 8, stone: 3, berries: 4 }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',
   }
   s.players[p.id] = p
@@ -386,6 +421,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
   const k = tok.strength
   const i = cellIndex(world, ev.col, ev.row)
   const rng = rngFor(s.worldSeed, ev.id)
+  const land0 = landAt(world, s, i)
   consumeToken(p, tok.id)
   switch (ev.action) {
     case 'scout': {
@@ -397,13 +433,23 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       break
     }
     case 'gather': {
-      const g = GATHER[world.cells[i].resource!]!
+      const g = GATHER[land0.resource!]!
       const n = round2(3 * k)
       addGoods(v, { [g]: n })
       log(s, ev.at, p.id, `Gathered ${n} ${g.replace('_', ' ')}.`, 'good')
       break
     }
+    case 'clear': {
+      const wood = land0.terrain === 'forest' ? 3 : 1
+      const n = round2(wood * k)
+      v.planted = v.planted.filter((x) => x.cell !== i)
+      if (!v.cleared.includes(i)) v.cleared.push(i)
+      addGoods(v, { timber: n })
+      log(s, ev.at, p.id, `Trees felled: +${n} timber. The land is open.`, 'good')
+      break
+    }
     case 'plant':
+      v.cleared = v.cleared.filter((x) => x !== i)
       v.planted.push({ cell: i, date: ev.at.slice(0, 10) })
       log(s, ev.at, p.id, 'Saplings planted. A forest in three days.', 'good')
       break

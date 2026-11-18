@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { buildCost, buildingAt, cellIndex, effectiveTerrain, fmtGoods, inTerritory, villageAt } from '../game/reducer'
+import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, villageAt } from '../game/reducer'
+import { hasTrees } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, tryAction } from './helpers'
@@ -24,7 +25,9 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const here = buildingAt(state, col, row)
   const village = villageAt(state, col, row)
   const lair = state.lairs.find((l) => l.col === col && l.row === row && !l.cleared)
-  const terr = effectiveTerrain(world, state, i, game.today(p.id))
+  const land = landAt(world, state, i, game.today(p.id))
+  const terr = land.terrain
+  const trees = hasTrees(land)
   const mine = inTerritory(v, col, row)
 
   const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
@@ -46,7 +49,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   }
 
   const title = village ? village.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
-  const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, cell.resource && `${cell.resource} deposit`, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
+  const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, trees && 'trees', cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
   if (mode === 'build') {
     const defs = Object.values(BUILDINGS)
@@ -71,8 +74,9 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   else if (village && village.id !== v.id) acts.push('caravan')
   else {
     acts.push('scout')
-    if (mine && cell.resource) acts.push('gather')
-    if (mine && !here && !village) acts.push('plant')
+    if (trees && !here && !village) acts.push('clear')
+    if (mine && land.resource) acts.push('gather')
+    if (mine && !here && !village && !trees) acts.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
     if (cell.tier > 0) acts.push('road')
   }

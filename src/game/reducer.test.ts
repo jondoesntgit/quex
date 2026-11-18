@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { apply, dayScore, newGame, pendingTicks, validate } from './reducer'
+import { apply, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { spiral } from '../world/hex'
+import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
 
 const world: World = generateWorld('test-seed')
@@ -54,6 +56,58 @@ describe('1-2-3 tasks and tokens', () => {
   })
 })
 
+/** first hex in ann's territory matching a test */
+function findIn(s: GameState, pred: (i: number) => boolean) {
+  const v = s.villages.v_ann
+  return spiral(v, 2).find((o) => o.col >= 0 && o.row >= 0 && (o.col !== v.col || o.row !== v.row) && inTerritory(v, o.col, o.row) && pred(cellIndex(world, o.col, o.row)))
+}
+
+describe('land: clear ground, trees, mountains', () => {
+  it('every generated village site is clear, open ground', () => {
+    for (const seed of ['test-seed', 'a', 'b', 'quex-season-1']) {
+      const w = generateWorld(seed)
+      for (const rg of w.regions) for (const site of rg.sites) {
+        expect(isVillageSite(cellLand(w.cells[site.row * w.width + site.col]))).toBe(true)
+      }
+    }
+  })
+  it('trees must be felled before building; felling gives timber and opens the hex', () => {
+    const s = newGame(world, SUN)
+    // a forestry site has woods nearby
+    const site = sites.find((x) => x.role === 'forestry')!
+    apply(s, world, ev('join', 'ann', `${SUN}T08:00:00Z`, { name: 'Ann', role: 'forestry', site, resetHour: 0, tz: 0 }))
+    const at = `${SUN}T10:00:00Z`
+    const t = findIn(s, (i) => world.cells[i].terrain === 'forest')!
+    expect(t).toBeTruthy()
+    apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 1, status: 'full' }))
+    const med = s.players.ann.tokens[0]
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'house', ...t }))).toMatch(/[Ff]ell/)
+    // woodland buildings are fine among the trees
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'lumber_camp', ...t }))).toBeNull()
+    apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 3, status: 'full' }))
+    const small = s.players.ann.tokens.find((x) => x.size === 'small')!
+    const timber = s.villages.v_ann.goods.timber!
+    apply(s, world, ev('act', 'ann', at, { tokenId: small.id, action: 'clear', ...t }))
+    expect(s.villages.v_ann.goods.timber).toBe(timber + 3)
+    const land = landAt(world, s, cellIndex(world, t.col, t.row))
+    expect(hasTrees(land)).toBe(false)
+    expect(land.terrain).toBe('grass')
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'house', ...t }))).toBeNull()
+  })
+  it('mountains take mines and quarries, not houses', () => {
+    const s = newGame(world, SUN)
+    const site = sites.find((x) => x.role === 'mining')!
+    apply(s, world, ev('join', 'ann', `${SUN}T08:00:00Z`, { name: 'Ann', role: 'mining', site, resetHour: 0, tz: 0 }))
+    const at = `${SUN}T10:00:00Z`
+    const m = findIn(s, (i) => world.cells[i].terrain === 'rock')
+    if (!m) return // this seed's mining site has no mountain in reach
+    apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 1, status: 'full' }))
+    const med = s.players.ann.tokens[0]
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'house', ...m }))).toMatch(/steep/)
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'quarry', ...m }))).toBeNull()
+  })
+})
+
 describe('actions', () => {
   it('small tokens cannot build; medium can, and half tokens half-build', () => {
     const s = setup()
@@ -61,7 +115,7 @@ describe('actions', () => {
     const v = s.villages[s.players.ann.villageId]
     apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 3, status: 'full' }))
     const small = s.players.ann.tokens[0]
-    const target = { col: v.col + 1, row: v.row }
+    const target = spiral(v, 2).find((o) => (o.col !== v.col || o.row !== v.row) && isOpen(landAt(world, s, cellIndex(world, o.col, o.row))))!
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: small.id, action: 'build', building: 'house', ...target }))).toMatch(/medium/)
     apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 1, status: 'half' }))
     const med = s.players.ann.tokens.find((t) => t.size === 'medium')!

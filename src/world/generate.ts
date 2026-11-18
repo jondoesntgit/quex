@@ -10,6 +10,7 @@
 import { fbm, simplex2 } from './noise'
 import { hashString, rngFor, type Rng } from './rng'
 import { distance, neighbours } from './hex'
+import { cellLand, isVillageSite } from './land'
 import type { Cell, Lair, Region, Resource, Role, Terrain, VillageSite, World } from './types'
 
 export interface GenOptions {
@@ -348,7 +349,7 @@ function pickSites(
     for (let c = rg.col0 + margin; c < rg.col1 - margin; c++) {
       const i = idx(c, r)
       const cell = cells[i]
-      if (isWater(i) || cell.tier >= 6 || cell.terrain === 'rock' || cell.terrain === 'swamp' || cell.terrain === 'snow') continue
+      if (cell.tier >= 5 || !isVillageSite(cellLand(cell))) continue
       cand.push(i)
     }
   }
