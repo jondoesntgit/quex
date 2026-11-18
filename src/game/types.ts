@@ -13,6 +13,8 @@ export interface DayRecord {
   date: ISODate
   slots: Slot[]
   habitsDone: string[]
+  /** running totals for habits with a daily goal (e.g. water: { water: 5 }) */
+  amounts?: Record<string, number>
   frozen: boolean
   ticked: boolean
 }
@@ -30,6 +32,8 @@ export interface Habit {
   id: string
   name: string
   effect: HabitEffect
+  /** a daily amount to reach (water: 8 cups); reaching it ticks the habit */
+  goal?: { target: number; unit: string }
 }
 
 export interface Player {
@@ -126,6 +130,10 @@ export type GameEvent =
   | (Base & { t: 'habit'; date: ISODate; habitId: string; done: boolean })
   | (Base & { t: 'habitAdd'; habit: Habit })
   | (Base & { t: 'habitRemove'; habitId: string })
+  /** set a habit's daily target and unit */
+  | (Base & { t: 'habitGoal'; habitId: string; target: number; unit: string })
+  /** log progress toward a habit's daily goal (negative to correct a mistake) */
+  | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
   | (Base & { t: 'act'; tokenId: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
   | (Base & { t: 'tick'; date: ISODate })

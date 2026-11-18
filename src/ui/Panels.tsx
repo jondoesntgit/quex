@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, SIZE_POINTS, type Good } from '../game/data'
 import { dayScore, defence, foodStock, popCap, storageCap } from '../game/reducer'
-import type { Player, TaskStatus } from '../game/types'
+import type { Habit, Player, TaskStatus } from '../game/types'
+import { addDays, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
@@ -50,7 +51,9 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
       <p className="muted" style={{ margin: '0 0 4px' }}>
         Perfect days: {p.perfectStreak}/{PERFECT_DAYS_PER_SLOT} to unlock slot {Math.min(MAX_HABIT_SLOTS, p.habitSlots + 1)}. Missing a day never loses a slot.
       </p>
-      {p.habits.map((h) => (
+      {p.habits.map((h) => h.id === 'water' ? (
+        <WaterTracker key={h.id} game={game} p={p} habit={h} date={date} editable={editable} />
+      ) : (
         <label className="habit" key={h.id}>
           <input type="checkbox" disabled={!editable} checked={!!day?.habitsDone.includes(h.id)} onChange={(e) => toggleHabit(h.id, e.target.checked)} />
           {h.effect === 'rain' && <Icon name="water" size={16} />}
@@ -78,6 +81,106 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
           {day?.frozen ? 'Frozen ❄' : 'Freeze today'}
         </button>
       </div>
+    </div>
+  )
+}
+
+const UNITS = ['cups', 'glasses', 'bottles', 'ml', 'L', 'oz']
+/** Quick-add amounts that make sense for a unit. */
+function quickAmounts(unit: string): number[] {
+  const u = unit.toLowerCase()
+  if (u === 'ml') return [250, 500]
+  if (u === 'l' || u === 'litres' || u === 'liters') return [0.25, 0.5]
+  if (u === 'oz' || u === 'fl oz') return [8, 16]
+  return [1, 0.5]
+}
+const fmt = (n: number) => (Math.round(n * 100) / 100).toString()
+
+/** Water habit as a tracker: a glass that fills toward the day's target,
+ *  quick-add / custom amounts, and the last two weeks. Hitting the target
+ *  ticks the habit (and brings the rain). */
+function WaterTracker({ game, p, habit, date, editable }: { game: Game; p: Player; habit: Habit; date: string; editable: boolean }) {
+  const goal = habit.goal
+  const [setting, setSetting] = useState(!goal)
+  const [target, setTarget] = useState(String(goal?.target ?? 8))
+  const [unit, setUnit] = useState(goal?.unit ?? 'cups')
+  const [custom, setCustom] = useState('')
+  const [last, setLast] = useState<number | null>(null)
+  const total = p.days[date]?.amounts?.[habit.id] ?? 0
+  const pct = goal ? Math.min(100, (total / goal.target) * 100) : 0
+  const done = !!goal && total + 1e-9 >= goal.target
+  const at = () => game.now().toISOString()
+
+  const add = async (amount: number) => {
+    if (!amount) return
+    await game.dispatch({ t: 'drink', id: eventId(), at: at(), playerId: p.id, date, habitId: habit.id, amount })
+    setLast(amount)
+  }
+  const saveGoal = async () => {
+    const t = Number(target)
+    if (!(t > 0) || !unit.trim()) return
+    await game.dispatch({ t: 'habitGoal', id: eventId(), at: at(), playerId: p.id, habitId: habit.id, target: t, unit: unit.trim() })
+    setSetting(false)
+  }
+  const days = Array.from({ length: 14 }, (_, k) => addDays(date, k - 13))
+  const hist = days.map((d) => ({ d, n: p.days[d]?.amounts?.[habit.id] ?? 0 }))
+  const logged = hist.filter((x) => x.n > 0)
+  const avg = logged.length ? logged.reduce((s, x) => s + x.n, 0) / logged.length : 0
+
+  return (
+    <div className="water">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <b>💧 {habit.name}</b>
+        <span className="muted">Rain: +20% crops when you reach it</span>
+      </div>
+      {(setting || !goal) && editable ? (
+        <form className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }} onSubmit={(e) => { e.preventDefault(); saveGoal() }}>
+          <span>Daily target</span>
+          <input type="number" min="0" step="any" inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} style={{ width: 80 }} />
+          <input list="water-units" value={unit} maxLength={12} onChange={(e) => setUnit(e.target.value)} style={{ width: 90 }} />
+          <datalist id="water-units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+          <button type="submit" className="btn primary" disabled={!(Number(target) > 0) || !unit.trim()}>Save</button>
+          {goal && <button type="button" className="btn" onClick={() => setSetting(false)}>Cancel</button>}
+        </form>
+      ) : !goal ? (
+        <p className="muted">No daily target set yet.</p>
+      ) : (
+        <>
+          <div className="water-row">
+            <div className={`glass ${done ? 'full' : ''}`} title={`${fmt(total)} of ${fmt(goal.target)} ${goal.unit}`}>
+              <i style={{ height: `${pct}%` }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="water-total"><b>{fmt(total)}</b> / {fmt(goal.target)} {goal.unit} {done && <span className="done">✓ done!</span>}</div>
+              {editable && (
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                  {quickAmounts(goal.unit).map((q) => <button key={q} className="btn" onClick={() => add(q)}>+{fmt(q)}</button>)}
+                  <form className="row" style={{ gap: 4 }} onSubmit={(e) => { e.preventDefault(); const n = Number(custom); if (n) { add(n); setCustom('') } }}>
+                    <input type="number" step="any" inputMode="decimal" placeholder="amount" value={custom} onChange={(e) => setCustom(e.target.value)} style={{ width: 70 }} />
+                    <button type="submit" className="btn" disabled={!Number(custom)}>Add</button>
+                  </form>
+                  {last !== null && total > 0 && <button className="btn ghost" title="Undo the last entry" onClick={() => { add(-Math.min(last, total)); setLast(null) }}>↶ undo</button>}
+                  <button className="btn ghost" onClick={() => setSetting(true)} title="Change your daily target">⚙︎</button>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="water-hist" aria-label="Last 14 days">
+            {hist.map(({ d, n }) => (
+              <span key={d} title={`${d}: ${fmt(n)} ${goal.unit}`} className={d === date ? 'today' : ''}>
+                <i style={{ height: `${Math.min(100, (n / goal.target) * 100)}%` }} className={n + 1e-9 >= goal.target ? 'met' : ''} />
+                <small>{'SMTWTFS'[weekday(d)]}</small>
+              </span>
+            ))}
+          </div>
+          <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
+            {(() => {
+              const met = hist.filter((x) => x.n + 1e-9 >= goal.target).length
+              return `Last 14 days: target met ${met === 1 ? 'once' : `${met} times`}${logged.length ? `, about ${fmt(avg)} ${goal.unit} a day on days you logged` : ''}.`
+            })()}
+          </p>
+        </>
+      )}
     </div>
   )
 }

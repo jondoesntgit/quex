@@ -101,6 +101,20 @@ input { -webkit-user-select: text; user-select: text; }
 .tri button.on.full { background: var(--good); color: white; }
 
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.water { padding: 6px 0 8px; border-bottom: 1px dashed var(--paper-2); }
+.water input { border: 2px solid var(--paper-2); border-radius: var(--radius); padding: 4px 6px; font-size: 15px; background: white; }
+.water-row { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
+.glass { position: relative; width: 34px; height: 46px; border: 3px solid var(--ink); border-top-width: 2px; border-radius: 3px 3px 9px 9px; background: #f4f8ff; overflow: hidden; flex: none; }
+.glass i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#78b8ff, #3a78e0); transition: height .4s; }
+.glass.full { border-color: #2a60c0; }
+.water-total { font-size: 15px; }
+.water-total .done { color: var(--good, #287828); margin-left: 6px; }
+.water-hist { display: flex; gap: 3px; align-items: flex-end; height: 44px; margin-top: 8px; }
+.water-hist span { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+.water-hist i { display: block; width: 100%; min-height: 1px; background: #a8ccf8; border-radius: 2px 2px 0 0; }
+.water-hist i.met { background: #3a78e0; }
+.water-hist .today i { outline: 2px solid var(--ink); }
+.water-hist small { font-size: 9px; opacity: .7; }
 .habit { display: flex; gap: 8px; align-items: center; padding: 5px 0; }
 .habit input { width: 20px; height: 20px; accent-color: var(--good); }
 

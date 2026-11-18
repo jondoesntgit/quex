@@ -336,3 +336,40 @@ describe('renaming', () => {
     expect(validate(s, world, ev('rename', 'ann', `${SUN}T09:00:00Z`, { name: 'x'.repeat(21) }))).toBeTruthy()
   })
 })
+
+describe('water tracker', () => {
+  function withWater() {
+    const s = setup()
+    apply(s, world, ev('habitAdd', 'ann', `${SUN}T08:00:00Z`, { habit: { id: 'water', name: 'Drink water', effect: 'rain' } }))
+    return s
+  }
+  it('needs a target before logging', () => {
+    const s = withWater()
+    expect(validate(s, world, ev('drink', 'ann', `${SUN}T09:00:00Z`, { date: SUN, habitId: 'water', amount: 1 }))).toMatch(/target/)
+  })
+  it('adds up through the day and ticks the habit at the target', () => {
+    const s = withWater()
+    apply(s, world, ev('habitGoal', 'ann', `${SUN}T08:30:00Z`, { habitId: 'water', target: 8, unit: 'cups' }))
+    expect(s.players.ann.habits[0].goal).toEqual({ target: 8, unit: 'cups' })
+    for (let k = 0; k < 7; k++) apply(s, world, ev('drink', 'ann', `${SUN}T1${k}:00:00Z`, { date: SUN, habitId: 'water', amount: 1 }))
+    const d = s.players.ann.days[SUN]
+    expect(d.amounts?.water).toBe(7)
+    expect(d.habitsDone).not.toContain('water')
+    apply(s, world, ev('drink', 'ann', `${SUN}T18:00:00Z`, { date: SUN, habitId: 'water', amount: 1.5 }))
+    expect(d.amounts?.water).toBe(8.5)
+    expect(d.habitsDone).toContain('water')
+    // a correction below the target un-ticks it, and totals never go negative
+    apply(s, world, ev('drink', 'ann', `${SUN}T18:05:00Z`, { date: SUN, habitId: 'water', amount: -1 }))
+    expect(d.habitsDone).not.toContain('water')
+    apply(s, world, ev('drink', 'ann', `${SUN}T18:06:00Z`, { date: SUN, habitId: 'water', amount: -50 }))
+    expect(d.amounts?.water).toBe(0)
+  })
+  it('refuses silly targets and units, and logging after the day is over', () => {
+    const s = withWater()
+    expect(validate(s, world, ev('habitGoal', 'ann', `${SUN}T08:30:00Z`, { habitId: 'water', target: 0, unit: 'cups' }))).toBeTruthy()
+    expect(validate(s, world, ev('habitGoal', 'ann', `${SUN}T08:30:00Z`, { habitId: 'water', target: 2, unit: '' }))).toBeTruthy()
+    apply(s, world, ev('habitGoal', 'ann', `${SUN}T08:30:00Z`, { habitId: 'water', target: 2, unit: 'L' }))
+    apply(s, world, ev('tick', 'ann', `${addDays(SUN, 1)}T03:00:00Z`, { date: SUN }))
+    expect(validate(s, world, ev('drink', 'ann', `${addDays(SUN, 1)}T09:00:00Z`, { date: SUN, habitId: 'water', amount: 1 }))).toMatch(/over/)
+  })
+})

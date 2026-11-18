@@ -7,7 +7,7 @@ import { distance, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
 import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
-import { addDays, CROP_SEASON, daysBetween, weekSeason, weekday } from './calendar'
+import { addDays, CROP_SEASON, daysBetween, playerDate, weekSeason, weekday } from './calendar'
 import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type BuildingDef, type Good, type Goods,
@@ -219,6 +219,21 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       return null
     case 'habitRemove':
       return null
+    case 'habitGoal': {
+      if (!p.habits.some((h) => h.id === ev.habitId)) return 'Unknown habit'
+      if (!(ev.target > 0) || ev.target > 100_000) return 'Pick a target above zero'
+      const unit = ev.unit.trim()
+      if (!unit || unit.length > 12) return 'Pick a short unit, like cups or ml'
+      return null
+    }
+    case 'drink': {
+      const h = p.habits.find((x) => x.id === ev.habitId)
+      if (!h) return 'Unknown habit'
+      if (!h.goal) return 'Set a daily target first'
+      if (!Number.isFinite(ev.amount) || ev.amount === 0 || Math.abs(ev.amount) > 100_000) return 'Enter an amount'
+      if (p.days[ev.date]?.ticked) return 'That day is already over'
+      return null
+    }
     case 'freeze':
       if (p.freezes <= 0) return 'No freezes left this week'
       if (p.days[ev.date]?.frozen) return 'Already frozen'
@@ -372,6 +387,22 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'habitRemove':
       p.habits = p.habits.filter((h) => h.id !== ev.habitId)
       return s
+    case 'habitGoal': {
+      const h = p.habits.find((x) => x.id === ev.habitId)!
+      h.goal = { target: round2(ev.target), unit: ev.unit.trim() }
+      // a new target re-judges today
+      const d = p.days[playerDate(new Date(ev.at), p.resetHour, p.tz)]
+      if (d && !d.ticked) syncGoal(d, h)
+      return s
+    }
+    case 'drink': {
+      const h = p.habits.find((x) => x.id === ev.habitId)!
+      const d = ensureDay(p, ev.date)
+      const amounts = (d.amounts ??= {})
+      amounts[h.id] = Math.max(0, round2((amounts[h.id] ?? 0) + ev.amount))
+      syncGoal(d, h)
+      return s
+    }
     case 'freeze': {
       ensureDay(p, ev.date).frozen = true
       p.freezes--
@@ -405,6 +436,14 @@ function abandon(s: GameState, p: Player, at: string) {
   delete s.players[p.id]
   log(s, at, null, `${p.name} abandoned ${v.name}. The land is free again.`, 'info')
   return s
+}
+
+/** A habit with a goal is done exactly when the day's total reaches it. */
+function syncGoal(d: DayRecord, h: { id: string; goal?: { target: number } }) {
+  if (!h.goal) return
+  const done = (d.amounts?.[h.id] ?? 0) + 1e-9 >= h.goal.target
+  d.habitsDone = d.habitsDone.filter((x) => x !== h.id)
+  if (done) d.habitsDone.push(h.id)
 }
 
 function log(s: GameState, at: string, playerId: string | null, text: string, kind: LogEntry['kind']) {
