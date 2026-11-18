@@ -1,0 +1,2 @@
+# Minimal config so the Supabase CLI recognises this folder (used by CI `supabase db push`).
+project_id = "quex"
