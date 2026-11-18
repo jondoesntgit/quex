@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
-  <!-- Quex: the Q is a flat-top hex with a tail -->
-  <rect width="32" height="32" rx="6" fill="#141424"/>
-  <polygon points="4,16 10,6 22,6 28,16 22,26 10,26" fill="#78c850" stroke="#f8f0d8" stroke-width="2.5"/>
-  <polygon points="11,16 14,11 18,11 21,16 18,21 14,21" fill="#141424"/>
-  <path d="M19 20 L27 29" stroke="#f8d040" stroke-width="4" stroke-linecap="square"/>
-</svg>

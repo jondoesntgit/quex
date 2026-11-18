@@ -1,0 +1,13 @@
+{
+  "name": "Quex",
+  "short_name": "Quex",
+  "description": "Your to-do list builds a tiny village. A cosy co-op pixel-art hex game.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141424",
+  "theme_color": "#141424",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

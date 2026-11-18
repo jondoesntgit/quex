@@ -71,7 +71,9 @@ export class MapView {
     c.style.touchAction = 'none'
     c.style.display = 'block'
     host.appendChild(c)
-    this.root.addChild(this.cells, this.people.layer, this.overlay)
+    // villagers live inside `cells` so they sort into the painter's order with trees and houses
+    this.cells.sortableChildren = true
+    this.root.addChild(this.cells, this.overlay)
     this.app.ticker.add((t) => this.people.update(Math.min(0.1, t.deltaMS / 1000)))
     this.app.stage.addChild(this.root)
     this.ro = new ResizeObserver(() => this.resize())
@@ -127,7 +129,8 @@ export class MapView {
     const { world, state, viewer } = input
     const { tier: TP } = this.atlas.meta
     const W = this.W
-    this.cells.removeChildren().forEach((c) => c.destroy())
+    const walkers = new Set<unknown>(this.people.nodes())
+    for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy()
     this.overlay.removeChildren().forEach((c) => c.destroy())
 
     const revealed = visibleSet(input)
@@ -156,6 +159,11 @@ export class MapView {
       for (let c = c0 + (c0 & 1 ? 1 : 0); c <= c1; c += 2) order.push(idx(c, r))
       for (let c = c0 + (c0 & 1 ? 0 : 1); c <= c1; c += 2) order.push(idx(c, r))
     }
+    // draw rank of each hex: everything on a hex sorts as rank*4 + layer
+    // (0 terrain column, 1 road/river, 3 features); villagers slot in at 2 or 3.5
+    const rank = new Int32Array(world.cells.length).fill(-1)
+    order.forEach((i, k) => { rank[i] = k })
+    const z = (i: number, layer: number) => rank[i] * 4 + layer
     const hl = new Set(input.highlight ?? [])
     const blocked = new Set(input.blocked ?? [])
     // roads join each other and the places they lead to
@@ -184,12 +192,13 @@ export class MapView {
         if (!known) s.tint = 0x3a3a58
         else if (hl.has(i)) s.tint = 0xfff0a0
         else if (blocked.has(i) && cell.tier > 0) s.tint = 0xffb4a8
+        s.zIndex = z(i, 0)
         this.cells.addChild(s)
       }
       if (!known) continue
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
-        this.cells.addChild(this.road(world, i, cx, cy, roadSet, hubs))
-      if (cell.riverTo !== -1 && cell.tier > 0) this.cells.addChild(this.river(world, i, cx, cy))
+        this.cells.addChild(this.road(world, i, cx, cy, roadSet, hubs)).zIndex = z(i, 1)
+      if (cell.riverTo !== -1 && cell.tier > 0) this.cells.addChild(this.river(world, i, cx, cy)).zIndex = z(i, 1)
       const thing = things.get(i)
       const natural = land!.feature ? `f_${land!.feature}` : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
@@ -205,6 +214,7 @@ export class MapView {
         s.x = cx - f.frame.ax
         s.y = cy - f.frame.ay + l.dy
         s.alpha = l.alpha
+        s.zIndex = z(i, 3)
         this.cells.addChild(s)
       }
     }
@@ -256,6 +266,7 @@ export class MapView {
     }
     this.overlay.addChildAt(g, 0)
     this.people.sync(world, state, revealed)
+    this.people.attach(this.cells, rank)
   }
 
   /** Dirt track across the hex top toward neighbouring roads/buildings; where it
