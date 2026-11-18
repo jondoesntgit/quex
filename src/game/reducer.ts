@@ -68,19 +68,13 @@ export function territoryCells(world: World, v: Village): number[] {
 export const VILLAGE_RADIUS = 2
 export const FOUNDING_GAP = 2
 
-/** Villages founded before this keep their spot even if the terrain rule
- *  (no mountains, woods, swamp or hills) would refuse it now. */
-export const TERRAIN_RULE_FROM = '2026-11-18T12:16:00Z'
-
-/** Why a village can't be founded here (null = fine). `at` is the join time
- *  when replaying history; omit it for a new settlement. */
-export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }, at?: string): string | null {
+/** Why a village can't be founded here (null = fine). */
+export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }): string | null {
   const cell = world.cells[cellIndex(world, site.col, site.row)]
   if (!cell || site.col < 0 || site.row < 0 || site.col >= world.width || site.row >= world.height) return 'Off the map'
   if (cell.tier === 0) return 'Villages must be on land'
   const land = landAt(world, s, cellIndex(world, site.col, site.row))
-  if (at && at < TERRAIN_RULE_FROM) { /* grandfathered */ }
-  else if (MOUNTAIN_TERRAIN.includes(land.terrain)) return 'Too steep: a village needs flat ground'
+  if (MOUNTAIN_TERRAIN.includes(land.terrain)) return 'Too steep: a village needs flat ground'
   else if (hasTrees(land)) return 'Thick woods: settle on open ground nearby (you can fell trees later)'
   else if (land.terrain === 'swamp') return 'Too boggy for a village square'
   else if (!isVillageSite(land)) return 'Too hilly for a village square: try the flat land below'
@@ -204,7 +198,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   const p = s.players[ev.playerId]
   if (ev.t === 'join') {
     if (p) return 'Already joined'
-    return foundingProblem(s, world, ev.site, ev.at)
+    return foundingProblem(s, world, ev.site)
   }
   if (!p) return 'Unknown player'
   const v = s.villages[p.villageId]

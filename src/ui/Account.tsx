@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react'
 import { account, type AccountInfo } from '../app/supabase'
 import type { Game } from '../app/store'
 
-/** Sign in with email so the same village follows you to other devices. */
-export function Account({ game, onClose }: { game: Game; onClose: () => void }) {
+/** Sign in with email so the same village follows you to other devices.
+ *  With `onSignedIn` (founding a village), a guest who adds their email keeps
+ *  their user id, so we carry on without reloading; signing in to a different
+ *  existing account still reloads (after `beforeReload`) to pick up its villages. */
+export function Account({ game, onClose, onSignedIn, beforeReload }: {
+  game: Game
+  onClose: () => void
+  onSignedIn?: () => void
+  beforeReload?: () => void
+}) {
   const [info, setInfo] = useState<AccountInfo | null>(null)
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -11,6 +19,22 @@ export function Account({ game, onClose }: { game: Game; onClose: () => void }) 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   useEffect(() => { account.info().then(setInfo) }, [])
+  const settling = !!onSignedIn
+
+  const finish = (type: 'email_change' | 'email') => {
+    if (type === 'email_change' && onSignedIn) return onSignedIn()
+    beforeReload?.()
+    location.reload() // reload as the signed-in user and pick up their villages
+  }
+  // tapping the emailed link (any tab or device) also works: notice it here
+  useEffect(() => {
+    if (!sent) return
+    const t = setInterval(async () => {
+      const i = await account.info()
+      if (i && !i.guest) { clearInterval(t); finish(sent) }
+    }, 4000)
+    return () => clearInterval(t)
+  }, [sent]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (f: () => Promise<void>) => {
     setBusy(true); setErr(null)
@@ -19,7 +43,7 @@ export function Account({ game, onClose }: { game: Game; onClose: () => void }) 
   const send = () => run(async () => { setSent(await account.sendCode(email.trim())) })
   const verify = () => run(async () => {
     await account.verify(email.trim(), code, sent!)
-    location.reload() // reload as the signed-in user and pick up their villages
+    finish(sent!)
   })
   const signOut = () => run(async () => {
     await account.signOut()
@@ -32,7 +56,7 @@ export function Account({ game, onClose }: { game: Game; onClose: () => void }) 
   return (
     <div className="modal account" onClick={onClose}>
       <div className="card" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0 }}>Account</h2>
+        <h2 style={{ marginTop: 0 }}>{settling ? 'Sign in to settle' : 'Account'}</h2>
         {!info && <p className="muted">Checking…</p>}
         {info && !info.guest && (
           <>
@@ -46,13 +70,15 @@ export function Account({ game, onClose }: { game: Game; onClose: () => void }) 
         {info?.guest && !sent && (
           <>
             <p style={{ marginTop: 0 }}>
-              You’re playing as a guest on this device. Add your email to keep your village and play it on other devices.
-              Already have an account? Enter its email to sign in.
+              {settling
+                ? 'Villages belong to a real person, so sign in with your email first. You’ll get a 6-digit code, and you can then play this village on any device.'
+                : 'You’re playing as a guest on this device. Add your email to keep your village and play it on other devices.'}
+              {' '}Already have an account? Enter its email to sign in.
             </p>
             <label>Email</label>
             <input type="text" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={onClose}>Not now</button>
+              <button className="btn" onClick={onClose}>{settling ? 'Cancel' : 'Not now'}</button>
               <button className="btn primary" disabled={busy || !/.+@.+\..+/.test(email)} onClick={send}>Email me a code</button>
             </div>
           </>

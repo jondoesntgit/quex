@@ -320,15 +320,3 @@ describe('role fit stars', () => {
   })
 })
 
-describe('terrain rule history', () => {
-  it('keeps villages founded on a mountain before the rule, refuses new ones', async () => {
-    const { TERRAIN_RULE_FROM } = await import('./reducer')
-    const mountain = world.cells.find((c) => c.terrain === 'rock' && c.tier > 0)!
-    const s = newGame(world, SUN)
-    apply(s, world, ev('join', 'old', '2026-11-18T11:00:00Z', { name: 'Old', role: 'mining', site: mountain, resetHour: 0, tz: 0 }))
-    expect(s.players.old).toBeDefined()
-    const s2 = newGame(world, SUN)
-    apply(s2, world, ev('join', 'new', TERRAIN_RULE_FROM, { name: 'New', role: 'mining', site: mountain, resetHour: 0, tz: 0 }))
-    expect(s2.players.new).toBeUndefined()
-  })
-})
