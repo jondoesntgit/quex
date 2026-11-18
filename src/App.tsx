@@ -241,7 +241,7 @@ function Main({ game }: { game: Game }) {
             {(['today', 'village', 'party', 'log'] as Tab[]).map((t) => (
               <button key={t} className={`tab ${tab === t && !collapsed ? 'on' : ''}`}
                 onClick={() => { if (tab === t) setCollapsed(!collapsed); else { setTab(t); setCollapsed(false) } }}>
-                {t === 'today' ? `Today ${score}` : t[0].toUpperCase() + t.slice(1)}
+                {t[0].toUpperCase() + t.slice(1)}
               </button>
             ))}
           </div>

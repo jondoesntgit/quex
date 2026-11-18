@@ -1,8 +1,12 @@
 @import '@fontsource/pixelify-sans/400.css';
+@import '@fontsource/pixelify-sans/700.css';
 
-/* m5x7 by Daniel Linssen (managore.itch.io/m5x7), CC0. Each font pixel is
-   1/16 em, so it's only crisp at 16px multiples: 16px text, 32px titles.
-   Pixelify Sans fills in symbols m5x7 lacks (✓ … ★ ⌂). */
+/* Two pixel fonts:
+   - m5x7 by Daniel Linssen (managore.itch.io/m5x7, CC0) for titles, buttons,
+     tabs, chips and labels. Each font pixel is 1/16 em, so it's only crisp at
+     16px multiples; it's used at 32px (2x).
+   - Pixelify Sans for reading text (help, tasks, log, descriptions) at ~18px,
+     rounder and easier on the eyes in sentences, and for symbols m5x7 lacks. */
 @font-face {
   font-family: 'm5x7';
   src: url('/fonts/m5x7.ttf') format('truetype');
@@ -24,9 +28,9 @@
   --good: #38a838;
   --radius: 4px;
   --shadow: 0 3px 0 var(--ink);
-  font-family: 'm5x7', 'Pixelify Sans', ui-monospace, monospace;
-  font-size: 16px;
-  line-height: 1.25;
+  font-family: 'Pixelify Sans', ui-monospace, monospace;
+  font-size: 18px;
+  line-height: 1.35;
   color: var(--ink);
   -webkit-font-smoothing: none;
   font-smooth: never;
@@ -36,16 +40,13 @@
 html, body, #root { margin: 0; height: 100%; overflow: hidden; background: var(--sky); }
 body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
 button, input, select { font: inherit; color: inherit; }
-/* m5x7 has no bold: instead of the browser's smeared fake bold, thicken by
-   exactly one pixel so bold stays crisp */
-:root { font-synthesis: none; }
-b, strong, h1, h2, h3, summary, .tab.on, .chip b { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
+
 input { -webkit-user-select: text; user-select: text; }
 
 .app { position: fixed; inset: 0; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
 .map { position: absolute; inset: 0; }
 
-.title { font-family: 'm5x7', 'Pixelify Sans', monospace; letter-spacing: 1px; }
+.title {  letter-spacing: 1px; }
 
 /* ---------------------------------------------------------------- chrome */
 .topbar {
@@ -54,16 +55,16 @@ input { -webkit-user-select: text; user-select: text; }
 }
 .chip {
   pointer-events: auto; background: var(--paper); border: 2px solid var(--ink); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 3px 8px; font-size: 16px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center;
+  box-shadow: var(--shadow); padding: 3px 8px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center;
 }
-.chip.score b { font-size: 16px; }
+.chip.score b { }
 .spacer { flex: 1; }
 
-.zoom { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); z-index: 2; display: flex; flex-direction: column; gap: 6px; }
+.zoom { position: absolute; right: 8px; top: calc(env(safe-area-inset-top) + 112px); z-index: 2; display: flex; flex-direction: column; gap: 6px; }
 
 .btn {
   background: var(--paper); border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 6px 10px; cursor: pointer; font-size: 16px; line-height: 1.1; min-height: 34px;
+  padding: 6px 10px; cursor: pointer; line-height: 1.1; min-height: 34px;
 }
 .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -83,31 +84,31 @@ input { -webkit-user-select: text; user-select: text; }
 }
 .sheet.collapsed .sheet-body { display: none; }
 .tabs { display: flex; border-bottom: 2px solid var(--ink); }
-.tab { flex: 1; padding: 8px 4px; text-align: center; background: var(--paper-2); border: none; border-right: 2px solid var(--ink); cursor: pointer; font-size: 16px; }
+.tab { flex: 1; padding: 8px 4px; text-align: center; background: var(--paper-2); border: none; border-right: 2px solid var(--ink); cursor: pointer; }
 .tab:last-child { border-right: none; }
 .tab.on { background: var(--paper); font-weight: 700; }
 .sheet-body { overflow-y: auto; padding: 10px 12px 14px; -webkit-overflow-scrolling: touch; }
-.sheet-body h3 { margin: 10px 0 6px; font-size: 16px; font-family: 'm5x7', 'Pixelify Sans', monospace; font-weight: 400; }
-.muted { color: var(--ink-soft); font-size: 16px; }
+.sheet-body h3 { margin: 10px 0 6px;  font-weight: 400; }
+.muted { color: var(--ink-soft); }
 
 /* tokens tray */
 .tray { position: absolute; left: 8px; right: 8px; z-index: 3; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
-.token { pointer-events: auto; border: 2px solid var(--ink); border-radius: 12px; padding: 2px 9px; color: white; font-size: 16px; box-shadow: var(--shadow); }
+.token { pointer-events: auto; border: 2px solid var(--ink); border-radius: 12px; padding: 2px 9px; color: white; box-shadow: var(--shadow); }
 .token.big { background: var(--big); } .token.medium { background: var(--medium); } .token.small { background: var(--small); }
 .token.half { background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.35) 4px 8px); }
 
 /* today slots */
 .slot { display: grid; grid-template-columns: 46px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--paper-2); }
-.size { border: 2px solid var(--ink); border-radius: var(--radius); color: white; text-align: center; font-size: 16px; padding: 2px 0; }
+.size { border: 2px solid var(--ink); border-radius: var(--radius); color: white; text-align: center; padding: 2px 0; }
 .size.big { background: var(--big); } .size.medium { background: var(--medium); } .size.small { background: var(--small); }
-.slot input { width: 100%; border: 2px solid var(--paper-2); background: white; border-radius: var(--radius); padding: 5px 26px 5px 6px; font-size: 16px; }
+.slot input { width: 100%; border: 2px solid var(--paper-2); background: white; border-radius: var(--radius); padding: 5px 26px 5px 6px; }
 .labelbox { position: relative; display: block; min-width: 0; }
-.labelmark { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: 16px; pointer-events: none; }
+.labelmark { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-weight: 700; pointer-events: none; }
 .labelmark.saved { color: #287828; }
 .labelmark.saving { color: var(--muted, #888); }
 .labelmark.error { color: var(--danger); pointer-events: auto; }
 .tri { display: flex; border: 2px solid var(--ink); border-radius: var(--radius); overflow: hidden; }
-.tri button { border: none; background: white; width: 34px; height: 32px; cursor: pointer; font-size: 16px; border-right: 2px solid var(--ink); }
+.tri button { border: none; background: white; width: 34px; height: 32px; cursor: pointer; border-right: 2px solid var(--ink); }
 .tri button:last-child { border-right: none; }
 .tri button.on.none { background: var(--paper-2); }
 .tri button.on.half { background: var(--half); color: white; }
@@ -115,23 +116,23 @@ input { -webkit-user-select: text; user-select: text; }
 
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .water { padding: 6px 0 8px; border-bottom: 1px dashed var(--paper-2); }
-.water input { border: 2px solid var(--paper-2); border-radius: var(--radius); padding: 4px 6px; font-size: 16px; background: white; }
+.water input { border: 2px solid var(--paper-2); border-radius: var(--radius); padding: 4px 6px; background: white; }
 .water-row { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
 .glass { position: relative; width: 34px; height: 46px; border: 3px solid var(--ink); border-top-width: 2px; border-radius: 3px 3px 9px 9px; background: #f4f8ff; overflow: hidden; flex: none; }
 .glass i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#78b8ff, #3a78e0); transition: height .4s; }
 .glass.full { border-color: #2a60c0; }
-.water-total { font-size: 16px; }
+.water-total { }
 .water-total .done { color: var(--good, #287828); margin-left: 6px; }
 .water-hist { display: flex; gap: 3px; align-items: flex-end; height: 44px; margin-top: 8px; }
 .water-hist span { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
 .water-hist i { display: block; width: 100%; min-height: 1px; background: #a8ccf8; border-radius: 2px 2px 0 0; }
 .water-hist i.met { background: #3a78e0; }
 .water-hist .today i { outline: 2px solid var(--ink); }
-.water-hist small { font-size: 16px; opacity: .7; }
+.water-hist small { opacity: .7; }
 .habit { display: flex; gap: 8px; align-items: center; padding: 5px 0; }
 .habit input { width: 20px; height: 20px; accent-color: var(--good); }
 
-.goods { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 10px; font-size: 16px; }
+.goods { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 10px; }
 .good { display: flex; gap: 6px; align-items: center; line-height: 1.1; }
 .ico { flex: none; }
 .bar { height: 10px; border: 2px solid var(--ink); border-radius: 3px; background: white; overflow: hidden; }
@@ -143,7 +144,7 @@ input { -webkit-user-select: text; user-select: text; }
 .pip.full { background: var(--good); }
 .pip.frozen { outline: 2px dashed #58a8f8; outline-offset: 1px; }
 
-.log p { margin: 4px 0; font-size: 16px; }
+.log p { margin: 4px 0; }
 .log .monster { color: var(--danger); } .log .good { color: #287828; } .log .bad { color: var(--danger); }
 
 /* inspector */
@@ -151,29 +152,29 @@ input { -webkit-user-select: text; user-select: text; }
   position: absolute; left: 8px; right: 8px; z-index: 4; background: var(--paper); border: 3px solid var(--ink);
   border-radius: 6px; box-shadow: 0 4px 0 var(--ink); padding: 10px 12px; max-height: 55%; overflow-y: auto;
 }
-.inspector h2 { margin: 0 0 4px; padding-right: 110px; font-size: 16px; font-family: 'm5x7', 'Pixelify Sans', monospace; font-weight: 400; }
+.inspector h2 { margin: 0 0 4px; padding-right: 110px;  font-weight: 400; }
 .actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 8px; }
 .action { text-align: left; }
-.action small { display: block; font-size: 16px; opacity: 0.85; }
+.action small { display: block; opacity: 0.85; }
 .close { position: absolute; right: 6px; top: 6px; }
-.share { position: absolute; right: 44px; top: 6px; font-size: 16px; }
+.share { position: absolute; right: 44px; top: 6px; }
 
 /* modal / onboarding */
 .modal { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(20, 20, 36, 0.55); padding: 16px; }
 .card { background: var(--paper); border: 3px solid var(--ink); border-radius: 8px; box-shadow: 0 5px 0 var(--ink); padding: 18px; width: min(460px, 100%); max-height: 100%; overflow-y: auto; }
-.card h1 { font-family: 'm5x7', 'Pixelify Sans', monospace; font-weight: 400; margin: 0 0 4px; font-size: 32px; }
-.card label { display: block; margin: 12px 0 4px; font-size: 16px; }
-.card input[type='text'], .card input[type='password'] { width: 100%; padding: 8px; border: 2px solid var(--ink); border-radius: var(--radius); font-size: 16px; background: white; }
+.card h1 {  font-weight: 400; margin: 0 0 4px; }
+.card label { display: block; margin: 12px 0 4px; }
+.card input[type='text'], .card input[type='password'] { width: 100%; padding: 8px; border: 2px solid var(--ink); border-radius: var(--radius); background: white; }
 .choice { display: block; width: 100%; text-align: left; margin: 6px 0; }
 .choice.on { background: var(--gold); }
 .placebar { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 10; width: min(560px, calc(100% - 16px)); padding: 12px 14px; }
 .btn.danger { background: var(--danger); color: white; }
 /* role buttons while settling: suited roles stand out, the rest stay available */
 .btn.fit-ok:not(.primary) { opacity: 0.75; }
-.supervised { background: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 16px; }
+.supervised { background: var(--paper-2); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 .slot input[readonly] { background: var(--paper); }
-.chipbtn { display: inline-flex; align-items: center; gap: 6px; font-size: 16px; padding-right: 4px; }
-.chipbtn .x { border: 0; background: transparent; cursor: pointer; font-size: 16px; padding: 0 4px; color: inherit; }
+.chipbtn { display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
+.chipbtn .x { border: 0; background: transparent; cursor: pointer; padding: 0 4px; color: inherit; }
 .card.manage { width: min(560px, 100%); }
 .card.help { width: min(620px, 100%); line-height: 1.45; }
 .help details { border-top: 1px dashed var(--paper-2); padding: 6px 0; }
@@ -186,10 +187,38 @@ input { -webkit-user-select: text; user-select: text; }
 .help p { margin: 6px 0; }
 .linkbtn { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
 .account { position: absolute; inset: 0; z-index: 12; }
-.toast { position: absolute; left: 50%; transform: translateX(-50%); top: 64px; z-index: 20; background: var(--ink); color: var(--paper); padding: 8px 12px; border-radius: 6px; font-size: 16px; max-width: 90%; }
+.toast { position: absolute; left: 50%; transform: translateX(-50%); top: 64px; z-index: 20; background: var(--ink); color: var(--paper); padding: 8px 12px; border-radius: 6px; max-width: 90%; }
 
 @media (min-width: 900px) {
   .sheet { left: auto; width: 420px; right: 12px; bottom: 12px; border: 3px solid var(--ink); border-radius: 8px; max-height: 75%; box-shadow: 0 5px 0 var(--ink); }
   .inspector { left: 12px; right: auto; width: 380px; bottom: 12px !important; }
   .tray { right: 450px; bottom: 12px !important; }
 }
+
+/* ---------------------------------------------------------------- type */
+/* reading text (Pixelify Sans) */
+.muted, .log p, .goods, .supervised, .action small, .toast, .card p, .help li { font-size: 16px; }
+.slot input, .water input, .card input[type='text'], .card input[type='password'] { font-size: 18px; }
+.size { font-size: 14px; }
+.token { font-size: 15px; }
+.tri button, .labelmark { font-size: 18px; }
+.water-hist small { font-size: 11px; }
+.btn small { font-family: 'Pixelify Sans', monospace; font-size: 14px; line-height: 1.25; word-spacing: normal; }
+
+/* labels, buttons and titles (m5x7 at a crisp 32px). m5x7 has no bold, so
+   bold here is thickened by exactly one font pixel (2px) to stay sharp, and
+   its extra-wide spaces are tightened. */
+.chip, .tab, .btn, .title, h1, h2, h3, .help summary, .card label, .sheet-body h3, .inspector h2, .water-total, .chip.score b {
+  font-family: 'm5x7', 'Pixelify Sans', monospace;
+  font-size: 32px;
+  line-height: 0.85;
+  font-weight: 400;
+  word-spacing: -0.15em;
+  font-synthesis: none;
+}
+.card h1 { font-size: 64px; letter-spacing: 2px; }
+h1, h2, h3, .help summary, .tab.on { text-shadow: 2px 0 0 currentColor; }
+.btn { min-height: 38px; padding: 4px 10px 6px; }
+.tab { padding: 6px 4px 8px; white-space: nowrap; }
+.chip { padding: 2px 8px 4px; }
+.tri button { font-family: 'Pixelify Sans', monospace; }
