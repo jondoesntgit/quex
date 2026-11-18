@@ -123,6 +123,30 @@ for key, m in meta["sprites"].items():
     else:
         sprites.append((f"f_{name}", outline(img), m["ax"], m["ay"]))
 
+# PixelLab overrides: hand-picked sprites drawn at true scale for 64 px tiles.
+# Feet sit a little in front of the hex centre; goblins come as a pair.
+OVR = os.path.join(HERE, "..", "art", "pixellab")
+if meta["size"] == 64 and os.path.isdir(OVR):
+    def trim(im):
+        bb = im.getbbox()
+        return im.crop(bb) if bb else im
+    def load(n):
+        return trim(Image.open(os.path.join(OVR, n + ".png")).convert("RGBA"))
+    face = meta["face"]
+    over = {}
+    for n in ("troll", "orcs", "dragon", "scout"):
+        if os.path.exists(os.path.join(OVR, n + ".png")):
+            over["f_" + n] = load(n)
+    if os.path.exists(os.path.join(OVR, "goblin_a.png")):
+        a, b = load("goblin_a"), load("goblin_b")
+        pair = Image.new("RGBA", (a.width + b.width + 4, max(a.height, b.height) + 3), (0, 0, 0, 0))
+        pair.alpha_composite(a, (0, 0))
+        pair.alpha_composite(b, (a.width + 4, 3))
+        over["f_goblins"] = trim(pair)
+    sprites = [s for s in sprites if s[0] not in over]
+    for name, im in over.items():
+        sprites.append((name, im, im.width // 2, im.height - face // 6))
+
 # shelf-pack
 os.makedirs(DST, exist_ok=True)
 sprites.sort(key=lambda s: -s[1].height)

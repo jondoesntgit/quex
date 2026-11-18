@@ -2,16 +2,16 @@
 import json, sys
 from PIL import Image, ImageDraw
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'art/preview_monsters.png'
-SIZES = [24, 32, 48, 64]; DISPLAY = 80
+SIZES = [64]; DISPLAY = 128
 # 7 x 3 strip: (terrain, tier, sprite)
 G = {}
 for c in range(7):
     for r in range(3):
         G[(c, r)] = ('grass', 1, None)
 G.update({
-    (0, 1): ('rock', 3, 'f_troll'), (1, 1): ('hills', 2, None), (2, 1): ('forest', 2, 'f_goblins'),
-    (3, 1): ('grass', 1, 'f_orcs'), (4, 1): ('rock', 4, 'f_dragon'), (5, 1): ('meadow', 1, 'f_scout'),
-    (6, 1): ('grass', 1, 'f_caravan'), (1, 0): ('forest', 2, 'f_pine3'), (3, 0): ('shallow', 0, None),
+    (0, 1): ('rock', 3, 'f_troll'), (1, 1): ('forest', 3, 'f_pine1'), (2, 1): ('forest', 2, 'f_goblins'),
+    (3, 1): ('grass', 1, 'f_orcs'), (4, 1): ('grass', 1, 'f_dragon'), (5, 1): ('meadow', 1, 'f_scout'),
+    (6, 1): ('grass', 1, 'f_caravan'), (1, 0): ('forest', 2, 'f_pine3'), (3, 0): ('grass', 1, 'f_oak1'),
     (4, 0): ('rock', 3, None), (2, 2): ('beach', 1, None), (5, 2): ('grass', 1, 'f_village'),
     (6, 0): ('shallow', 0, None), (0, 2): ('swamp', 1, 'f_reeds'),
 })

@@ -387,9 +387,9 @@ def creature_goblins():
         cone((x, y, 0.4 * s), 0.12 * s, 0.22 * s, p["hood"], segs=5, shade=(p["hood_light"], p["hood_dark"]))
 
     def build(W):
-        one(-0.35, 0.1, 1.2)
-        one(0.35, 0.15, 1.1)
-        one(0.0, -0.25, 1.35)
+        # two goblins, each ~0.55 tall: shorter than an oak (0.62)
+        one(-0.3, 0.1, 0.89)
+        one(0.3, -0.15, 0.89)
     return build
 
 
@@ -470,7 +470,9 @@ def unit_caravan():
     return build
 
 
-CREATURE_SCALE = {"troll": 1.4, "orcs": 1.4, "goblins": 1.3, "dragon": 1.25, "scout": 1.35, "caravan": 1.15}
+# Real-world scale rules (hex = 2 units wide; pine 0.87 tall, oak 0.62):
+#   goblin < oak, human ~0.6, orc ~ tree, troll slightly > pine, dragon fits one hex.
+CREATURE_SCALE = {"troll": 0.95, "orcs": 0.9, "goblins": 1.0, "dragon": 1.1, "scout": 0.8, "caravan": 0.9}
 
 FEATURES = {
     "troll": creature_troll(), "goblins": creature_goblins(), "orcs": creature_orcs(), "dragon": creature_dragon(),
@@ -508,6 +510,11 @@ def main():
         if kind == "features" and k:
             for ob in bpy.data.objects:
                 ob.scale = (k, k, k)
+        if kind == "features":
+            bpy.context.view_layer.update()
+            zs = [(ob.matrix_world @ v.co) for ob in bpy.data.objects if ob.type == "MESH" for v in ob.data.vertices]
+            if zs:
+                print(f"BOUNDS {name}: height={max(v.z for v in zs):.2f} width={max(v.x for v in zs) - min(v.x for v in zs):.2f}")
         if kind == "terrain":
             H = face + (MAX_TIER + 1) * tier
             ax, ay = W // 2, face // 2
