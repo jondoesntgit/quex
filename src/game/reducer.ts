@@ -514,7 +514,7 @@ function deliverCaravans(s: GameState, at: string) {
 
 // ------------------------------------------------------------------ nightly tick
 
-function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
+function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
   const v = s.villages[p.villageId]
   const d = ensureDay(p, ev.date)
   const season = weekSeason(ev.date)
