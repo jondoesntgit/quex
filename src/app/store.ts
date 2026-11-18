@@ -132,6 +132,8 @@ export class Game {
     return () => this.listeners.delete(cb)
   }
   private emit() { for (const l of this.listeners) l() }
+  /** redraw listeners (e.g. when the connection status changes) */
+  poke() { this.emit() }
 
   now(): Date {
     return new Date(Date.now() + this.meta.dayOffset * 86_400_000)

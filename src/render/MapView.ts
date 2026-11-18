@@ -74,30 +74,75 @@ export class MapView {
 
   async mount(host: HTMLElement) {
     this.host = host
-    await this.app.init({ width: 10, height: 10, antialias: false, background: '#141424', resolution: 1, roundPixels: true })
+    // villagers live inside `cells` so they sort into the painter's order with trees and houses
+    this.cells.sortableChildren = true
+    this.root.addChild(this.cells, this.overlay)
+    await this.startRenderer()
+    this.ro = new ResizeObserver(() => this.resize())
+    this.ro.observe(host)
+    document.addEventListener('visibilitychange', this.onVisible)
+  }
+
+  /** Create the Pixi app and canvas. Also used to rebuild after the GPU context
+   *  is lost (laptop sleep, graphics switch) and the browser doesn't give it
+   *  back: the scene and the tile images are still in memory, so no network. */
+  private async startRenderer() {
+    // WebGL: its context loss/restore is the best supported path in browsers
+    await this.app.init({ width: 10, height: 10, antialias: false, background: '#141424', resolution: 1, roundPixels: true, preference: 'webgl' })
     const c = this.app.canvas
     c.style.width = '100%'
     c.style.height = '100%'
     c.style.imageRendering = 'pixelated'
     c.style.touchAction = 'none'
     c.style.display = 'block'
-    host.appendChild(c)
-    // villagers live inside `cells` so they sort into the painter's order with trees and houses
-    this.cells.sortableChildren = true
-    this.root.addChild(this.cells, this.overlay)
+    this.host.appendChild(c)
+    c.addEventListener('webglcontextlost', () => {
+      // Pixi asks for the context back; if the browser doesn't return it soon, rebuild
+      clearTimeout(this.lostTimer)
+      this.lostTimer = setTimeout(() => { if (this.contextLost()) void this.rebuild() }, 1500)
+    })
+    c.addEventListener('webglcontextrestored', () => clearTimeout(this.lostTimer))
     this.app.ticker.add((t) => {
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
     })
     this.app.stage.addChild(this.root)
-    this.ro = new ResizeObserver(() => this.resize())
-    this.ro.observe(host)
     this.resize()
     this.bindInput()
   }
 
+  private lostTimer?: ReturnType<typeof setTimeout>
+  private rebuilding = false
+
+  private contextLost(): boolean {
+    const gl = (this.app.renderer as unknown as { gl?: WebGLRenderingContext }).gl
+    return !!gl && gl.isContextLost()
+  }
+
+  /** Coming back to the tab (e.g. opening the laptop): make sure the map can draw. */
+  private onVisible = () => {
+    if (document.visibilityState === 'visible' && this.contextLost()) void this.rebuild()
+  }
+
+  private async rebuild() {
+    if (this.rebuilding) return
+    this.rebuilding = true
+    try {
+      this.app.stage.removeChild(this.root)
+      // drop the dead renderer but keep our scene, textures and tile images
+      this.app.destroy({ removeView: true }, { children: false, texture: false, textureSource: false })
+      this.app = new Application()
+      await this.startRenderer()
+      if (this.last) this.render(this.last)
+    } finally {
+      this.rebuilding = false
+    }
+  }
+
   destroy() {
     this.ro?.disconnect()
+    document.removeEventListener('visibilitychange', this.onVisible)
+    clearTimeout(this.lostTimer)
     this.app.destroy(true, { children: true })
   }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
-import { account, createSupabaseStore } from './app/supabase'
+import { account, createSupabaseStore, SupabaseStore } from './app/supabase'
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
 import { rememberAccount } from './app/accounts'
@@ -33,11 +33,13 @@ export default function App() {
         await g.init()
         if (remote) {
           // online, you play exactly this account's villages (new device, or a different account)
-          const owned = (await remote.ownedPlayers()).filter((id) => g!.state.players[id])
+          // offline we can't check, so keep what this device already knew
+          const owned = ((await remote.ownedPlayers()) ?? meta.localPlayers).filter((id) => g!.state.players[id])
           meta.localPlayers = owned
           meta.dayOffset = 0 // the testing day-skip never applies to the shared world
           if (!meta.activePlayer || !owned.includes(meta.activePlayer)) meta.activePlayer = owned[0] ?? null
           saveMeta(meta)
+          remote.onStatus = () => g!.poke()
           g.setAccess(await remote.access())
           // opened from a parent link: become this child's guardian
           const params = new URLSearchParams(location.search)
@@ -204,6 +206,9 @@ function Main({ game }: { game: Game }) {
         {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
         <span className="spacer" />
         {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
+        {game.store instanceof SupabaseStore && game.store.offline && (
+          <span className="chip" title="No connection: you're playing from this device's copy of the world. Your changes will send when you're back online.">📴 Offline</span>
+        )}
         <button className="chip" onClick={() => setShowHelp(true)} title="How to play" aria-label="How to play">?</button>
         {account.enabled && <button className="chip" onClick={() => setShowAccount(true)}>Account</button>}
       </div>

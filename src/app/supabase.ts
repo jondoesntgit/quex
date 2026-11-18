@@ -28,38 +28,133 @@ export async function createSupabaseStore(worldSeed: string): Promise<SupabaseSt
   const sb = await getClient()
   // detectSessionInUrl has already turned an emailed sign-in link into a session
   const { data: s } = await sb.auth.getSession()
-  if (!s.session || s.session.user.is_anonymous || !s.session.user.email) return 'signin'
+  if (!s.session || s.session.user.is_anonymous || !s.session.user.email) {
+    // offline with an expired token: the session can't refresh, but this device
+    // was signed in, so carry on from its copy of the world until we're back
+    if (!navigator.onLine && savedSessionEmail()) return new SupabaseStore(sb, worldSeed)
+    return 'signin'
+  }
   await sb.rpc('join_world', { p_world: worldSeed }).then(({ error }) => error && console.warn('join_world', error.message))
   return new SupabaseStore(sb, worldSeed)
+}
+
+/** The email of the session saved on this device, if any (works offline). */
+function savedSessionEmail(): string | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!
+      if (!/^sb-.*-auth-token$/.test(k)) continue
+      const v = JSON.parse(localStorage.getItem(k) ?? 'null')
+      const email = v?.user?.email ?? v?.currentSession?.user?.email
+      if (email) return email
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+/** A failure that means "can't reach the server" (retry later), not "refused". */
+const offlineError = (msg: string) => !navigator.onLine || /fetch|network|load failed|timed? ?out/i.test(msg)
+
+function readJSON<T>(key: string, fallback: T): T {
+  try { const v = localStorage.getItem(key); return v ? (JSON.parse(v) as T) : fallback } catch { return fallback }
+}
+function writeJSON(key: string, v: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* full or private mode: offline copy is best-effort */ }
 }
 
 export class SupabaseStore implements EventStore {
   private sb: SupabaseClient
   private world: string
+  /** true while showing the device's copy of the world because the server can't be reached */
+  offline = false
+  onStatus: () => void = () => {}
+  private flushing = false
+
   constructor(sb: SupabaseClient, world: string) {
     this.sb = sb
     this.world = world
+    window.addEventListener('online', () => { void this.flush() })
+  }
+
+  private get cacheKey() { return `quex:world:v1:${this.world}` }
+  private get queueKey() { return `quex:outbox:v1:${this.world}` }
+  /** events made offline, waiting to be sent */
+  pending(): GameEvent[] { return readJSON<GameEvent[]>(this.queueKey, []) }
+
+  private setOffline(v: boolean) {
+    if (this.offline !== v) { this.offline = v; this.onStatus() }
   }
 
   async load(): Promise<GameEvent[]> {
     const out: GameEvent[] = []
     let from = 0
-    for (;;) {
-      const { data, error } = await this.sb.from('events').select('body').eq('world', this.world)
-        .order('at', { ascending: true }).order('seq', { ascending: true }).range(from, from + 999)
-      if (error) throw error
-      out.push(...data.map((r) => r.body as GameEvent))
-      if (data.length < 1000) break
-      from += 1000
+    try {
+      for (;;) {
+        const { data, error } = await this.sb.from('events').select('body').eq('world', this.world)
+          .order('at', { ascending: true }).order('seq', { ascending: true }).range(from, from + 999)
+        if (error) throw new Error(error.message)
+        out.push(...data.map((r) => r.body as GameEvent))
+        if (data.length < 1000) break
+        from += 1000
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const cached = readJSON<GameEvent[] | null>(this.cacheKey, null)
+      if (cached && offlineError(msg)) {
+        // offline: play from this device's copy (plus anything still waiting to send)
+        this.setOffline(true)
+        const seen = new Set(cached.map((x) => x.id))
+        return [...cached, ...this.pending().filter((x) => !seen.has(x.id))]
+      }
+      throw e
     }
-    return out
+    this.setOffline(false)
+    writeJSON(this.cacheKey, out)
+    void this.flush()
+    const seen = new Set(out.map((x) => x.id))
+    return [...out, ...this.pending().filter((x) => !seen.has(x.id))]
+  }
+
+  private remember(ev: GameEvent) {
+    const cached = readJSON<GameEvent[]>(this.cacheKey, [])
+    if (!cached.some((x) => x.id === ev.id)) { cached.push(ev); writeJSON(this.cacheKey, cached) }
   }
 
   async append(ev: GameEvent) {
+    this.remember(ev)
+    if (!navigator.onLine) return this.queue(ev)
     const { error } = await this.sb.from('events').insert({
       id: ev.id, world: this.world, at: ev.at, player_id: ev.playerId, kind: ev.t, body: ev,
     })
-    if (error) console.warn('event not synced', error.message)
+    if (!error) return this.setOffline(false)
+    if (offlineError(error.message)) this.queue(ev)
+    else console.warn('event not synced', error.message)
+  }
+
+  private queue(ev: GameEvent) {
+    const q = this.pending()
+    if (!q.some((x) => x.id === ev.id)) { q.push(ev); writeJSON(this.queueKey, q) }
+    this.setOffline(true)
+  }
+
+  /** Send events made while offline, oldest first. */
+  async flush() {
+    if (this.flushing || !navigator.onLine) return
+    this.flushing = true
+    try {
+      for (const ev of this.pending()) {
+        const { error } = await this.sb.from('events').insert({
+          id: ev.id, world: this.world, at: ev.at, player_id: ev.playerId, kind: ev.t, body: ev,
+        })
+        if (error && offlineError(error.message)) return // still offline: try again later
+        // sent, already there (duplicate id) or refused: either way it leaves the outbox
+        if (error && !/duplicate key/i.test(error.message)) console.warn('queued event not synced', error.message)
+        writeJSON(this.queueKey, this.pending().filter((x) => x.id !== ev.id))
+      }
+      this.setOffline(false)
+    } finally {
+      this.flushing = false
+    }
   }
 
   /** Private task names for these players, last 30 days. */
@@ -78,18 +173,20 @@ export class SupabaseStore implements EventStore {
   }
 
   /** Player ids in this world owned by the signed-in user (for a new device). */
-  async ownedPlayers(): Promise<string[]> {
-    const { data: u } = await this.sb.auth.getUser()
-    if (!u.user) return []
-    const { data, error } = await this.sb.from('player_owners').select('player_id').eq('world', this.world).eq('user_id', u.user.id)
-    if (error) { console.warn('player_owners', error.message); return [] }
+  /** null = couldn't check (offline): keep what this device already knows. */
+  async ownedPlayers(): Promise<string[] | null> {
+    const { data: s } = await this.sb.auth.getSession()
+    const uid = s.session?.user.id
+    if (!uid) return []
+    const { data, error } = await this.sb.from('player_owners').select('player_id').eq('world', this.world).eq('user_id', uid)
+    if (error) { console.warn('player_owners', error.message); return offlineError(error.message) ? null : [] }
     return data.map((r) => r.player_id as string)
   }
 
   subscribe(cb: (ev: GameEvent) => void) {
     const ch = this.sb.channel(`events:${this.world}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: `world=eq.${this.world}` },
-        (msg) => cb((msg.new as { body: GameEvent }).body))
+        (msg) => { const ev = (msg.new as { body: GameEvent }).body; this.remember(ev); cb(ev) })
       .subscribe()
     return () => { this.sb.removeChannel(ch) }
   }
@@ -98,18 +195,25 @@ export class SupabaseStore implements EventStore {
 
   /** Who is signed in, who guards which player, and which user plays which player. */
   async access(): Promise<Access> {
-    const { data: u } = await this.sb.auth.getUser()
+    const key = `quex:access:v1:${this.world}`
+    const { data: s } = await this.sb.auth.getSession()
     const [g, o] = await Promise.all([
       this.sb.from('player_guardians').select('player_id, guardian_id').eq('world', this.world),
       this.sb.from('player_owners').select('player_id, user_id').eq('world', this.world),
     ])
-    if (g.error) console.warn('player_guardians', g.error.message)
-    if (o.error) console.warn('player_owners', o.error.message)
-    return {
-      me: u.user?.id ?? null,
+    if (g.error || o.error) {
+      // offline: who guards whom hasn't changed, use the last known roles
+      console.warn('access', g.error?.message ?? o.error?.message)
+      const cached = readJSON<Access | null>(key, null)
+      if (cached) return cached
+    }
+    const a: Access = {
+      me: s.session?.user.id ?? null,
       guardians: (g.data ?? []).map((r) => ({ player: r.player_id as string, user: r.guardian_id as string })),
       owners: (o.data ?? []).map((r) => ({ player: r.player_id as string, user: r.user_id as string })),
     }
+    if (!g.error && !o.error) writeJSON(key, a)
+    return a
   }
 
   /** A one-time link a parent opens (signed in to their own account) to become a guardian. */
