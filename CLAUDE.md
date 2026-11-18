@@ -26,8 +26,10 @@ custom domain and is not the live site. Ignore its "Workers Builds" check.
 
 ## Database
 Supabase project `snzgotquolwdbdnmbdov`. Schema changes go in a new file under
-`supabase/migrations/` and are applied by CI on push to main. Don't hand-edit the live
-schema.
+`supabase/migrations/` and are applied on push to main, both by CI (`supabase db push --yes`)
+and by the Supabase GitHub integration (the "Supabase Preview" check). Whichever runs first
+applies them and the other finds nothing to do. Don't hand-edit the live schema. Check with
+the Supabase MCP `list_migrations`.
 
 ## Checks before committing
 `npx tsc --noEmit -p tsconfig.app.json`, `npx vitest run`, `npx oxlint src`, `npm run build`.
