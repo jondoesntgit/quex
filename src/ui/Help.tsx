@@ -151,6 +151,24 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li><b>Switch account</b> signs out and lists the accounts used on this device. Switching still asks for a code or password.</li>
           </ul>
         </details>
+
+        <details>
+          <summary>Planning with an AI assistant</summary>
+          <p>
+            Claude, ChatGPT and other assistants can read your task list and plan days ahead with you: “plan my week”,
+            or, for a parent, “plan my son’s tasks for tomorrow”.
+          </p>
+          <ol>
+            <li><b>Account → Connect an AI assistant</b> makes a private link. Copy it straight away.</li>
+            <li><b>Claude:</b> Settings → Connectors → Add custom connector, and paste the link as the URL.</li>
+            <li><b>ChatGPT:</b> Settings → Apps & Connectors → Advanced → Developer mode, then Create, paste the link, no authentication.</li>
+          </ol>
+          <p>
+            The assistant can see and write task names for you and any children you look after, from yesterday up to two
+            weeks ahead. It can’t tick tasks off, take actions or change your village, and a child’s own assistant can’t
+            change tasks a parent sets. Treat the link like a password; <b>Turn off</b> in Account stops it at once.
+          </p>
+        </details>
       </div>
     </div>
   )

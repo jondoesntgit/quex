@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { account, SupabaseStore, type AccountInfo } from '../app/supabase'
+import { account, SupabaseStore, type AccountInfo, type AssistantLink } from '../app/supabase'
 import { eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
@@ -206,6 +206,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           </>
         )}
 
+        {remote && info && !info.guest && <AssistantLinks notify={notify} />}
+
         <form onSubmit={(e) => { e.preventDefault(); savePw() }}>
           <label>Set or change password <span className="muted">(optional)</span></label>
           <div className="row" style={{ gap: 6 }}>
@@ -295,6 +297,61 @@ function WorldSettings({ game, remote, notify }: { game: Game; remote: SupabaseS
           ))}
         </div>
       )}
+    </>
+  )
+}
+
+/** Connect Claude, ChatGPT or another AI assistant: a secret link (an MCP
+ *  server address) that can read and plan your tasks and your children's. */
+function AssistantLinks({ notify }: { notify: (s: string) => void }) {
+  const [links, setLinks] = useState<AssistantLink[] | null>(null)
+  const [fresh, setFresh] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const load = () => account.assistantLinks().then(setLinks).catch(() => setLinks([]))
+  useEffect(() => { load() }, [])
+  const make = async () => {
+    setBusy(true)
+    try {
+      const url = await account.createAssistantLink('AI assistant')
+      setFresh(url)
+      await load()
+      try { await navigator.clipboard.writeText(url); notify('Assistant link copied.') } catch { /* shown below */ }
+    } catch (e) { notify(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  const revoke = async (id: string) => {
+    setBusy(true)
+    try { await account.revokeAssistantLink(id); setFresh(null); await load(); notify('Link turned off.') }
+    catch (e) { notify(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  const day = (s: string) => new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return (
+    <>
+      <label>AI assistant <span className="muted">(Claude, ChatGPT)</span></label>
+      <p className="muted" style={{ margin: '0 0 6px' }}>
+        Let an assistant read your tasks and plan days ahead, for you and any children you look after. It can’t tick
+        tasks off or touch your village.
+      </p>
+      {fresh && (
+        <div className="assistant-link">
+          <input type="text" readOnly value={fresh} onFocus={(e) => e.target.select()} style={{ width: '100%' }} />
+          <p className="muted" style={{ margin: '4px 0' }}>
+            Copy this now: it won’t be shown again. Keep it secret, like a password.
+            In <b>Claude</b>: Settings → Connectors → Add custom connector, paste it as the URL.
+            In <b>ChatGPT</b>: Settings → Apps & Connectors → Advanced → Developer mode, then Create and paste it (no authentication).
+          </p>
+        </div>
+      )}
+      {links && links.length > 0 && (
+        <ul className="assistant-links" style={{ margin: '0 0 6px', paddingLeft: 18 }}>
+          {links.map((l) => (
+            <li key={l.id}>
+              Link made {day(l.created_at)}{l.last_used_at ? `, last used ${day(l.last_used_at)}` : ', not used yet'}
+              <button className="linkbtn" disabled={busy} onClick={() => revoke(l.id)} title="Turn this link off"> Turn off</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button className="btn" disabled={busy} onClick={make}>+ Connect an AI assistant</button>
     </>
   )
 }

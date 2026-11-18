@@ -1,2 +1,6 @@
 # Minimal config so the Supabase CLI recognises this folder (used by CI `supabase db push`).
 project_id = "quex"
+
+# The MCP endpoint for AI assistants authenticates with its own link token, not a Supabase JWT.
+[functions.quex-mcp]
+verify_jwt = false

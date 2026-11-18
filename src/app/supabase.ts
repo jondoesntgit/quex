@@ -305,6 +305,8 @@ export class PrivateWorldError extends Error {
   constructor() { super('This world is private') }
 }
 
+export interface AssistantLink { id: string; label: string; created_at: string; last_used_at: string | null }
+
 export interface AccountInfo { email: string | null; guest: boolean }
 
 const here = () => location.origin + location.pathname + location.search
@@ -373,6 +375,27 @@ export const account = {
     const sb = await getClient()
     const { error } = await sb.auth.verifyOtp({ email, token: code.trim(), type })
     if (error) throw error
+  },
+
+  /** Links that let an AI assistant (Claude, ChatGPT…) read and plan tasks through the quex-mcp function. */
+  async assistantLinks(): Promise<AssistantLink[]> {
+    const sb = await getClient()
+    const { data, error } = await sb.from('assistant_links').select('id, label, created_at, last_used_at')
+      .is('revoked_at', null).order('created_at')
+    if (error) throw new Error(error.message)
+    return data as AssistantLink[]
+  },
+  /** Makes a link; the full address is only ever shown this once. */
+  async createAssistantLink(label: string): Promise<string> {
+    const sb = await getClient()
+    const { data, error } = await sb.rpc('create_assistant_link', { p_label: label })
+    if (error) throw new Error(error.message)
+    return `${URL_}/functions/v1/quex-mcp/${data as string}`
+  },
+  async revokeAssistantLink(id: string) {
+    const sb = await getClient()
+    const { error } = await sb.rpc('revoke_assistant_link', { p_id: id })
+    if (error) throw new Error(error.message)
   },
 
   async signOut() {
