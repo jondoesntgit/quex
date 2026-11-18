@@ -4,12 +4,16 @@
  *  never in the event log.
  *
  *  Routes take the least effort through the village's land (climbing costs
- *  more than walking), cross between hexes only at the shared edge, go around
+ *  more than walking, roads cost less and are followed along the track),
+ *  cross between hexes only at the shared edge, go around
  *  buildings, climb cliffs hand over hand and hop down them (see walk.ts).
  *  They sort into the map's painter's order (see MapView rank), so trees,
- *  houses and cliffs in front of them hide them. */
+ *  houses and cliffs in front of them hide them.
+ *
+ *  A newly built road pops a puff of dust; villagers nearby give a startled
+ *  hop, and those whose village it belongs to wander over for a look. */
 import { Container, Graphics } from 'pixi.js'
-import { hexToPixel, neighbours } from '../world/hex'
+import { distance, hexToPixel, neighbours } from '../world/hex'
 import { mulberry32, hashString } from '../world/rng'
 import type { World } from '../world/types'
 import type { GameState, Village } from '../game/types'
@@ -31,6 +35,9 @@ const CLIMB_B = CLIMB_A.map((r) => r.padEnd(6, '.').split('').reverse().join('')
 const HOP = ['.oooo.', '.oHHo.', 'ooHHoo', 'HoSSoH', 'oSSSSo', '.oSSo.', 'oLooLo', 'Lo..oL', 'o....o']
 const LAND = ['.oooo.', '.oHHo.', 'ooHHoo', 'oSSSSo', 'oSSSSo', 'oLLLLo', 'oooooo']
 const MAX_STEP = 3 // tiers a villager will climb or drop in one go
+const ROAD_COST = 0.4 // a road hex costs this much to cross, vs 1 for open land
+const REACT_RANGE = 4 // hexes: villagers this close notice a new road
+const PUFF_TIME = 0.9 // seconds
 
 interface Walker {
   g: Graphics
@@ -45,7 +52,10 @@ interface Walker {
   shirt: number
   skin: number
   idle: number // time accumulator for the work animation
+  react: number | null // a new road (cell) to react to at the next safe moment
 }
+
+interface Puff { g: Graphics; cell: number; x: number; y: number; t: number }
 
 interface Plan { home: number; spots: number[]; land: Set<number>; blocked: Set<number> }
 
@@ -57,6 +67,10 @@ export class People {
   private TP: number
   private plans = new Map<string, Plan>()
   private rank: Int32Array = new Int32Array(0)
+  private roads = new Set<number>()
+  private roadsSeen = false
+  private puffs: Puff[] = []
+  private parent: Container | null = null
 
   constructor(W: number, TP: number) {
     this.W = W
@@ -64,27 +78,40 @@ export class People {
   }
 
   /** Graphics owned by the crowd (MapView keeps these when it redraws). */
-  nodes() { return this.walkers.map((w) => w.g) }
+  nodes() { return [...this.walkers.map((w) => w.g), ...this.puffs.map((p) => p.g)] }
 
   /** Put the crowd into the map container and take its painter's ranks. */
   attach(parent: Container, rank: Int32Array) {
     this.rank = rank
+    this.parent = parent
     for (const w of this.walkers) if (w.g.parent !== parent) parent.addChild(w.g)
+    for (const p of this.puffs) if (p.g.parent !== parent) parent.addChild(p.g)
   }
 
-  /** Rebuild the crowd only when villages, buildings, roads or territory change. */
+  /** Rebuild the crowd when villages, population, buildings or outposts change;
+   *  new roads only update routes (and get a puff and an audience). */
   sync(world: World, state: GameState, revealed: Set<number>) {
     this.world = world
     const vs = Object.values(state.villages)
-    const sig = vs.map((v) => `${v.id}:${Math.floor(v.population)}:${v.buildings.length}:${v.roads.length}:${v.outposts.length}`).join('|')
-    if (sig === this.sig) return
-    this.sig = sig
-    for (const w of this.walkers) w.g.destroy()
-    this.walkers = []
-    for (const v of vs) this.spawn(world, v, revealed)
+    const roads = new Set(vs.flatMap((v) => v.roads))
+    const fresh = this.roadsSeen ? [...roads].filter((r) => !this.roads.has(r)) : []
+    const roadsChanged = roads.size !== this.roads.size || fresh.length > 0
+    this.roads = roads
+    this.roadsSeen = true
+    const sig = vs.map((v) => `${v.id}:${Math.floor(v.population)}:${v.buildings.length}:${v.outposts.length}`).join('|')
+    if (sig !== this.sig) {
+      this.sig = sig
+      for (const w of this.walkers) w.g.destroy()
+      this.walkers = []
+      for (const v of vs) this.spawn(world, v, revealed)
+    } else if (roadsChanged) {
+      for (const v of vs) this.plans.set(v.id, this.planFor(world, v, revealed))
+    }
+    for (const r of fresh) this.newRoad(r)
   }
 
-  private spawn(world: World, v: Village, revealed: Set<number>) {
+  /** Where a village's people may go: its land and roads, and what's worth visiting. */
+  private planFor(world: World, v: Village, revealed: Set<number>): Plan {
     const idx = (c: number, r: number) => r * world.width + c
     const home = idx(v.col, v.row)
     const land = new Set(territoryCells(world, v).filter((i) => world.cells[i].tier > 0 && revealed.has(i)))
@@ -100,12 +127,18 @@ export class People {
     const rest = [...land].filter((i) => i !== home)
     const rng = mulberry32(hashString(v.id))
     for (let k = 0; k < 3 && rest.length; k++) spots.push(rest[Math.floor(rng() * rest.length)])
-    this.plans.set(v.id, { home, spots, land, blocked })
+    return { home, spots, land, blocked }
+  }
+
+  private spawn(world: World, v: Village, revealed: Set<number>) {
+    const plan = this.planFor(world, v, revealed)
+    this.plans.set(v.id, plan)
+    const { home, blocked } = plan
     const n = Math.min(10, Math.max(2, Math.floor(v.population / 2) + Math.floor(v.buildings.length / 2)))
     for (let k = 0; k < n; k++) {
       const r = mulberry32(hashString(`${v.id}-${k}`))
       const w: Walker = {
-        g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0,
+        g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null,
         at: { cell: home, p: this.spot(home, blocked.has(home), r) }, rng: r,
         shirt: SHIRT[v.role] ?? 0xd0d0d0, skin: SKIN[Math.floor(r() * SKIN.length)],
       }
@@ -147,7 +180,7 @@ export class People {
         if (!land.has(j)) continue
         const dz = Math.abs(world.cells[j].tier - c.tier)
         if (dz > MAX_STEP) continue
-        const d = dist.get(i)! + 1 + dz * 1.5
+        const d = dist.get(i)! + (this.roads.has(j) ? ROAD_COST : 1) + dz * 1.5
         if (d < (dist.get(j) ?? Infinity)) {
           if (!dist.has(j)) open.push(j)
           dist.set(j, d)
@@ -168,7 +201,7 @@ export class People {
     const path = this.cells(from, goal, P.land)
     const dest = path[path.length - 1]
     const end = this.spot(dest, P.blocked.has(dest), w.rng)
-    const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i) }))
+    const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i), road: this.roads.has(i) }))
     w.route = buildRoute(hexes, w.at.p, end, this.W, this.TP)
     w.t = 0
     w.end = routeTime(w.route)
@@ -176,10 +209,86 @@ export class People {
     w.working = dest !== P.home && P.blocked.has(dest)
   }
 
+  // ------------------------------------------------------------ new roads
+
+  private newRoad(cell: number) {
+    const h = this.hex(cell)
+    const g = new Graphics()
+    this.parent?.addChild(g)
+    this.puffs.push({ g, cell, x: h.cx, y: h.cy - h.tier * this.TP, t: 0 })
+    const c = this.world.cells[cell]
+    for (const w of this.walkers) {
+      const at = this.world.cells[w.at.cell]
+      if (distance(at, c) <= REACT_RANGE + 1) w.react = cell
+    }
+  }
+
+  /** Startled hop on the spot, then (if it's our village's road) go and look. */
+  private reactTo(w: Walker, road: number, pose: Pose) {
+    const P = this.plans.get(w.vid)
+    if (!P) return
+    const here = this.world.cells[pose.cell]
+    if (!here || distance(here, this.world.cells[road]) > REACT_RANGE) return
+    const h = this.hex(pose.cell)
+    const ground = { x: pose.x, y: pose.y + h.tier * this.TP }
+    const segs: Seg[] = [{ kind: 'bounce', at: ground, tier: h.tier, cell: pose.cell, cy: h.cy, dur: 0.38, height: 5 }]
+    w.at = { cell: pose.cell, p: ground }
+    if (P.land.has(road) && P.land.has(pose.cell)) {
+      const path = this.cells(pose.cell, road, P.land)
+      if (path[path.length - 1] === road) {
+        const r = this.hex(road)
+        // stand beside the new track and admire it
+        const end = { x: r.cx + (w.rng() - 0.5) * this.W * 0.3, y: r.cy + this.W * (0.08 + w.rng() * 0.06) }
+        const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i) && i !== road, road: this.roads.has(i) }))
+        segs.push({ kind: 'pause', at: ground, tier: h.tier, cell: pose.cell, cy: h.cy, dur: 0.25 + w.rng() * 0.3, pose: 'stand' })
+        segs.push(...buildRoute(hexes, ground, end, this.W, this.TP))
+        w.at = { cell: road, p: end }
+      }
+    }
+    w.route = segs
+    w.t = 0
+    w.end = routeTime(segs)
+    w.working = false
+  }
+
+  private drawPuff(p: Puff) {
+    const g = p.g
+    g.clear()
+    const u = p.t / PUFF_TIME
+    const r = this.rank[p.cell] ?? -1
+    g.zIndex = r * 4 + 3.8
+    // four chunky dust blobs bursting out and up, then thinning away
+    const blobs = [[-1, -0.2], [1, -0.3], [-0.4, -1], [0.5, -0.9]]
+    const spread = this.W * 0.16 * Math.sqrt(u)
+    const size = Math.max(1, Math.round(2 + u * 3))
+    const alpha = u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4
+    for (const [bx, by] of blobs) {
+      const x = Math.round(p.x + bx * spread - size / 2)
+      const y = Math.round(p.y + by * spread * 0.8 - u * 4 - size / 2)
+      g.rect(x, y, size, size).fill({ color: u < 0.3 ? 0xf8f0e0 : 0xc8b8a0, alpha })
+      g.rect(x + 1, y + size - 1, Math.max(1, size - 2), 1).fill({ color: 0x8a7860, alpha: alpha * 0.8 })
+    }
+  }
+
   update(dt: number) {
     if (!this.world) return
+    for (const p of this.puffs) { p.t += dt; this.drawPuff(p) }
+    for (const p of this.puffs.filter((x) => x.t >= PUFF_TIME)) p.g.destroy()
+    this.puffs = this.puffs.filter((x) => x.t < PUFF_TIME)
     for (const w of this.walkers) {
       let pose: Pose
+      // react only with both feet on the ground (not mid-climb or mid-hop)
+      if (w.react !== null) {
+        const now = w.t < w.end ? sample(w.route, w.t, this.TP) : null
+        if (!now || now.kind === 'walk' || now.kind === 'stand' || now.kind === 'work') {
+          const h = this.hex(w.at.cell)
+          const p = now ?? { x: w.at.p.x, y: w.at.p.y - h.tier * this.TP, cell: w.at.cell, front: true, kind: 'stand' as const, dist: 0 }
+          const road = w.react
+          w.react = null
+          this.reactTo(w, road, p)
+          w.wait = 0
+        }
+      }
       if (w.t < w.end) {
         w.t = Math.min(w.end, w.t + dt)
         pose = sample(w.route, w.t, this.TP)

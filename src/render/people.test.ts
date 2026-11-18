@@ -92,3 +92,54 @@ describe('villager routes', () => {
     expect(insideHex({ x: 100 + W, y: 100 }, 100, 100, W)).toBe(false)
   })
 })
+
+describe('roads', () => {
+  it('a route across a road hex follows the track through its centre', () => {
+    const hs = hexes([1, 1, 1]).map((h, i) => ({ ...h, road: i === 1 }))
+    const off = { x: hs[0].cx + 10, y: hs[0].cy }
+    const route = buildRoute(hs, off, { x: hs[2].cx - 10, y: hs[2].cy }, W, TP)
+    const mid = hs[1]
+    const throughCentre = route.some((g) => g.kind === 'walk' && g.cell === 1 && g.b.x === mid.cx && g.b.y === mid.cy)
+    expect(throughCentre).toBe(true)
+  })
+  it('a startled bounce lifts and lands on the same spot', () => {
+    const route: Parameters<typeof sample>[0] = [{ kind: 'bounce', at: { x: 10, y: 20 }, tier: 1, cell: 0, cy: 20, dur: 0.4, height: 5 }]
+    expect(sample(route, 0.2, TP).y).toBeLessThan(20 - TP)
+    expect(sample(route, 0.2, TP).kind).toBe('hop')
+    expect(sample(route, 0.4, TP).y).toBe(20 - TP)
+  })
+})
+
+describe('villagers and a new road', async () => {
+  const { People } = await import('./people')
+  const { generateWorld } = await import('../world/generate')
+  const { newGame, apply, cellIndex } = await import('../game/reducer')
+  const { spiral } = await import('../world/hex')
+  it('puffs dust and gets nearby villagers to react', () => {
+    const world = generateWorld('test-seed')
+    const s = newGame(world, '2026-11-15')
+    const site = world.regions[world.startRegion].sites[0]
+    apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
+    const revealed = new Set(s.revealed)
+    const people = new People(64, 8) as unknown as {
+      sync: (w: typeof world, st: typeof s, r: Set<number>) => void
+      update: (dt: number) => void
+      puffs: unknown[]
+      walkers: { react: number | null; route: { kind: string }[] }[]
+    }
+    people.sync(world, s, revealed)
+    expect(people.puffs).toHaveLength(0) // nothing new on first look
+    const v = s.villages.v_a
+    const road = spiral(v, 1).map((o) => cellIndex(world, o.col, o.row)).find((i) => i !== cellIndex(world, v.col, v.row) && world.cells[i].tier > 0)!
+    v.roads.push(road)
+    const before = people.walkers.length
+    people.sync(world, s, revealed)
+    expect(people.walkers.length).toBe(before) // the crowd isn't rebuilt for a road
+    expect(people.puffs).toHaveLength(1)
+    expect(people.walkers.every((w) => w.react === road)).toBe(true)
+    for (let k = 0; k < 400 && people.walkers.some((w) => w.react !== null); k++) people.update(0.05)
+    expect(people.walkers.every((w) => w.route[0]?.kind === 'bounce')).toBe(true)
+    for (let k = 0; k < 40; k++) people.update(0.05)
+    expect(people.puffs).toHaveLength(0) // the puff has drifted away
+  })
+})

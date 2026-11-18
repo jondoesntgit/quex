@@ -11,10 +11,11 @@
  *  - inside a hex they walk straight lines, and both ends are inside the
  *    (convex) hex, so the whole line is too;
  *  - hexes with a building are crossed around the building, via waypoints
- *    near the rim. */
+ *    near the rim;
+ *  - on a road hex they follow the dirt track, which runs through the centre. */
 
 export interface Pt { x: number; y: number }
-export interface RouteHex { cell: number; cx: number; cy: number; tier: number; blocked: boolean }
+export interface RouteHex { cell: number; cx: number; cy: number; tier: number; blocked: boolean; road?: boolean }
 
 export type Seg =
   | { kind: 'walk'; a: Pt; b: Pt; tier: number; cell: number; cy: number; dur: number }
@@ -22,6 +23,8 @@ export type Seg =
   | { kind: 'hop'; a: Pt; b: Pt; t0: number; t1: number; cellA: number; cellB: number; cyB: number; dur: number
       /** fraction of the hop at which it passes over the edge */ over: number }
   | { kind: 'pause'; at: Pt; tier: number; cell: number; cy: number; dur: number; pose: 'land' | 'work' | 'stand' }
+  /** a startled little jump on the spot */
+  | { kind: 'bounce'; at: Pt; tier: number; cell: number; cy: number; dur: number; height: number }
 
 export interface Pose {
   x: number
@@ -97,7 +100,12 @@ export function crossHex(h: RouteHex, p: Pt, q: Pt, W: number): Pt[] {
 export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP: number): Seg[] {
   const segs: Seg[] = []
   const walk = (h: RouteHex, a: Pt, b: Pt) => {
-    const pts = crossHex(h, a, b, W)
+    // roads run through the hex centre: follow the track there and back out
+    const c = { x: h.cx, y: h.cy }
+    const near = (p: Pt) => Math.hypot(p.x - c.x, p.y - c.y) < 1
+    const pts = h.road && !h.blocked
+      ? [a, ...(near(a) || near(b) ? [] : [c]), b]
+      : crossHex(h, a, b, W)
     for (let i = 1; i < pts.length; i++) {
       const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
       if (d > 0.01) segs.push({ kind: 'walk', a: pts[i - 1], b: pts[i], tier: h.tier, cell: h.cell, cy: h.cy, dur: d / SPEED })
@@ -161,6 +169,8 @@ export function sample(segs: Seg[], t: number, TP: number): Pose {
       }
       case 'pause':
         return { x: g.at.x, y: g.at.y - g.tier * TP, cell: g.cell, front: g.at.y > g.cy, kind: g.pose, dist }
+      case 'bounce':
+        return { x: g.at.x, y: g.at.y - g.tier * TP - 4 * u * (1 - u) * g.height, cell: g.cell, front: g.at.y > g.cy, kind: u < 1 ? 'hop' : 'stand', dist }
     }
   }
   return { x: 0, y: 0, cell: -1, front: true, kind: 'stand', dist }
