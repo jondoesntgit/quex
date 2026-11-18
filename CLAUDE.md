@@ -31,6 +31,14 @@ and by the Supabase GitHub integration (the "Supabase Preview" check). Whichever
 applies them and the other finds nothing to do. Don't hand-edit the live schema. Check with
 the Supabase MCP `list_migrations`.
 
+The `migrate` CI job also deploys the Edge Function `supabase/functions/quex-mcp` (the MCP
+endpoint for AI assistants, `verify_jwt = false`; it authenticates with its own link tokens
+through the `mcp_*` SQL functions).
+
+Worlds: `quex-season-1` is the friends-and-family playtest (public to view, `closed` to new
+players); `quex-sandbox` is open to anyone and is the default for people without a village in
+the family world. See `src/app/worlds.ts`.
+
 ## Checks before committing
 `npx tsc --noEmit -p tsconfig.app.json`, `npx vitest run`, `npx oxlint src`, `npm run build`.
 Browser flows: `e2e/*.mjs` (Playwright; pass `APP_URL` and, if needed, `CHROME_PATH`).
