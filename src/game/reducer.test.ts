@@ -127,11 +127,11 @@ describe('actions', () => {
     const s = setup()
     const at = `${SUN}T10:00:00Z`
     const p = s.players.ann
-    const before = p.revealed.length
+    const before = s.revealed.length
     apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 4, status: 'full' }))
     const v = s.villages[p.villageId]
     apply(s, world, ev('act', 'ann', at, { tokenId: p.tokens[0].id, action: 'scout', col: v.col + 4, row: v.row }))
-    expect(p.revealed.length).toBeGreaterThan(before)
+    expect(s.revealed.length).toBeGreaterThan(before)
     expect(p.tokens).toHaveLength(0)
   })
   it('caravans deliver goods once they arrive', () => {
@@ -215,5 +215,42 @@ describe('nightly tick', () => {
   it('pendingTicks lists missed days but never today', () => {
     const s = setup()
     expect(pendingTicks(s.players.ann, addDays(SUN, 3), SUN)).toEqual([SUN, addDays(SUN, 1), addDays(SUN, 2)])
+  })
+})
+
+describe('founding and shared fog', () => {
+  it('refuses villages that would crowd a neighbour, allows them further out', async () => {
+    const { distance } = await import('../world/hex')
+    const { foundingProblem, VILLAGE_RADIUS, FOUNDING_GAP } = await import('./reducer')
+    const s = setup()
+    const ann = s.villages.v_ann
+    const limit = VILLAGE_RADIUS * 2 + FOUNDING_GAP
+    const land = world.cells.filter((c) => c.tier > 0)
+    const near = land.find((c) => distance(c, ann) === limit)!
+    expect(foundingProblem(s, world, near)).toMatch(/Too close/)
+    const far = land.find((c) => Object.values(s.villages).every((v) => distance(c, v) > limit + 3) &&
+      !s.lairs.some((l) => l.col === c.col && l.row === c.row))!
+    expect(foundingProblem(s, world, far)).toBeNull()
+    expect(validate(s, world, ev('join', 'cat', `${SUN}T09:00:00Z`, { name: 'Cat', role: 'farm', site: near, resetHour: 0, tz: 0 }))).toMatch(/Too close/)
+  })
+  it('refuses water', async () => {
+    const { foundingProblem } = await import('./reducer')
+    const s = setup()
+    const sea = world.cells.find((c) => c.tier === 0)!
+    expect(foundingProblem(s, world, sea)).toMatch(/land/)
+  })
+  it('one player scouting reveals the map for everyone', () => {
+    const s = setup()
+    const at = `${SUN}T10:00:00Z`
+    const v = s.villages.v_ann
+    const before = s.revealed.length
+    apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 4, status: 'full' }))
+    apply(s, world, ev('act', 'ann', at, { tokenId: s.players.ann.tokens[0].id, action: 'scout', col: v.col + 4, row: v.row }))
+    expect(s.revealed.length).toBeGreaterThan(before)
+    // Bob can now scout outward from the edge of what Ann found
+    const frontier = world.cells.find((c) => !s.revealed.includes(cellIndex(world, c.col, c.row)) &&
+      spiral(c, 1).some((o) => s.revealed.includes(cellIndex(world, o.col, o.row))) && c.col > v.col + 4)!
+    apply(s, world, ev('progress', 'bob', at, { date: SUN, slot: 4, status: 'full' }))
+    expect(validate(s, world, { t: 'act', id: 'x', at, playerId: 'bob', tokenId: s.players.bob.tokens[0].id, action: 'scout', col: frontier.col, row: frontier.row })).toBeNull()
   })
 })

@@ -23,6 +23,9 @@ export interface SceneInput {
   viewer: string | null
   selected: { col: number; row: number } | null
   highlight?: number[] // cells to tint (e.g. valid targets)
+  blocked?: number[] // cells to tint red (e.g. too close to a neighbour)
+  /** lift the fog (choosing where to found a village) */
+  showAll?: boolean
   today: string
 }
 
@@ -127,8 +130,7 @@ export class MapView {
     this.cells.removeChildren().forEach((c) => c.destroy())
     this.overlay.removeChildren().forEach((c) => c.destroy())
 
-    const player = viewer ? state.players[viewer] : null
-    const revealed = new Set(player?.revealed ?? world.cells.map((_, i) => i))
+    const revealed = visibleSet(input)
     // draw box: revealed bounds + margin of fog
     let c0 = Infinity, r0 = Infinity, c1 = -Infinity, r1 = -Infinity
     for (const i of revealed) {
@@ -155,6 +157,7 @@ export class MapView {
       for (let c = c0 + (c0 & 1 ? 0 : 1); c <= c1; c += 2) order.push(idx(c, r))
     }
     const hl = new Set(input.highlight ?? [])
+    const blocked = new Set(input.blocked ?? [])
     // roads join each other and the places they lead to
     const roadSet = new Set<number>()
     const hubs = new Set<number>()
@@ -180,6 +183,7 @@ export class MapView {
         s.y = cy - t.frame.ay
         if (!known) s.tint = 0x3a3a58
         else if (hl.has(i)) s.tint = 0xfff0a0
+        else if (blocked.has(i) && cell.tier > 0) s.tint = 0xffb4a8
         this.cells.addChild(s)
       }
       if (!known) continue
@@ -333,13 +337,13 @@ export class MapView {
     const x = this.camX + cssX / this.zoom
     const y = this.camY + cssY / this.zoom
     const TP = this.atlas.meta.tier
-    const revealed = s.viewer ? new Set(s.state.players[s.viewer]?.revealed ?? []) : null
+    const revealed = visibleSet(s)
     let best: { col: number; row: number; depth: number } | null = null
     for (let t = 0; t <= this.atlas.meta.maxTier; t++) {
       const h = pixelToHex(x, y + t * TP, this.W)
       if (h.col < 0 || h.row < 0 || h.col >= s.world.width || h.row >= s.world.height) continue
       const i = h.row * s.world.width + h.col
-      const tier = !revealed || revealed.has(i) ? s.world.cells[i].tier : 0
+      const tier = revealed.has(i) ? s.world.cells[i].tier : 0
       if (tier !== t) continue
       const depth = h.row * 2 + (h.col & 1)
       if (!best || depth > best.depth) best = { ...h, depth }
@@ -401,6 +405,13 @@ export class MapView {
       this.setZoom(this.zoom + (e.deltaY < 0 ? 1 : -1), { x: e.clientX - r.left, y: e.clientY - r.top })
     }, { passive: false })
   }
+}
+
+/** Hexes drawn unfogged: everything while choosing a site (or with no
+ *  player yet), otherwise what any player in the world has seen. */
+function visibleSet(s: SceneInput): Set<number> {
+  if (s.showAll || !s.viewer) return new Set(s.world.cells.map((_, i) => i))
+  return new Set(s.state.revealed)
 }
 
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),

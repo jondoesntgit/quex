@@ -46,7 +46,6 @@ export interface Player {
   freezes: number
   days: Record<ISODate, DayRecord>
   tokens: Token[]
-  revealed: number[]
   lastTick: ISODate | null
 }
 
@@ -110,6 +109,8 @@ export interface GameState {
   villages: Record<string, Village>
   caravans: Caravan[]
   lairs: LairState[]
+  /** hexes any player has seen: fog of war is shared by the whole world */
+  revealed: number[]
   log: LogEntry[]
   /** count of applied events (for sync) */
   version: number

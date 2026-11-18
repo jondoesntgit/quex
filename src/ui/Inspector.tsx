@@ -19,7 +19,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const { world, state } = game
   const i = cellIndex(world, col, row)
   const cell = world.cells[i]
-  const known = p.revealed.includes(i)
+  const known = state.revealed.includes(i)
   const [mode, setMode] = useState<'main' | 'build' | 'caravan'>('main')
   const v = state.villages[p.villageId]
   const here = buildingAt(state, col, row)

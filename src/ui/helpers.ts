@@ -1,6 +1,10 @@
 import { useEffect, useReducer } from 'react'
 import { ACTIONS, SIZE_RANK, type ActionKind, type BuildingId } from '../game/data'
-import { validate } from '../game/reducer'
+import { cellIndex, effectiveTerrain, validate } from '../game/reducer'
+import type { GameState } from '../game/types'
+import { spiral } from '../world/hex'
+import { MOUNTAIN_TERRAIN } from '../world/land'
+import type { Role, World } from '../world/types'
 import type { GameEvent, Player, Token } from '../game/types'
 import { eventId, type Game } from '../app/store'
 
@@ -42,4 +46,26 @@ export const ROLE_INFO: Record<string, { name: string; blurb: string }> = {
   forestry: { name: 'Foresters', blurb: 'Timber, game, leather and the charcoal the miners need.' },
   herding: { name: 'Herders', blurb: 'Hills and meadows. Wool, cheese, cloth and pack animals.' },
   explorer: { name: 'Explorers', blurb: 'The frontier. Fed by friends, brings back rare loot and new land.' },
+}
+
+export interface Spot { col: number; row: number }
+
+/** The role the land around a spot favours most. */
+export function suggestRole(world: World, s: GameState, at: Spot): Role {
+  const count = { water: 0, mountain: 0, forest: 0, pasture: 0 }
+  for (const o of spiral(at, 2)) {
+    if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) continue
+    const i = cellIndex(world, o.col, o.row)
+    const t = effectiveTerrain(world, s, i)
+    if (world.cells[i].tier === 0) count.water++
+    else if (MOUNTAIN_TERRAIN.includes(t)) count.mountain++
+    else if (t === 'forest') count.forest++
+    else if (t === 'hills' || t === 'meadow') count.pasture++
+  }
+  const nextToSea = spiral(at, 1).some((o) => world.cells[cellIndex(world, o.col, o.row)]?.tier === 0)
+  if (nextToSea && count.water >= 3) return 'port'
+  if (count.mountain >= 3) return 'mining'
+  if (count.forest >= 6) return 'forestry'
+  if (count.pasture >= 5) return 'herding'
+  return 'farm'
 }

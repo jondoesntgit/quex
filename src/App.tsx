@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
-import { createSupabaseStore } from './app/supabase'
+import { account, createSupabaseStore } from './app/supabase'
+import { Account } from './ui/Account'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
-import { dayScore } from './game/reducer'
-import type { VillageSite } from './world/types'
+import { dayScore, foundingBlockedCells } from './game/reducer'
 import { Inspector } from './ui/Inspector'
-import { Onboarding } from './ui/Onboarding'
+import { Onboarding, type Spot } from './ui/Onboarding'
 import { LogPanel, PartyPanel, TodayPanel, VillagePanel } from './ui/Panels'
 import { SIZE_LABEL, useGame } from './ui/helpers'
 import { Icon } from './ui/Icon'
@@ -23,9 +23,17 @@ export default function App() {
       try {
         const meta = loadMeta() ?? newMeta(new URLSearchParams(location.search).get('seed') ?? 'quex-season-1')
         saveMeta(meta)
-        const store: EventStore = (await createSupabaseStore(meta.worldSeed)) ?? new LocalStore()
+        const remote = await createSupabaseStore(meta.worldSeed)
+        const store: EventStore = remote ?? new LocalStore()
         g = new Game(meta, store)
         await g.init()
+        if (remote) {
+          // signed in on a new device (or after a sign-in): adopt this account's villages
+          const owned = (await remote.ownedPlayers()).filter((id) => g!.state.players[id])
+          for (const id of owned) if (!meta.localPlayers.includes(id)) meta.localPlayers.push(id)
+          if (!meta.activePlayer || !g.state.players[meta.activePlayer]) meta.activePlayer = owned[0] ?? null
+          saveMeta(meta)
+        }
         setGame(g)
       } catch (e) {
         console.error(e)
@@ -47,9 +55,13 @@ function Main({ game }: { game: Game }) {
   const [tab, setTab] = useState<Tab>('today')
   const [collapsed, setCollapsed] = useState(false)
   const [sel, setSel] = useState<{ col: number; row: number } | null>(null)
-  const [preview, setPreview] = useState<VillageSite | null>(null)
+  const [preview, setPreview] = useState<Spot | null>(null)
+  const [placing, setPlacing] = useState(false)
+  const placingRef = useRef(false)
+  useEffect(() => { placingRef.current = placing }, [placing])
   const [onboard, setOnboard] = useState<'first' | 'friend' | null>(game.meta.activePlayer ? null : 'first')
   const [toast, setToast] = useState<string | null>(null)
+  const [showAccount, setShowAccount] = useState(false)
 
   const pid = game.meta.activePlayer
   const p = pid ? game.state.players[pid] : null
@@ -66,7 +78,8 @@ function Main({ game }: { game: Game }) {
       if (!alive || !host.current) return
       view = new MapView(atlas)
       await view.mount(host.current)
-      view.onSelect = (col, row) => setSel({ col, row })
+      // while choosing a village site, taps pick the site instead of opening the inspector
+      view.onSelect = (col, row) => (placingRef.current ? setPreview({ col, row }) : setSel({ col, row }))
       viewRef.current = view
       setReady(true)
     })()
@@ -81,12 +94,14 @@ function Main({ game }: { game: Game }) {
 
   const today = game.today()
   const highlight = useMemo(() => (preview ? [preview.row * game.world.width + preview.col] : []), [preview, game.world.width])
+  const blocked = useMemo(() => (placing ? foundingBlockedCells(game.world, game.state) : []), [placing, game, game.state.version]) // eslint-disable-line react-hooks/exhaustive-deps
+  const onStep = useCallback((step: 'about' | 'place') => { setPlacing(step === 'place'); if (step === 'about') setPreview(null) }, [])
 
   // redraw on any state change
   useEffect(() => {
     const view = viewRef.current
     if (!view || !ready) return
-    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: sel, highlight, today })
+    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: placing ? null : sel, highlight, blocked, showAll: placing, today })
   })
 
   // centre the camera on the village (or the starter region) once
@@ -94,19 +109,17 @@ function Main({ game }: { game: Game }) {
   useEffect(() => {
     const view = viewRef.current
     if (!view || !ready) return
-    const key = p?.id ?? (preview ? `${preview.col},${preview.row}` : 'region')
+    const key = p?.id ?? 'region'
     if (centred.current === key) return
     centred.current = key
     if (p) {
       const v = game.state.villages[p.villageId]
       view.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)
-    } else if (preview) {
-      view.centreOn(preview.col, preview.row + 2, 2)
     } else {
       const rg = game.world.regions[game.world.startRegion]
       view.centreOn((rg.col0 + rg.col1) >> 1, (rg.row0 + rg.row1) >> 1, 2)
     }
-  }, [ready, p, preview, game])
+  }, [ready, p, game])
 
   const notify = (s: string) => {
     setToast(s)
@@ -129,6 +142,7 @@ function Main({ game }: { game: Game }) {
         {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
         <span className="spacer" />
         {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
+        {account.enabled && <button className="chip" onClick={() => setShowAccount(true)}>Account</button>}
       </div>
 
       <div className="zoom">
@@ -147,9 +161,9 @@ function Main({ game }: { game: Game }) {
         </div>
       )}
 
-      {p && sel && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} onClose={() => setSel(null)} notify={notify} />}
+      {p && sel && !placing && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} onClose={() => setSel(null)} notify={notify} />}
 
-      {p && (
+      {p && !placing && (
         <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>
           <div className="tabs">
             {(['today', 'village', 'party', 'log'] as Tab[]).map((t) => (
@@ -169,10 +183,11 @@ function Main({ game }: { game: Game }) {
       )}
 
       {onboard && (
-        <Onboarding game={game} first={onboard === 'first'} onPreview={setPreview}
-          onCancel={onboard === 'friend' ? () => setOnboard(null) : undefined}
-          onDone={() => { setOnboard(null); setPreview(null); centred.current = null }} />
+        <Onboarding game={game} first={onboard === 'first'} site={preview} onStep={onStep}
+          onCancel={onboard === 'friend' ? () => { setOnboard(null); setPlacing(false); setPreview(null) } : undefined}
+          onDone={() => { setOnboard(null); setPlacing(false); setPreview(null); centred.current = null }} />
       )}
+      {showAccount && <Account game={game} onClose={() => setShowAccount(false)} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

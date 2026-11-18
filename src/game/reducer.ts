@@ -22,6 +22,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
     villages: {},
     caravans: [],
     lairs: world.lairs.map((l) => ({ ...l, cleared: false })),
+    revealed: [],
     log: [],
     version: 0,
   }
@@ -45,7 +46,7 @@ export function cellIndex(world: World, col: number, row: number) {
 }
 
 export function territory(v: Village): { col: number; row: number; radius: number }[] {
-  return [{ col: v.col, row: v.row, radius: 2 }, ...v.outposts.map((o) => ({ col: o.col, row: o.row, radius: (o as { radius?: number }).radius ?? 1 }))]
+  return [{ col: v.col, row: v.row, radius: VILLAGE_RADIUS }, ...v.outposts.map((o) => ({ col: o.col, row: o.row, radius: (o as { radius?: number }).radius ?? 1 }))]
 }
 
 export function inTerritory(v: Village, col: number, row: number): boolean {
@@ -57,6 +58,37 @@ export function territoryCells(world: World, v: Village): number[] {
   for (const t of territory(v)) {
     for (const o of spiral(t, t.radius)) {
       if (o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height) out.add(cellIndex(world, o.col, o.row))
+    }
+  }
+  return [...out]
+}
+
+/** Village territory radius, and the empty hexes required between a new
+ *  village's territory and anyone else's. */
+export const VILLAGE_RADIUS = 2
+export const FOUNDING_GAP = 2
+
+/** Why a village can't be founded here (null = fine). */
+export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }): string | null {
+  const cell = world.cells[cellIndex(world, site.col, site.row)]
+  if (!cell || site.col < 0 || site.row < 0 || site.col >= world.width || site.row >= world.height) return 'Off the map'
+  if (cell.tier === 0) return 'Villages must be on land'
+  if (s.lairs.some((l) => !l.cleared && l.col === site.col && l.row === site.row)) return 'Monsters live here'
+  for (const v of Object.values(s.villages)) {
+    if (territory(v).some((t) => distance(t, site) <= t.radius + VILLAGE_RADIUS + FOUNDING_GAP))
+      return `Too close to ${v.name}`
+  }
+  return null
+}
+
+/** Every hex where founding is blocked by a neighbour (for map tinting). */
+export function foundingBlockedCells(world: World, s: GameState): number[] {
+  const out = new Set<number>()
+  for (const v of Object.values(s.villages)) {
+    for (const t of territory(v)) {
+      for (const o of spiral(t, t.radius + VILLAGE_RADIUS + FOUNDING_GAP)) {
+        if (o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height) out.add(cellIndex(world, o.col, o.row))
+      }
     }
   }
   return [...out]
@@ -161,10 +193,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   const p = s.players[ev.playerId]
   if (ev.t === 'join') {
     if (p) return 'Already joined'
-    const cell = world.cells[cellIndex(world, ev.site.col, ev.site.row)]
-    if (!cell || cell.tier === 0) return 'Villages must be on land'
-    if (Object.values(s.villages).some((v) => distance(v, ev.site) < 4)) return 'Too close to another village'
-    return null
+    return foundingProblem(s, world, ev.site)
   }
   if (!p) return 'Unknown player'
   const v = s.villages[p.villageId]
@@ -215,13 +244,13 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   if (ev.col < 0 || ev.row < 0 || ev.col >= world.width || ev.row >= world.height) return 'Off the map'
   const i = cellIndex(world, ev.col, ev.row)
   const cell = world.cells[i]
-  const revealed = p.revealed.includes(i)
+  const revealed = s.revealed.includes(i)
   const land = landAt(world, s, i)
   const terr = land.terrain
   switch (ev.action) {
     case 'scout': {
       if (revealed) return null
-      const near = spiral(ev, 1).some((o) => p.revealed.includes(cellIndex(world, o.col, o.row)))
+      const near = spiral(ev, 1).some((o) => s.revealed.includes(cellIndex(world, o.col, o.row)))
       return near ? null : 'Scout from the edge of what you know'
     }
     case 'gather': {
@@ -354,7 +383,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   const vid = 'v_' + ev.playerId
   const p: Player = {
     id: ev.playerId, name: ev.name, villageId: vid, resetHour: ev.resetHour, resetChangedAt: null, tz: ev.tz,
-    habits: [], habitSlots: 1, perfectStreak: 0, freezes: 1, days: {}, tokens: [], revealed: [], lastTick: null,
+    habits: [], habitSlots: 1, perfectStreak: 0, freezes: 1, days: {}, tokens: [], lastTick: null,
   }
   const v: Village = {
     id: vid, playerId: p.id, name: `${ev.name}’s ${ROLE_TOWN[ev.role]}`, role: ev.role,
@@ -364,13 +393,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   }
   s.players[p.id] = p
   s.villages[vid] = v
-  reveal(world, p, ev.site, 4)
-  // co-op: everyone knows where their neighbours live
-  for (const o of Object.values(s.players)) {
-    if (o.id === p.id) continue
-    reveal(world, o, ev.site, 1)
-    reveal(world, p, s.villages[o.villageId], 1)
-  }
+  reveal(world, s, ev.site, 4)
   log(s, ev.at, p.id, `${ev.name} founded a ${ev.role} village.`, 'good')
   return s
 }
@@ -379,12 +402,13 @@ const ROLE_TOWN: Record<string, string> = {
   farm: 'Farmstead', port: 'Harbour', mining: 'Mine', forestry: 'Woodhall', herding: 'Steading', explorer: 'Camp',
 }
 
-function reveal(world: World, p: Player, at: { col: number; row: number }, radius: number) {
-  const set = new Set(p.revealed)
+/** Map knowledge is shared by every human player in the world. */
+function reveal(world: World, s: GameState, at: { col: number; row: number }, radius: number) {
+  const set = new Set(s.revealed)
   for (const o of spiral(at, radius)) {
     if (o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height) set.add(cellIndex(world, o.col, o.row))
   }
-  p.revealed = [...set]
+  s.revealed = [...set]
 }
 
 function progress(s: GameState, p: Player, ev: Extract<GameEvent, { t: 'progress' }>) {
@@ -427,7 +451,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'scout': {
       const camp = done(v).some((b) => b.type === 'scout_camp') ? 1 : 0
       const radius = (k >= 1 ? 2 : 1) + camp
-      reveal(world, p, ev, radius)
+      reveal(world, s, ev, radius)
       const found = spiral(ev, radius).map((o) => s.lairs.find((l) => !l.cleared && l.col === o.col && l.row === o.row)).find(Boolean)
       log(s, ev.at, p.id, found ? `Scouts spotted ${found.kind} nearby!` : 'Scouts mapped new land.', found ? 'monster' : 'info')
       break
@@ -483,7 +507,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'outpost':
       addGoods(v, { timber: 6, stone: 2 }, -k)
       v.outposts.push({ col: ev.col, row: ev.row, radius: k >= 1 ? 1 : 0 } as Village['outposts'][number])
-      reveal(world, p, ev, 2)
+      reveal(world, s, ev, 2)
       log(s, ev.at, p.id, k >= 1 ? 'An outpost was founded.' : 'A small camp was pitched.', 'good')
       break
     case 'expedition': {
