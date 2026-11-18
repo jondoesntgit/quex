@@ -3,10 +3,12 @@
  *  Everything is drawn with plain sprites and Graphics, so it looks the same
  *  on every renderer, and it's skipped when zoomed far out, off screen, or
  *  when the player has asked for reduced motion. Purely cosmetic. */
-import { Container, Graphics, type Sprite } from 'pixi.js'
+import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 
 const FOAM = 0xf4fbff
 const GLINT = 0xffffff
+const RIPPLE_SHALLOW = 0xc8ecff
+const RIPPLE_DEEP = 0x8cc4f4
 const SHIMMER = 0xfff2b8
 
 /** 0..1: how hard the wind blows at x (world px) at time t (s). Gusts travel east. */
@@ -23,14 +25,40 @@ const hash = (a: number, b: number) => {
   return s - Math.floor(s)
 }
 
-interface Surf { waves: Container[]; rim: Graphics; phase: number; period: number }
-interface Glint { g: Graphics; phase: number; period: number }
+interface Surf {
+  waves: Graphics[]; drawn: number[]; rim: Graphics; phase: number; period: number
+  cx: number; cy: number; segs: [number, number, number, number][] // relative to the hex centre
+}
+
+/** A crisp one-pixel line (Bresenham), as filled pixels: no blurry strokes. */
+function pixelLine(g: Graphics, x0: number, y0: number, x1: number, y1: number) {
+  let x = Math.round(x0), y = Math.round(y0)
+  const X = Math.round(x1), Y = Math.round(y1)
+  const dx = Math.abs(X - x), dy = -Math.abs(Y - y), sx = x < X ? 1 : -1, sy = y < Y ? 1 : -1
+  let err = dx + dy
+  for (let n = 0; n < 512; n++) {
+    g.rect(x, y, 1, 1)
+    if (x === X && y === Y) break
+    const e2 = 2 * err
+    if (e2 >= dy) { err += dy; x += sx }
+    if (e2 <= dx) { err += dx; y += sy }
+  }
+}
+/** bottom layer: a one-pixel-high dash drifting right across a water hex, a pixel at a time */
+interface Ripple { s: Sprite; cx: number; y: number; half: number; x0: number; speed: number; phase: number; len: number }
+/** top layer: a small bright spot that grows and shrinks by a pixel */
+interface Spark { s: Sprite; x: number; y: number; phase: number; period: number }
+/** foam rising off the surf like smoke */
+interface Puff { s: Sprite; x: number; y: number; dx: number; phase: number; period: number }
 interface Tree { s: Sprite; x: number; y: number; amp: number; phase: number }
 interface Field { g: Graphics; x: number; y: number }
 
 export class Ambient {
   private surf: Surf[] = []
-  private glints: Glint[] = []
+  private ripples: Ripple[] = []
+  private sparks: Spark[] = []
+  private puffs: Puff[] = []
+  private puffSurf = new Map<Surf, Puff[]>()
   private trees: Tree[] = []
   private fields: Field[] = []
   private reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -46,52 +74,89 @@ export class Ambient {
   }
 
   /** The scene is being rebuilt: forget the old pieces (their owner destroys them). */
-  reset() { this.surf = []; this.glints = []; this.trees = []; this.fields = [] }
+  reset() { this.surf = []; this.trees = []; this.fields = []; this.ripples = []; this.sparks = []; this.puffs = []; this.puffSurf.clear() }
+
+  private dot(color: number, alpha = 1): Sprite {
+    const s = new Sprite(Texture.WHITE)
+    s.tint = color
+    s.width = 1; s.height = 1
+    s.alpha = alpha
+    s.cullable = true
+    return s
+  }
+
+  /** The water's own movement on a water hex (top face centred on cx, cy):
+   *  ripples drifting right, and small highlights near the corners. */
+  water(cx: number, cy: number, seed: number, deep: boolean, shore: boolean): Sprite[] {
+    const out: Sprite[] = []
+    const hh = this.W / 4, hw = this.W / 2
+    const n = Math.max(2, Math.round(this.W / 16))
+    for (let k = 0; k < n; k++) {
+      // one row per ripple, spread over the hex, at least a pixel from the rim
+      const dy = Math.round(((k + 0.5) / n - 0.5) * (hh * 2 - 4) + (hash(seed, k + 50) - 0.5) * 2)
+      const half = Math.floor(hw - Math.abs(dy) - 3)
+      if (half < 4) continue
+      const s = this.dot(deep ? RIPPLE_DEEP : RIPPLE_SHALLOW, deep ? 0.55 : 0.75)
+      this.ripples.push({ s, cx, y: cy + dy, half, x0: hash(seed, k + 60) * half * 2, speed: 2 + hash(seed, k + 70) * 1.5, phase: hash(seed, k + 80) * 6.28, len: 2 + Math.floor(hash(seed, k + 90) * 2) })
+      out.push(s)
+    }
+    // highlights: in the hex's corners, more of them near the shore
+    const corners: [number, number][] = [[hw - 5, 0], [-(hw - 5), 0], [hw / 2 - 2, hh - 3], [-(hw / 2 - 2), hh - 3], [hw / 2 - 2, -(hh - 3)], [-(hw / 2 - 2), -(hh - 3)]]
+    const m = shore ? 2 : hash(seed, 99) < 0.5 ? 1 : 0
+    for (let k = 0; k < m; k++) {
+      const [ox, oy] = corners[Math.floor(hash(seed, k + 100) * 6)]
+      const s = this.dot(GLINT, 0)
+      this.sparks.push({ s, x: Math.round(cx + ox), y: Math.round(cy + oy), phase: hash(seed, k + 110) * 8, period: 3 + hash(seed, k + 120) * 3 })
+      out.push(s)
+    }
+    return out
+  }
 
   /** Surf for a water hex: `edges` are its shore edges as corner pairs around (cx, cy). Returns nodes to add. */
   shore(cx: number, cy: number, edges: [number, number, number, number][], seed: number): Container[] {
-    const mk = () => { const c = new Container(); c.x = cx; c.y = cy; c.cullable = true; return c }
-    const waves = [mk(), mk()]
-    const wg = new Graphics()
-    const rim = new Graphics()
+    const segs: [number, number, number, number][] = []
     for (const [x0, y0, x1, y1] of edges) {
-      // broken, pixel-ish strokes: three pieces with small gaps
+      // broken strokes: three pieces with small gaps, each one pixel chunk
       const pieces = 3
       for (let k = 0; k < pieces; k++) {
         const h = hash(seed + k, x0 + y1)
-        const u0 = (k + 0.08 + h * 0.12) / pieces, u1 = (k + 0.92 - h * 0.12) / pieces
-        const ax = x0 + (x1 - x0) * u0 - cx, ay = y0 + (y1 - y0) * u0 - cy
-        const bx = x0 + (x1 - x0) * u1 - cx, by = y0 + (y1 - y0) * u1 - cy
-        wg.moveTo(ax, ay).lineTo(bx, by)
-        // the rim sits right at the waterline, a touch inside the hex
-        rim.moveTo(cx + ax * 0.94, cy + ay * 0.94).lineTo(cx + bx * 0.94, cy + by * 0.94)
+        const u0 = (k + 0.1 + h * 0.12) / pieces, u1 = (k + 0.9 - h * 0.12) / pieces
+        segs.push([x0 + (x1 - x0) * u0 - cx, y0 + (y1 - y0) * u0 - cy, x0 + (x1 - x0) * u1 - cx, y0 + (y1 - y0) * u1 - cy])
       }
     }
-    wg.stroke({ width: 2, color: FOAM, alpha: 1, cap: 'round' })
-    rim.stroke({ width: 2, color: FOAM, alpha: 1 })
-    waves[0].addChild(wg)
-    waves[1].addChild(wg.clone())
-    rim.cullable = true
-    const s: Surf = { waves, rim, phase: hash(seed, 3.1) * 0.35 + (cx * 0.004 + cy * 0.002), period: 4.2 + hash(seed, 7) * 1.4 }
-    this.surf.push(s)
-    return [rim, ...waves]
-  }
-
-  /** A few twinkles on an open-water hex. */
-  glint(cx: number, cy: number, seed: number): Graphics | null {
-    if (hash(seed, 1.3) > 0.35) return null
-    const g = new Graphics()
-    const n = 1 + Math.floor(hash(seed, 2.9) * 2)
-    for (let k = 0; k < n; k++) {
-      const x = Math.round(cx + (hash(seed, k + 4) - 0.5) * this.W * 0.6)
-      const y = Math.round(cy + (hash(seed, k + 9) - 0.5) * this.W * 0.25)
-      g.rect(x, y, 2, 1).rect(x + 3, y, 1, 1)
+    // the rim sits right at the waterline, two pixels thick
+    const rim = new Graphics()
+    const f0 = 1 - 1 / (this.W / 4)
+    for (const [ax, ay, bx, by] of segs) {
+      pixelLine(rim, cx + ax * f0, cy + ay * f0, cx + bx * f0, cy + by * f0)
+      // thicken toward the water: down/up for flat edges, sideways for slanted ones (no checkerboard)
+      const flat = Math.abs(ay - by) < 1
+      const ox = flat ? 0 : -Math.sign(ax + bx), oy = flat ? -Math.sign(ay + by) : 0
+      pixelLine(rim, cx + ax * f0 + ox, cy + ay * f0 + oy, cx + bx * f0 + ox, cy + by * f0 + oy)
     }
-    g.fill({ color: GLINT })
-    g.alpha = 0
-    g.cullable = true
-    this.glints.push({ g, phase: hash(seed, 5.5) * 10, period: 2.5 + hash(seed, 6.6) * 4 })
-    return g
+    rim.fill({ color: FOAM })
+    rim.cullable = true
+    const waves = [new Graphics(), new Graphics()]
+    for (const w of waves) w.cullable = true
+    // foam puffs at the waterline, rising off each breaking wave
+    const puffs: Sprite[] = []
+    edges.forEach(([x0, y0, x1, y1], e) => {
+      for (let k = 0; k < 2; k++) {
+        const u = 0.25 + 0.5 * hash(seed + e, k + 130)
+        const px = x0 + (x1 - x0) * u, py = y0 + (y1 - y0) * u
+        const sp = this.dot(FOAM, 0)
+        // drift a little away from the land, back over the water
+        const away = Math.sign(cx - px) || 1
+        this.puffs.push({ s: sp, x: Math.round(cx + (px - cx) * 0.9), y: Math.round(cy + (py - cy) * 0.9), dx: away, phase: hash(seed + e, k + 140), period: 0 })
+        puffs.push(sp)
+      }
+    })
+    const s: Surf = { waves, drawn: [-1, -1], rim, cx, cy, segs, phase: hash(seed, 3.1) * 0.35 + (cx * 0.004 + cy * 0.002), period: 4.2 + hash(seed, 7) * 1.4 }
+    this.surf.push(s)
+    for (const p of this.puffs.slice(-puffs.length)) p.period = s.period
+    // puffs follow their own surf's timing
+    this.puffSurf.set(s, this.puffs.slice(-puffs.length))
+    return [rim, ...waves, ...puffs]
   }
 
   /** A tree sprite (anchored at its foot) that sways in the wind. */
@@ -122,7 +187,9 @@ export class Ambient {
       if (this.on) {
         // settle everything to rest once
         for (const s of this.surf) { for (const w of s.waves) w.visible = false; s.rim.alpha = 0.7 }
-        for (const g of this.glints) g.g.visible = false
+        for (const r of this.ripples) r.s.visible = false
+        for (const sp of this.sparks) sp.s.visible = false
+        for (const p of this.puffs) p.s.visible = false
         for (const tr of this.trees) tr.s.skew.x = 0
         for (const f of this.fields) f.g.visible = false
         this.on = false
@@ -131,7 +198,9 @@ export class Ambient {
     }
     if (!this.on) {
       for (const s of this.surf) for (const w of s.waves) w.visible = true
-      for (const g of this.glints) g.g.visible = true
+      for (const r of this.ripples) r.s.visible = true
+      for (const sp of this.sparks) sp.s.visible = true
+      for (const p of this.puffs) p.s.visible = true
       for (const f of this.fields) f.g.visible = true
       this.on = true
     }
@@ -141,19 +210,59 @@ export class Ambient {
       // two waves, half a cycle apart, roll in from well out, brighten,
       // break on the shore and fade back into the sea
       let brk = 0
+      const reach = Math.floor(this.W / 8) // pixels out to sea where a wave starts
+      let breakU = -1
       s.waves.forEach((w, k) => {
         const u = ((t / s.period + s.phase + k * 0.5) % 1 + 1) % 1
-        w.scale.set(0.5 + 0.47 * Math.sin(u * Math.PI / 2))
+        // whole pixels only: the wave steps in one pixel at a time (redrawn only when it moves)
+        const d = 3 + Math.round(reach * (1 - Math.sin(u * Math.PI / 2)))
+        if (s.drawn[k] !== d) {
+          s.drawn[k] = d
+          const f = 1 - d / (this.W / 4)
+          w.clear()
+          for (const [ax, ay, bx, by] of s.segs) pixelLine(w, s.cx + ax * f, s.cy + ay * f, s.cx + bx * f, s.cy + by * f)
+          w.fill({ color: FOAM })
+        }
         w.alpha = u < 0.8 ? 0.2 + 0.8 * (u / 0.8) : 1 - (u - 0.8) / 0.2
         brk = Math.max(brk, 1 - Math.abs(u - 0.88) * 6)
+        if (u >= 0.8) breakU = (u - 0.8) / 0.2
       })
       // the foam line at the waterline swells white as each wave breaks
       s.rim.alpha = 0.55 + 0.45 * Math.max(0, brk)
+      // foam puffs rise and drift off the break, like smoke, then fade
+      for (const p of this.puffSurf.get(s) ?? []) {
+        const v = breakU < 0 ? -1 : (breakU + p.phase * 0.3) % 1
+        if (v < 0) { p.s.alpha = 0; continue }
+        const step = Math.floor(v * 4) // 0..3 pixels of travel
+        p.s.x = p.x + p.dx * Math.min(2, step)
+        p.s.y = p.y - step
+        p.s.width = step < 2 ? 2 : 1
+        p.s.alpha = 0.9 * (1 - v)
+      }
     }
-    for (const g of this.glints) {
-      if (g.g.culled) continue
-      const u = ((t + g.phase) % g.period) / g.period
-      g.g.alpha = u < 0.12 ? Math.sin((u / 0.12) * Math.PI) * 0.9 : 0
+    for (const r of this.ripples) {
+      if (r.s.culled) continue
+      // drift right a whole pixel at a time, wrapping inside the hex
+      const span = r.half * 2
+      const pos = Math.floor(r.x0 + t * r.speed) % span
+      // length breathes by one pixel (2-3 or 3-4), never splitting the ripple
+      const len = r.len + (Math.sin(t * 0.9 + r.phase) > 0 ? 1 : 0)
+      r.s.x = Math.round(r.cx - r.half + pos)
+      r.s.y = r.y
+      r.s.width = Math.min(len, span - pos)
+      // fade in from the left rim and out at the right
+      const edge = Math.min(pos, span - pos) / 4
+      r.s.alpha = (r.s.tint === RIPPLE_DEEP ? 0.55 : 0.75) * Math.min(1, edge)
+    }
+    for (const sp of this.sparks) {
+      if (sp.s.culled) continue
+      // a bright spot that grows 1 -> 2 -> 1 pixels and goes out, now and then
+      const u = ((t + sp.phase) % sp.period) / sp.period
+      if (u > 0.3) { sp.s.alpha = 0; continue }
+      const size = u > 0.1 && u < 0.2 ? 2 : 1
+      sp.s.x = sp.x - (size - 1); sp.s.y = sp.y
+      sp.s.width = size * 2 - (size === 1 ? 0 : 1); sp.s.height = size === 2 ? 2 : 1
+      sp.s.alpha = 0.95
     }
     for (const tr of this.trees) {
       if (tr.s.culled) continue

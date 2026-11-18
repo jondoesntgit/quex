@@ -319,8 +319,8 @@ export class MapView {
           const [a, b] = EDGE_CORNERS[k]
           edges.push([corners[a][0], corners[a][1], corners[b][0], corners[b][1]])
         })
+        for (const n of this.ambient.water(cx, cy, i, land!.terrain !== 'shallow', edges.length > 0)) { n.zIndex = z(i, 0.4); this.cells.addChild(n) }
         if (edges.length) for (const n of this.ambient.shore(cx, cy, edges, i)) { n.zIndex = z(i, 0.5); this.cells.addChild(n) }
-        else if (land!.terrain !== 'shallow') { const g = this.ambient.glint(cx, cy, i); if (g) { g.zIndex = z(i, 0.5); this.cells.addChild(g) } }
       } else if ((land!.terrain === 'meadow' || land!.terrain === 'savannah') && !land!.feature && !things.has(i) && ((i * 2654435761) >>> 0) % 3 === 0) {
         const g = this.ambient.field(cx, cy, i, 2)
         g.zIndex = z(i, 0.5); this.cells.addChild(g)
