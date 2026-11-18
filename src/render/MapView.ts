@@ -10,7 +10,7 @@
  *  columns sit half a hex lower). Each hex draws terrain column, river,
  *  then whatever stands on it, so nearer hexes correctly cover farther ones.
  */
-import { Application, Container, Graphics, Sprite } from 'pixi.js'
+import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } from 'pixi.js'
 import { hexToPixel, neighbours, pixelToHex } from '../world/hex'
 import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
@@ -120,10 +120,12 @@ export class MapView {
     this.bindInput()
   }
 
-  /** Renderer to try first (see startRenderer). */
+  /** Renderer to try first (see startRenderer). iPhones and iPads use the
+   *  canvas renderer: WebGL texturing has drawn blank or solid tiles there. */
   preference: 'webgl' | 'webgpu' | 'canvas' = (() => {
     const r = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('renderer') : null
-    return r === 'canvas' || r === 'webgpu' ? r : 'webgl'
+    if (r === 'canvas' || r === 'webgpu' || r === 'webgl') return r
+    return isIOS() ? 'canvas' : 'webgl'
   })()
 
   /** Draw one grass tile off-screen and read it back: some phone GPUs leave
@@ -288,6 +290,7 @@ export class MapView {
       const t = this.atlas.tex(terrainName)
       if (t) {
         const s = new Sprite(t.texture)
+        s.cullable = true
         s.x = cx - t.frame.ax
         s.y = cy - t.frame.ay
         if (!known) s.tint = 0x3a3a58
@@ -312,6 +315,7 @@ export class MapView {
         const f = this.atlas.tex(l.name)
         if (!f) continue
         const s = new Sprite(f.texture)
+        s.cullable = true
         s.x = cx - f.frame.ax
         s.y = cy - f.frame.ay + l.dy
         s.alpha = l.alpha
@@ -620,6 +624,14 @@ function dashed(g: Graphics, x0: number, y0: number, x1: number, y1: number, col
       g.rect(x, y, 2, 1).fill(color)
     }
   }
+}
+
+// Skip drawing anything off-screen (matters most for the canvas renderer).
+extensions.add(CullerPlugin)
+
+function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
 /** Zoom levels: below 1 shrinks the scene to see the whole continent. */
