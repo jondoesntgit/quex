@@ -31,20 +31,25 @@ describe('villager routes', () => {
     const { out } = poses(hs)
     for (const q of out.filter((q) => q.kind === 'walk')) expect(onSolidGround(hs, q)).toBe(true)
   })
-  it('start a hop exactly at the cliff edge, not past it', () => {
+  it('take off a little way back from the edge and stay at ledge height until past it', () => {
     const hs = hexes([3, 1])
     const { route } = poses(hs)
     const hop = route.find((g) => g.kind === 'hop')!
-    expect(hop.kind).toBe('hop')
-    if (hop.kind !== 'hop') return
+    if (hop.kind !== 'hop') throw new Error('no hop')
     const edge = { x: (hs[0].cx + hs[1].cx) / 2, y: (hs[0].cy + hs[1].cy) / 2 }
-    expect(hop.a).toEqual(edge)
-    // the take-off point is on the boundary of the high hex and the landing inside the low one
+    // take-off is on the high hex, clearly short of the edge; landing is inside the low hex
     expect(insideHex(hop.a, hs[0].cx, hs[0].cy, W)).toBe(true)
+    expect(Math.hypot(hop.a.x - edge.x, (hop.a.y - edge.y) * 2)).toBeGreaterThan(W * 0.1)
     expect(insideHex(hop.b, hs[1].cx, hs[1].cy, W)).toBe(true)
-    // the walk before the hop ends at that same edge point
+    // the walk before the hop ends at the take-off point
     const before = route[route.indexOf(hop) - 1]
-    expect(before.kind === 'walk' && before.b).toEqual(edge)
+    expect(before.kind === 'walk' && before.b).toEqual(hop.a)
+    // while still over the high hex the jumper is never below its surface
+    const start = sample(route, route.slice(0, route.indexOf(hop)).reduce((s, g) => s + g.dur, 0), TP)
+    for (let u = 0; u <= hop.over; u += 0.05) {
+      const t = route.slice(0, route.indexOf(hop)).reduce((s, g) => s + g.dur, 0) + u * hop.dur
+      expect(sample(route, t, TP).y).toBeLessThanOrEqual(start.y + 0.001)
+    }
   })
   it('hop: lift, fall the full height, then land', () => {
     const hs = hexes([3, 1])

@@ -5,8 +5,9 @@
  *  point at tier t is drawn t * TP px higher. Hexes are flat-top, projected to
  *  W wide x W/2 tall. Rules that keep walkers on solid ground:
  *  - they only cross between hexes at the true shared-edge midpoint (the
- *    midpoint of the two hex centres), so a climb or hop always starts and
- *    ends on the edge, never in mid-air;
+ *    midpoint of the two hex centres). Climbs go straight up the face there;
+ *    hops take off a little way back from the edge, sail over it at full
+ *    height, and only drop once past it, so nobody walks off a ledge;
  *  - inside a hex they walk straight lines, and both ends are inside the
  *    (convex) hex, so the whole line is too;
  *  - hexes with a building are crossed around the building, via waypoints
@@ -18,7 +19,8 @@ export interface RouteHex { cell: number; cx: number; cy: number; tier: number; 
 export type Seg =
   | { kind: 'walk'; a: Pt; b: Pt; tier: number; cell: number; cy: number; dur: number }
   | { kind: 'climb'; at: Pt; t0: number; t1: number; cell: number; cy: number; dur: number }
-  | { kind: 'hop'; a: Pt; b: Pt; t0: number; t1: number; cellA: number; cellB: number; cyB: number; dur: number }
+  | { kind: 'hop'; a: Pt; b: Pt; t0: number; t1: number; cellA: number; cellB: number; cyB: number; dur: number
+      /** fraction of the hop at which it passes over the edge */ over: number }
   | { kind: 'pause'; at: Pt; tier: number; cell: number; cy: number; dur: number; pose: 'land' | 'work' | 'stand' }
 
 export interface Pose {
@@ -32,10 +34,11 @@ export interface Pose {
 
 export const SPEED = 9 // px / s walking
 export const CLIMB_SPEED = 4 // px / s up a cliff
-export const HOP_TIME = 0.42 // s in the air
+export const HOP_TIME = 0.5 // s in the air
 export const LAND_TIME = 0.15 // s squashed on landing
-export const HOP_HEIGHT = 4 // px of lift before the drop
-const HOP_REACH = 0.22 // how far into the lower hex a hop lands (fraction of edge→centre)
+export const HOP_HEIGHT = 9 // px of lift: perky little jumps
+const TAKEOFF = 0.32 // hops start this far back from the edge (fraction of edge→centre)
+const HOP_REACH = 0.3 // and land this far into the lower hex
 const OBSTACLE = 0.27 // building footprint radius, as a fraction of W (in unsquashed space)
 const RIM = 0.74 // waypoints sit this far from the centre toward each corner
 
@@ -104,17 +107,22 @@ export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP:
   for (let i = 0; i + 1 < hexes.length; i++) {
     const h = hexes[i], n = hexes[i + 1]
     const edge = { x: (h.cx + n.cx) / 2, y: (h.cy + n.cy) / 2 }
-    walk(h, cur, edge)
     const lower = h.tier <= n.tier ? h : n
     if (n.tier > h.tier) {
+      walk(h, cur, edge)
       segs.push({ kind: 'climb', at: edge, t0: h.tier, t1: n.tier, cell: lower.cell, cy: lower.cy, dur: ((n.tier - h.tier) * TP) / CLIMB_SPEED })
       cur = edge
     } else if (n.tier < h.tier) {
+      // take off a little way back from the edge, clear it at full height, land well onto the lower hex
+      const off = { x: edge.x + (h.cx - edge.x) * TAKEOFF, y: edge.y + (h.cy - edge.y) * TAKEOFF }
+      walk(h, cur, off)
       const land = { x: edge.x + (n.cx - edge.x) * HOP_REACH, y: edge.y + (n.cy - edge.y) * HOP_REACH }
-      segs.push({ kind: 'hop', a: edge, b: land, t0: h.tier, t1: n.tier, cellA: h.cell, cellB: n.cell, cyB: n.cy, dur: HOP_TIME })
+      const over = Math.hypot(edge.x - off.x, edge.y - off.y) / Math.max(0.01, Math.hypot(land.x - off.x, land.y - off.y))
+      segs.push({ kind: 'hop', a: off, b: land, t0: h.tier, t1: n.tier, cellA: h.cell, cellB: n.cell, cyB: n.cy, dur: HOP_TIME, over })
       segs.push({ kind: 'pause', at: land, tier: n.tier, cell: n.cell, cy: n.cy, dur: LAND_TIME, pose: 'land' })
       cur = land
     } else {
+      walk(h, cur, edge)
       cur = edge
     }
   }
@@ -146,8 +154,10 @@ export function sample(segs: Seg[], t: number, TP: number): Pose {
       case 'hop': {
         const x = g.a.x + (g.b.x - g.a.x) * u, y = g.a.y + (g.b.y - g.a.y) * u
         const lift = 4 * u * (1 - u) * HOP_HEIGHT
-        const z = g.t0 + (g.t1 - g.t0) * u * u // falls faster as it goes
-        return { x, y: y - z * TP - lift, cell: u < 0.5 ? g.cellA : g.cellB, front: y > g.cyB, kind: 'hop', dist }
+        // level with the ledge until clear of it, then a falling drop to the lower hex
+        const v = u <= g.over ? 0 : (u - g.over) / (1 - g.over)
+        const z = g.t0 + (g.t1 - g.t0) * v * v
+        return { x, y: y - z * TP - lift, cell: u < g.over ? g.cellA : g.cellB, front: y > g.cyB, kind: 'hop', dist }
       }
       case 'pause':
         return { x: g.at.x, y: g.at.y - g.tier * TP, cell: g.cell, front: g.at.y > g.cy, kind: g.pose, dist }
