@@ -15,7 +15,11 @@
  *  - on a road hex they follow the dirt track, which runs through the centre. */
 
 export interface Pt { x: number; y: number }
-export interface RouteHex { cell: number; cx: number; cy: number; tier: number; blocked: boolean; road?: boolean }
+export interface RouteHex {
+  cell: number; cx: number; cy: number; tier: number; blocked: boolean; road?: boolean
+  /** on a river hex with a road: the bridge's two ends, to cross by instead of the middle */
+  via?: [number, number][] | null
+}
 
 export type Seg =
   | { kind: 'walk'; a: Pt; b: Pt; tier: number; cell: number; cy: number; dur: number }
@@ -103,9 +107,17 @@ export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP:
     // roads run through the hex centre: follow the track there and back out
     const c = { x: h.cx, y: h.cy }
     const near = (p: Pt) => Math.hypot(p.x - c.x, p.y - c.y) < 1
-    const pts = h.road && !h.blocked
-      ? [a, ...(near(a) || near(b) ? [] : [c]), b]
-      : crossHex(h, a, b, W)
+    // over the bridge, entering from whichever end is nearer
+    const bridge = (): Pt[] => {
+      const [u, v] = h.via!.map(([x, y]) => ({ x, y }))
+      const d = (p: Pt, q: Pt) => Math.hypot(p.x - q.x, p.y - q.y)
+      return d(a, u) + d(v, b) <= d(a, v) + d(u, b) ? [a, u, v, b] : [a, v, u, b]
+    }
+    const pts = h.road && !h.blocked && h.via
+      ? bridge()
+      : h.road && !h.blocked
+        ? [a, ...(near(a) || near(b) ? [] : [c]), b]
+        : crossHex(h, a, b, W)
     for (let i = 1; i < pts.length; i++) {
       const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
       if (d > 0.01) segs.push({ kind: 'walk', a: pts[i - 1], b: pts[i], tier: h.tier, cell: h.cell, cy: h.cy, dur: d / SPEED })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { apply, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { actionSize, apply, BRIDGES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
@@ -105,6 +105,18 @@ describe('land: clear ground, trees, mountains', () => {
     const med = s.players.ann.tokens[0]
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'house', ...m }))).toMatch(/steep/)
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'quarry', ...m }))).toBeNull()
+  })
+})
+
+describe('bridges', () => {
+  it('a road across a river is a bridge: a medium task (from the bridge rule on)', () => {
+    const river = world.cells.find((c) => c.riverTo !== -1 && c.tier > 0)!
+    const dry = world.cells.find((c) => c.riverTo === -1 && c.tier > 0)!
+    const after = BRIDGES_FROM, before = '2026-11-01T00:00:00.000Z'
+    expect(actionSize(world, 'road', river.col, river.row, after)).toBe('medium')
+    expect(actionSize(world, 'road', river.col, river.row, before)).toBe('small') // older roads replay unchanged
+    expect(actionSize(world, 'road', dry.col, dry.row, after)).toBe('small')
+    expect(actionSize(world, 'gather', river.col, river.row, after)).toBe('small')
   })
 })
 

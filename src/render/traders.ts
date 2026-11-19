@@ -13,6 +13,7 @@ import type { World } from '../world/types'
 import type { GameState } from '../game/types'
 import { cellIndex } from '../game/reducer'
 import { crossHex, type Pt } from './walk'
+import { bridgeVia } from './waterways'
 import type { Atlas } from './atlas'
 
 export const PERIOD = 6 * 60_000 // ms: at most one caravan per window
@@ -81,7 +82,14 @@ export function tripAt(world: World, s: GameState, now: number, W: number): Trad
       // ramp across the edge: leave this hex's level at 40%, reach the next one's at 60%
       const a = { x: c.x + (n.x - c.x) * 0.4, y: c.y + (n.y - c.y) * 0.4 }
       const b = { x: c.x + (n.x - c.x) * 0.6, y: c.y + (n.y - c.y) * 0.6 }
-      const via = roads.has(i) && !h.blocked ? [cur, c, a] : crossHex(h, cur, a, W)
+      // on a road: along the track (over the bridge, on a river hex), else across the hex
+      const br = roads.has(i) && !h.blocked ? bridgeVia(world, i, W, roads, blocked) : null
+      const brPts = br ? (() => {
+        const [u, v] = br.map(([x, y]) => ({ x, y }))
+        const d = (p: Pt, q: Pt) => Math.hypot(p.x - q.x, p.y - q.y)
+        return d(cur, u) + d(v, a) <= d(cur, v) + d(u, a) ? [cur, u, v, a] : [cur, v, u, a]
+      })() : null
+      const via = brPts ?? (roads.has(i) && !h.blocked ? [cur, c, a] : crossHex(h, cur, a, W))
       for (const p of via.slice(k === 0 ? 0 : 1)) push(p, i)
       out.push({ x: b.x, y: b.y, tier: world.cells[next].tier, cell: next, cy: n.y })
       cur = b

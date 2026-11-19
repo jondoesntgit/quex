@@ -10,7 +10,7 @@ import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, playerDate, weekSeason, weekday } from './calendar'
 import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
-  PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type BuildingDef, type Good, type Goods,
+  PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Village } from './types'
 
@@ -74,6 +74,21 @@ export const WEEKLY_TOKENS_FROM = '2026-11-18T22:00:00.000Z'
  *  lowered) after its night has passed: the late ticks earn their action and
  *  score, and the village gets the extra share of that night's harvest. */
 export const LATE_TICKS_FROM = '2026-11-19T02:15:00.000Z'
+
+/** From this moment a road across a river is a bridge: it needs a medium task. */
+export const BRIDGES_FROM = '2026-11-19T03:30:00.000Z'
+
+/** Does this hex carry a river (where a road would need a bridge)? */
+export function hasRiver(world: World, col: number, row: number) {
+  const c = world.cells[cellIndex(world, col, row)]
+  return !!c && c.riverTo !== -1 && c.tier > 0
+}
+
+/** The task size an action needs here: a road over a river is a bridge (medium). */
+export function actionSize(world: World, action: ActionKind, col: number, row: number, at: string): TaskSize {
+  if (action === 'road' && at >= BRIDGES_FROM && hasRiver(world, col, row)) return 'medium'
+  return ACTIONS[action].size
+}
 
 /** Is this a late tick: raising a task on a day whose night has already passed, the day before the event's own day? */
 function lateTick(p: Player, ev: { at: string; date: ISODate }) {
@@ -283,12 +298,12 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   const tok = p.tokens.find((t) => t.id === ev.tokenId)
   if (!tok) return 'That action token has been used'
   if (tok.strength < 1 && ev.at >= WEEKLY_TOKENS_FROM) return 'Finish the task to use this action'
-  const need = ACTIONS[ev.action].size
+  const need = actionSize(world, ev.action, ev.col, ev.row, ev.at)
   if (ev.action === 'build') {
     const def = ev.building && BUILDINGS[ev.building]
     if (!def) return 'Unknown building'
     if (SIZE_RANK[tok.size] < SIZE_RANK[def.size]) return `${def.name} needs a ${def.size} task`
-  } else if (SIZE_RANK[tok.size] < SIZE_RANK[need]) return `${ACTIONS[ev.action].name} needs a ${need} task`
+  } else if (SIZE_RANK[tok.size] < SIZE_RANK[need]) return ev.action === 'road' && need === 'medium' ? 'A bridge needs a medium task' : `${ACTIONS[ev.action].name} needs a ${need} task`
   if (ev.col < 0 || ev.row < 0 || ev.col >= world.width || ev.row >= world.height) return 'Off the map'
   const i = cellIndex(world, ev.col, ev.row)
   const cell = world.cells[i]
@@ -599,7 +614,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       break
     case 'road':
       v.roads.push(i)
-      log(s, ev.at, p.id, 'A dirt road was laid.', 'good')
+      log(s, ev.at, p.id, world.cells[i].riverTo !== -1 ? 'A bridge was built over the river.' : 'A dirt road was laid.', 'good')
       break
     case 'build': {
       const def = BUILDINGS[ev.building!]

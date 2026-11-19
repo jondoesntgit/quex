@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { actionSize, buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
@@ -136,10 +136,14 @@ function Shell({ title, children, onClose, onShare }: { title: string; children:
 function ActionButton({ game, p, action, col, row, onRun }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onRun: () => void }) {
   const r = tryAction(game, p, action, col, row)
   const a = ACTIONS[action]
+  // a road across a river is a bridge: a medium task
+  const bridge = action === 'road' && actionSize(game.world, action, col, row, game.now().toISOString()) === 'medium'
+  const name = bridge ? 'Bridge' : a.name
+  const blurb = bridge ? 'A wood and stone bridge carries the road over the river.' : a.blurb
   return (
-    <button className={`btn ${a.size} action`} disabled={!r.ev} onClick={onRun} title={r.error ?? a.blurb}>
-      {a.name}
-      <small>{r.error ?? a.blurb}</small>
+    <button className={`btn ${bridge ? 'medium' : a.size} action`} disabled={!r.ev} onClick={onRun} title={r.error ?? blurb}>
+      {name}
+      <small>{r.error ?? blurb}</small>
     </button>
   )
 }

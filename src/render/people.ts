@@ -22,6 +22,7 @@ import type { World } from '../world/types'
 import type { GameState, Village } from '../game/types'
 import { territoryCells } from '../game/reducer'
 import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
+import { bridgeVia } from './waterways'
 
 const SHIRT: Record<string, number> = {
   farm: 0xe8c040, port: 0x4878d8, mining: 0x9a9ab0, forestry: 0x3c8c3c, herding: 0xe0e0d0, explorer: 0xc04878,
@@ -118,6 +119,9 @@ export class People {
     const roadsChanged = roads.size !== this.roads.size || fresh.length > 0
     this.roads = roads
     this.roadsSeen = true
+    const idx = (col: number, row: number) => row * world.width + col
+    this.hubs = new Set(vs.flatMap((v) => [idx(v.col, v.row), ...v.outposts.map((o) => idx(o.col, o.row)), ...v.buildings.map((b) => idx(b.col, b.row))]))
+    this.vias.clear()
     const sig = vs.map((v) => `${v.id}:${Math.floor(v.population)}:${v.buildings.length}:${v.outposts.length}`).join('|')
     if (sig !== this.sig) {
       this.sig = sig
@@ -167,6 +171,14 @@ export class People {
       // start somewhere along the route so they don't all leave home together
       w.t = r() * w.end
     }
+  }
+
+  private hubs = new Set<number>()
+  private vias = new Map<number, [number, number][] | null>()
+  /** The bridge's ends on a river hex with a road (cached until the roads change). */
+  private via(i: number) {
+    if (!this.vias.has(i)) this.vias.set(i, bridgeVia(this.world, i, this.W, this.roads, this.hubs))
+    return this.vias.get(i)!
   }
 
   private hex(i: number): RouteHex {
@@ -221,7 +233,7 @@ export class People {
     const path = this.cells(from, goal, P.land)
     const dest = path[path.length - 1]
     const end = this.spot(dest, P.blocked.has(dest), w.rng)
-    const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i), road: this.roads.has(i) }))
+    const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i), road: this.roads.has(i), via: this.via(i) }))
     w.route = buildRoute(hexes, w.at.p, end, this.W, this.TP)
     w.t = 0
     w.end = routeTime(w.route)
@@ -259,7 +271,7 @@ export class People {
         const r = this.hex(road)
         // stand beside the new track and admire it
         const end = { x: r.cx + (w.rng() - 0.5) * this.W * 0.3, y: r.cy + this.W * (0.08 + w.rng() * 0.06) }
-        const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i) && i !== road, road: this.roads.has(i) }))
+        const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i) && i !== road, road: this.roads.has(i), via: this.via(i) }))
         segs.push({ kind: 'pause', at: ground, tier: h.tier, cell: pose.cell, cy: h.cy, dur: 0.25 + w.rng() * 0.3, pose: 'stand' })
         segs.push(...buildRoute(hexes, ground, end, this.W, this.TP))
         w.at = { cell: road, p: end }

@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from 'react'
-import { ACTIONS, SIZE_RANK, type ActionKind, type BuildingId } from '../game/data'
-import { validate } from '../game/reducer'
+import { SIZE_RANK, type ActionKind, type BuildingId } from '../game/data'
+import { actionSize, validate } from '../game/reducer'
 import type { World } from '../world/types'
 import type { GameEvent, Player, Token } from '../game/types'
 import { eventId, type Game } from '../app/store'
@@ -28,9 +28,10 @@ export function actEvent(game: Game, p: Player, tok: Token, action: ActionKind, 
 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
   extra: { building?: BuildingId; to?: string; goods?: Record<string, number> } = {}, needOverride?: 'big' | 'medium' | 'small') {
-  const tok = bestToken(p, needOverride ?? ACTIONS[action].size)
+  const size = needOverride ?? actionSize(game.world, action, col, row, game.now().toISOString())
+  const tok = bestToken(p, size)
   if (!tok) {
-    const need = needOverride ?? ACTIONS[action].size
+    const need = size
     const half = p.tokens.some((t) => t.strength < 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
     return { ev: null, error: half ? `Finish your half-done ${need} task to unlock this` : `Finish a ${need} task to unlock this` }
   }
