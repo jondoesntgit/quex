@@ -419,6 +419,75 @@ def feat_cactus():
     return build
 
 
+# ---------------------------------------------------------------- deposits
+# Outcrops that say what's in the ground: small, low clusters sitting toward
+# the front-right of the hex (so trees or a cactus can share it), each kind
+# with its own colour and shape so they read at a glance.
+
+def feat_ore(kind, part):
+    """One half of a deposit's outcrop: "front" (near side, toward the front-right)
+    or "back" (far side, toward the back-left). A mine or quarry takes the back
+    half's place; the front half stays to show what's being dug."""
+    p = PAL["features"]
+    rng = random.Random(f"ore:{kind}:{part}")
+    ox, oy = (0.3, -0.3) if part == "front" else (-0.3, 0.28)
+
+    def at(dx, dy):
+        return (ox + dx + rng.uniform(-0.05, 0.05), oy + dy + rng.uniform(-0.04, 0.04))
+
+    def boulder(x, y, r, h, col, light, dark):
+        cone((x, y, 0), r, h, col, segs=5, r_top=r * 0.35, rot=rng.uniform(0, 1.2), shade=(light, dark))
+
+    spots = [(-0.14, 0.1), (0.1, 0.08), (0.0, -0.07), (0.16, -0.1), (-0.16, -0.08)]
+    rng.shuffle(spots)
+
+    def build(W):
+        if kind == "iron":
+            for k, (dx, dy) in enumerate(spots[:4]):
+                x, y = at(dx, dy)
+                boulder(x, y, rng.uniform(0.13, 0.2) * (1.3 if k == 0 else 1), rng.uniform(0.16, 0.26) * (1.5 if k == 0 else 1),
+                        p["iron"], p["iron_light"], p["iron_dark"])
+        elif kind == "copper":
+            for k, (dx, dy) in enumerate(spots[:3]):
+                x, y = at(dx, dy)
+                r, h = rng.uniform(0.14, 0.2), rng.uniform(0.18, 0.3)
+                boulder(x, y, r, h, p["copper_rock"], p["copper_rock"], p["copper_rock_dark"])
+                # bright green-blue veins breaking out of the rock
+                for j in range(2):
+                    a = rng.uniform(0, 6.28)
+                    cone((x + math.cos(a) * r * 0.6, y + math.sin(a) * r * 0.6, h * rng.uniform(0.2, 0.6)), 0.075, 0.11,
+                         p["copper"], segs=4, shade=(p["copper_light"], p["copper"]))
+        elif kind == "stone":
+            # pale slabs and a cut ledge: a quarry waiting to happen
+            x, y = at(0, 0.05)
+            box((x, y, 0), (0.42, 0.22, 0.12), p["stone_light"], (p["stone"], p["stone"], p["stone_dark"]), rot=rng.uniform(-0.3, 0.3))
+            for (dx, dy) in spots[:3]:
+                x, y = at(dx, dy)
+                box((x, y, 0), (rng.uniform(0.1, 0.16), rng.uniform(0.08, 0.12), rng.uniform(0.08, 0.16)),
+                    p["stone_light"], (p["stone"], p["stone"], p["stone_dark"]), rot=rng.uniform(0, 1.5))
+        elif kind == "tin":
+            for (dx, dy) in spots[:2]:
+                x, y = at(dx, dy)
+                boulder(x, y, 0.17, 0.22, p["tin"], p["tin"], p["tin_dark"])
+                for j in range(3):
+                    cone((x + rng.uniform(-0.08, 0.08), y + rng.uniform(-0.06, 0.06), 0.12), 0.035, rng.uniform(0.14, 0.22),
+                         p["tin_light"], segs=4, shade=(p["tin_light"], p["tin"]))
+        elif kind == "clay":
+            # a low, small cut bank of red clay
+            x, y = at(0, 0)
+            cone((x, y, 0), 0.2, 0.05, p["clay"], segs=8, r_top=0.15, shade=(p["clay_light"], p["clay_dark"]))
+            box((x + 0.03, y - 0.13, 0), (0.16, 0.04, 0.045), p["clay_light"], (p["clay_dark"], p["clay_dark"], p["clay_dark"]))
+        elif kind == "salt":
+            for (dx, dy) in spots[:4]:
+                x, y = at(dx * 1.2, dy * 1.2)
+                cone((x, y, 0), rng.uniform(0.1, 0.16), 0.03, p["salt"], segs=6, r_top=rng.uniform(0.06, 0.12), shade=(p["salt"], p["salt_dark"]))
+    return build
+
+
+ORES = ("iron", "copper", "stone", "tin", "clay", "salt")
+ORE_SCALE = 1.15
+
+
 # ---------------------------------------------------------------- creatures
 # Built big and blocky on purpose: silhouettes must read at 24 px. Each one
 # is ~0.8-1.2 hex tall, with one bright accent colour (club, cap, axe, wings).
@@ -606,6 +675,9 @@ FEATURES = {
     "lair": feat_lair(), "mine": feat_mine(), "farm": feat_farm(), "dock": feat_dock(),
     "reeds": feat_reeds(), "cactus": feat_cactus(),
 }
+for _o in ORES:
+    for _part in ("front", "back"):
+        FEATURES[f"ore_{_o}_{_part}"] = feat_ore(_o, _part)
 # variants (f_<name>_v1, f_<name>_v2) so forests and ranges don't look stamped
 for _v in (1, 2):
     for _k in ("pine", "oak"):
@@ -642,7 +714,7 @@ def main():
             continue
         clear_objects()
         build(W)
-        k = CREATURE_SCALE.get(name)
+        k = CREATURE_SCALE.get(name) or (ORE_SCALE if name.startswith("ore_") else None)
         if kind == "features" and k:
             for ob in bpy.data.objects:
                 ob.scale = (k, k, k)

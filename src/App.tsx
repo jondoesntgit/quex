@@ -113,6 +113,8 @@ function Main({ game }: { game: Game }) {
   // a shared link (?at=col,row) centres on that hex, marks it, and opens it for existing players
   const [linked] = useState(() => linkedSpot(game.world))
   const [sel, setSel] = useState<{ col: number; row: number } | null>(() => (game.meta.activePlayer ? linked : null))
+  // prospecting: dim everything but deposits (ore, building stone, clay, salt)
+  const [prospect, setProspect] = useState(false)
   const [preview, setPreview] = useState<Spot | null>(null)
   const [placing, setPlacing] = useState(false)
   const placingRef = useRef(false)
@@ -183,7 +185,7 @@ function Main({ game }: { game: Game }) {
   useEffect(() => {
     const view = viewRef.current
     if (!view || !ready) return
-    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: placing ? null : sel, highlight, blocked, focus, showAll: placing, guest: game.guest, today })
+    view.render({ world: game.world, state: game.state, viewer: p?.id ?? null, selected: placing ? null : sel, highlight, blocked, focus, showAll: placing, guest: game.guest, today, prospect })
   })
 
   // centre the camera on the village (or the starter region) once
@@ -265,6 +267,9 @@ function Main({ game }: { game: Game }) {
           <button className="btn icon" title="Back to your village" aria-label="Back to your village"
             onClick={() => viewRef.current?.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)}>⌂</button>
         )}
+        <button className={`btn icon ${prospect ? 'on' : ''}`} aria-pressed={prospect}
+          title={prospect ? 'Stop prospecting' : 'Prospect: show what is in the ground'} aria-label="Prospect"
+          onClick={() => setProspect(!prospect)}>⛏</button>
       </div>
 
       {p && p.tokens.length > 0 && !sel && (

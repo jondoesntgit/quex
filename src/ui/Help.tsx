@@ -129,6 +129,12 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
             <li>Merchant caravans pass through now and then on their way to trade. They're just passing; enjoy the view.</li>
           </ul>
+          <p>
+            <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, dark rock with green-blue veins for
+            copper, pale slabs for building stone, dark crystals for rare tin, red banks of river clay and white salt
+            crusts. In the mountains, ore streaks the rock itself: green-blue for copper, rust for iron. Tap a hex to see
+            what you could build there, or press ⛏ by the zoom buttons to dim everything except deposits.
+          </p>
           <p>Drag to move around; pinch, scroll or use ＋/－ to zoom. Zoom right out to see the whole continent.</p>
         </details>
 

@@ -18,6 +18,7 @@ import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
 import type { GameState } from '../game/types'
 import { landAt, territoryCells } from '../game/reducer'
+import { isDeposit } from '../world/land'
 import { People } from './people'
 import { Traders } from './traders'
 import type { Atlas } from './atlas'
@@ -35,6 +36,8 @@ export interface SceneInput {
   showAll?: boolean
   /** a guest: no player, but sees only what the world's players have explored */
   guest?: boolean
+  /** prospecting: dim everything except deposits worth mining or gathering */
+  prospect?: boolean
   today: string
 }
 
@@ -304,6 +307,8 @@ export class MapView {
       const tier = known ? cell.tier : 0
       const cx = p.x, cy = p.y - tier * TP
       const land = known ? landAt(world, state, i, input.today) : null
+      const deposit = !!land && isDeposit(land.resource, land.feature)
+      const dim = !!input.prospect && known && !deposit
       const terrainName = land ? `t_${land.terrain}_${(cell.col * 7 + cell.row * 13) % 3}` : `t_deep_${(cell.col + cell.row) % 3}`
       const t = this.atlas.tex(terrainName)
       if (t) {
@@ -314,6 +319,7 @@ export class MapView {
         if (!known) s.tint = 0x3a3a58
         else if (hl.has(i)) s.tint = 0xfff0a0
         else if (blocked.has(i) && cell.tier > 0) s.tint = 0xffb4a8
+        else if (dim) s.tint = DIM
         s.zIndex = z(i, 0)
         this.cells.addChild(s)
       }
@@ -353,8 +359,19 @@ export class MapView {
         : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
-      const layers: { name: string; alpha: number; dy: number }[] = []
-      if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
+      const layers: { name: string; alpha: number; dx?: number; dy: number }[] = []
+      // an outcrop on open ground says what's in it (on mountains, the ore stains the rock instead).
+      // It comes in two halves: a mine, house, town or lair here takes the far half, and the near half stays.
+      const outcrop = deposit && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
+      const ore = (part: 'front' | 'back') => ({ name: `f_ore_${land!.resource}_${part}`, alpha: 1, dy: 0 })
+      if (outcrop) {
+        const far = { dx: -Math.round(W * 0.15), dy: -Math.round(W * 0.07) }
+        if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('front'))
+        // clay and salt are common and low: just the near half
+        else if (land!.resource === 'clay' || land!.resource === 'salt') layers.push(...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
+        else layers.push(ore('back'), ...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
+      }
+      else if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
       else if (dug) layers.push({ name: 'f_mine', alpha: thing!.alpha ?? 1, dy: 0 })
       else if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
       else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
@@ -367,6 +384,7 @@ export class MapView {
             s.cullable = true
             s.x = cx + m.ox
             s.y = cy + m.oy
+            if (dim) s.tint = DIM
             s.zIndex = z(i, 3)
             this.cells.addChild(s)
           }
@@ -378,9 +396,10 @@ export class MapView {
         s.cullable = true
         // anchored at its foot, so trees can sway from the ground
         s.anchor.set(f.frame.ax / f.frame.w, f.frame.ay / f.frame.h)
-        s.x = cx
+        s.x = cx + (l.dx ?? 0)
         s.y = cy + l.dy
         s.alpha = l.alpha
+        if (dim) s.tint = DIM
         s.zIndex = z(i, 3)
         this.cells.addChild(s)
         if (l.name === 'f_farm' && l.alpha === 1) {
@@ -755,6 +774,9 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 /** Corners of the projected top face (flat-top hex squashed to W x W/2),
  *  clockwise from the right-hand point. */
 const WATER = new Set(['deep', 'ocean', 'shallow'])
+const MOUNTAIN_FEATURE = new Set(['mountain', 'mountain_snow'])
+const DIM = 0x5c5c70
+
 
 /** A hex's slightly off-centre middle, so roads and rivers bend a little (stable per hex). */
 function bendPoint(seed: number, cx: number, cy: number, W: number): [number, number] {

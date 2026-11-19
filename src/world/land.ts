@@ -24,3 +24,11 @@ export const isOpen = (l: Land) => l.tier > 0 && OPEN_TERRAIN.includes(l.terrain
 export const isVillageSite = (l: Land) => isOpen(l) && l.terrain !== 'hills'
 
 export const cellLand = (c: Cell): Land => ({ terrain: c.terrain, feature: c.feature, tier: c.tier })
+
+/** Deposits worth showing on the map: ores, building stone (off the mountains,
+ *  where all rock is stone), clay and salt. */
+const DEPOSITS = new Set(['iron', 'copper', 'tin', 'stone', 'clay', 'salt'])
+export function isDeposit(resource: string | null | undefined, feature: string | null | undefined) {
+  if (!resource || !DEPOSITS.has(resource)) return false
+  return resource !== 'stone' || (feature !== 'mountain' && feature !== 'mountain_snow')
+}

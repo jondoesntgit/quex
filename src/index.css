@@ -279,3 +279,7 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .week .wday.today small { text-decoration: underline; }
 .week small { line-height: 0.8; }
 .week .avg { align-self: center; margin-left: 4px; }
+
+/* prospecting button (on while dimming everything but deposits) */
+.btn.icon.on { background: var(--gold); }
+.inspector .deposit { color: var(--ink); }

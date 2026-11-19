@@ -1,11 +1,22 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
-import { hasTrees } from '../world/land'
+import { hasTrees, isDeposit } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
+
+
+/** What a deposit is good for (shown on the hex card). */
+const DEPOSIT_NOTE: Record<string, string> = {
+  iron: 'Iron deposit: a Deep iron mine could go here (big task). Iron makes better tools and weapons.',
+  copper: 'Copper deposit: a Copper mine could go here (big task). Copper plus a little tin makes bronze.',
+  tin: 'Tin! Rare: gather it (small task) and trade it. A little tin turns copper into bronze.',
+  stone: 'Building stone: a Quarry could go here (medium task), or gather stone by hand (small task).',
+  clay: 'River clay: gather it (small task) for a Brick kiln.',
+  salt: 'Salt: gather it (small task), or build Salt pans on the shore (medium task). Salt keeps cheese and fish.',
+}
 
 const TERRAIN_NAME: Record<string, string> = {
   deep: 'Deep sea', ocean: 'Sea', shallow: 'Shallows', beach: 'Beach', grass: 'Grassland', meadow: 'Meadow',
@@ -90,6 +101,9 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   return (
     <Shell onClose={onClose} title={title} onShare={share}>
       <p className="muted" style={{ margin: 0 }}>{sub}</p>
+      {!here && !village && land.resource && DEPOSIT_NOTE[land.resource] && isDeposit(land.resource, land.feature) && (
+        <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>
+      )}
       {village && <p style={{ margin: '4px 0' }}>{ROLE_INFO[village.role]?.name} · 👥 {Math.floor(village.population)} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}

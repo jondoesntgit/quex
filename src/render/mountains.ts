@@ -22,8 +22,21 @@ const RED = [[0xe0, 0x90, 0x68], [0xc0, 0x68, 0x48], [0x88, 0x40, 0x30], [0x62, 
 const SNOW = [[0xff, 0xff, 0xff], [0xe4, 0xec, 0xf8], [0xb8, 0xc8, 0xe8], [0x9c, 0xb0, 0xd8]]
 const PINE = [[0x6c, 0xa8, 0x44], [0x4c, 0x88, 0x34], [0x36, 0x62, 0x28], [0x28, 0x4a, 0x20]] // forest on the lower slopes
 const WARM_TERRAIN = new Set(['desert', 'savannah'])
+// ore showing through the rock: copper's green-blue, iron's rust, tin's dark slate with pale glints
+const STAIN: Record<string, number[][]> = {
+  copper: [[0x7c, 0xe0, 0xc0], [0x3c, 0xb0, 0x90], [0x2a, 0x7c, 0x6c], [0x1e, 0x58, 0x50]],
+  iron: [[0xd0, 0x84, 0x58], [0xa8, 0x5c, 0x38], [0x78, 0x3e, 0x26], [0x56, 0x2c, 0x1c]],
+  tin: [[0xb0, 0xb8, 0xe8], [0x68, 0x6c, 0x98], [0x4a, 0x4c, 0x70], [0x34, 0x36, 0x52]],
+}
+const ORES = ['copper', 'iron', 'tin'] as const
 
 const isMountain = (f: string | null) => f === 'mountain' || f === 'mountain_snow'
+
+function strongest(ore: number[], all: number) {
+  let k = -1, best = 0
+  ore.forEach((v, j) => { if (v > best) { best = v; k = j } })
+  return { ore: k, oreW: best / all }
+}
 
 /** deterministic value noise in [0, 1] */
 function hash2(x: number, y: number, s: number) {
@@ -108,7 +121,7 @@ export class Mountains {
   private near(i: number) {
     const { world } = this
     const c = world.cells[i]
-    const out: { x: number; y: number; tier: number; cold: number; warm: number; m: boolean }[] = []
+    const out: { x: number; y: number; tier: number; cold: number; warm: number; m: boolean; ore: number }[] = []
     const seen = new Set<number>([i])
     let ring = [i]
     for (let r = 0; r < 3; r++) {
@@ -116,7 +129,7 @@ export class Mountains {
       for (const j of ring) {
         const cj = world.cells[j]
         const p = hexToPixel(cj.col, cj.row, this.W)
-        out.push({ x: p.x, y: p.y * K, tier: cj.tier, cold: cj.feature === 'mountain_snow' || cj.terrain === 'snow' || cj.terrain === 'tundra' ? 1 : 0, warm: WARM_TERRAIN.has(cj.terrain) ? 1 : 0, m: isMountain(cj.feature) })
+        out.push({ x: p.x, y: p.y * K, tier: cj.tier, cold: cj.feature === 'mountain_snow' || cj.terrain === 'snow' || cj.terrain === 'tundra' ? 1 : 0, warm: WARM_TERRAIN.has(cj.terrain) ? 1 : 0, m: isMountain(cj.feature), ore: ORES.indexOf(cj.resource as typeof ORES[number]) })
         if (r < 2) for (const [nc, nr] of neighbours(cj.col, cj.row)) {
           if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
           const k = nr * world.width + nc
@@ -141,12 +154,14 @@ export class Mountains {
       let m = 0, wt = 0, tsum = 0, cold = 0
       let mm = 0, all = 0 // soft mountain mask: share of nearby land that is mountain
       let warm = 0, chill = 0 // the land around: deserts warm the rock's colour, snowfields keep trees off
+      const ore = [0, 0, 0] // how strongly each ore shows here (fades smoothly away from its deposit hexes)
       let dM = Infinity, dN = Infinity
       for (const p of pts) {
         const d2 = (x - p.x) ** 2 + (y - p.y) ** 2
         const wm = Math.exp(-d2 * km)
         all += wm
         warm += wm * p.warm; chill += wm * p.cold
+        if (p.ore >= 0) ore[p.ore] += wm
         if (p.m) dM = Math.min(dM, d2)
         else dN = Math.min(dN, d2)
         if (p.m) {
@@ -155,7 +170,7 @@ export class Mountains {
           mm += wm
         }
       }
-      if (wt <= 0) return { alt: 0, snow: Infinity, ground: 0, warm: 0, cold: 0 }
+      if (wt <= 0) return { alt: 0, snow: Infinity, ground: 0, warm: 0, cold: 0, ore: -1, oreW: 0 }
       // rounded outline and gentle foothills from the blurred mask (no per-hex bumps)
       // the mask is 1/2 on the border with lowland hexes: height falls to nothing there
       const fade = Math.max(0, Math.min(1, (mm / all - 0.5) / 0.42))
@@ -172,14 +187,15 @@ export class Mountains {
       const crown = 1.6 * W
       const eased = crown * Math.tanh(raw / crown)
       const tier = tsum / wt
-      const snowLine = TP * 6 + W * (0.85 - 0.45 * (cold / wt))
+      const snowLine = TP * 6 + W * (0.9 - 0.38 * (cold / wt))
       // jaggedness: mid-sized knobs over the whole surface, strongest up high
       const h = eased * Math.pow(edge, 0.8) + fine * W * (0.05 + 0.1 * Math.min(1, eased / W)) * edge
-      return { alt: tier * TP + Math.max(0, h), snow: snowLine, ground: tier * TP, warm: Math.min(1, (warm / all) * 2.5), cold: Math.min(1, chill / all + cold / wt) }
+      return { alt: tier * TP + Math.max(0, h), snow: snowLine, ground: tier * TP, warm: Math.min(1, (warm / all) * 2.5), cold: Math.min(1, chill / all + cold / wt), ...strongest(ore, all) }
     }
   }
 
   // ------------------------------------------------------------ rasterising
+
 
   private draw(i: number): Slice | null {
     const { world, W, TP } = this
@@ -199,6 +215,7 @@ export class Mountains {
     const rows = Math.round((2 * hh) / STEP) + 1
     const Z = new Float32Array(rows * w), SN = new Float32Array(rows * w), ALT = new Float32Array(rows * w)
     const GR = new Float32Array(rows * w), WM = new Float32Array(rows * w), CD = new Float32Array(rows * w)
+    const OK = new Int8Array(rows * w).fill(-1), OW = new Float32Array(rows * w)
     for (let r = 0; r < rows; r++) {
       const dy = -hh + r * STEP
       for (let col = 0; col < w; col++) {
@@ -212,6 +229,8 @@ export class Mountains {
         GR[r * w + col] = f.ground
         WM[r * w + col] = f.warm
         CD[r * w + col] = f.cold
+        OK[r * w + col] = f.ore
+        OW[r * w + col] = f.oreW
       }
     }
     // round off the sharpest tips: two light smoothing passes over the grid
@@ -270,6 +289,16 @@ export class Mountains {
             // treeline: solid forest low down, thinning out (dithered) over a narrow band at its top
             const line = (0.13 + 0.12 * vnoise(gx / (0.5 * W), gy / (0.5 * W), this.seed + 41)) * W
             if (rel < line - 2 || (rel < line + 2 && hash2(gx, y, 11) < (line + 2 - rel) / 4)) { pal = PINE; t = Math.min(3, tone + 1) }
+          }
+          // ore: streaks of colour down the rock near a deposit, densest at its heart
+          if (!pal && OK[k] >= 0 && OW[k] > 0.2) {
+            const streak = vnoise(gx / (0.11 * W), alt / (0.45 * W), this.seed + 51 + OK[k])
+            if (streak > 0.86 - 0.16 * Math.min(1, OW[k]) && hash2(Math.floor(gx / 2), Math.floor(alt / 3), 19) < 0.8) {
+              const kind = ORES[OK[k]]
+              pal = STAIN[kind]
+              // tin glints: the odd pale speck
+              if (kind === 'tin' && hash2(gx, y, 17) < 0.12) t = 0
+            }
           }
           const rgb = (pal ?? ROCK)[Math.min(t, 3)]
           const o = (y * w + col) * 4
