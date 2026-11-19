@@ -426,11 +426,31 @@ def feat_cactus():
 
 def feat_ore(kind, part):
     """One half of a deposit's outcrop: "front" (near side, toward the front-right)
-    or "back" (far side, toward the back-left). A mine or quarry takes the back
-    half's place; the front half stays to show what's being dug."""
+    or "back" (far side, toward the back-left), each a low cluster with loose
+    debris around it; or "debris" alone (stones and chips on the near side), shown
+    when a mine, house or town takes the hex. All of it is squashed to a third of
+    its height in main() (ORE_FLAT), so outcrops lie low in the grass."""
     p = PAL["features"]
     rng = random.Random(f"ore:{kind}:{part}")
-    ox, oy = (0.3, -0.3) if part == "front" else (-0.3, 0.28)
+    ox, oy = (-0.3, 0.28) if part == "back" else (0.3, -0.3)
+    # colours for the loose stones of each kind
+    chips = {
+        "iron": (p["iron"], p["iron_light"], p["iron_dark"]),
+        "copper": (p["copper_rock"], p["copper_rock_light"], p["copper_rock_dark"]),
+        "stone": (p["stone"], p["stone_light"], p["stone_dark"]),
+        "tin": (p["tin"], p["tin_light"], p["tin_dark"]),
+        "salt": (p["salt"], p["salt"], p["salt_dark"]),
+    }[kind]
+
+    def debris(n, spread):
+        """Small loose stones (and the odd green chip for copper) scattered round the cluster."""
+        for j in range(n):
+            a = rng.uniform(0, 6.28)
+            d = rng.uniform(spread * 0.45, spread)
+            x, y = ox + math.cos(a) * d, oy + math.sin(a) * d * 0.8
+            r = rng.uniform(0.03, 0.06)
+            col = (p["malachite"], p["malachite_light"], p["malachite"]) if kind == "copper" and j % 4 == 0 else chips
+            cone((x, y, 0), r, r * 2.2, col[0], segs=rng.choice((4, 5)), r_top=r * 0.35, rot=rng.uniform(0, 1.5), shade=(col[1], col[2]))
 
     def at(dx, dy):
         return (ox + dx + rng.uniform(-0.05, 0.05), oy + dy + rng.uniform(-0.04, 0.04))
@@ -442,6 +462,10 @@ def feat_ore(kind, part):
     rng.shuffle(spots)
 
     def build(W):
+        if part == "debris":
+            debris(11, 0.34)
+            return
+        debris(10, 0.42)
         if kind == "iron":
             for k, (dx, dy) in enumerate(spots[:4]):
                 x, y = at(dx, dy)
@@ -492,6 +516,7 @@ def feat_ore(kind, part):
 
 ORES = ("iron", "copper", "stone", "tin", "salt")  # clay is drawn in the game, as red riverbanks
 ORE_SCALE = 1.15
+ORE_FLAT = 0.34  # outcrops lie low: a third of their modelled height
 
 
 # ---------------------------------------------------------------- creatures
@@ -682,7 +707,7 @@ FEATURES = {
     "reeds": feat_reeds(), "cactus": feat_cactus(),
 }
 for _o in ORES:
-    for _part in ("front", "back"):
+    for _part in ("front", "back", "debris"):
         FEATURES[f"ore_{_o}_{_part}"] = feat_ore(_o, _part)
 # variants (f_<name>_v1, f_<name>_v2) so forests and ranges don't look stamped
 for _v in (1, 2):
@@ -723,7 +748,7 @@ def main():
         k = CREATURE_SCALE.get(name) or (ORE_SCALE if name.startswith("ore_") else None)
         if kind == "features" and k:
             for ob in bpy.data.objects:
-                ob.scale = (k, k, k)
+                ob.scale = (k, k, k * (ORE_FLAT if name.startswith("ore_") else 1))
         if kind == "features":
             bpy.context.view_layer.update()
             zs = [(ob.matrix_world @ v.co) for ob in bpy.data.objects if ob.type == "MESH" for v in ob.data.vertices]

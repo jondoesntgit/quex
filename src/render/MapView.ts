@@ -385,13 +385,15 @@ export class MapView {
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
       const layers: { name: string; alpha: number; dx?: number; dy: number }[] = []
       // an outcrop on open ground says what's in it (on mountains, the ore stains the rock instead).
-      // It comes in two halves: a mine, house, town or lair here takes the far half, and the near half stays.
+      // It comes in two halves: a mine, house, town or lair here takes the far half, and the near half
+      // shrinks to loose debris.
       const outcrop = deposit && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
-      const ore = (part: 'front' | 'back') => ({ name: `f_ore_${land!.resource}_${part}`, alpha: 1, dy: 0 })
+      const ore = (part: 'front' | 'back' | 'debris') => ({ name: `f_ore_${land!.resource}_${part}`, alpha: 1, dy: 0 })
       if (outcrop) {
         const far = { dx: -Math.round(W * 0.15), dy: -Math.round(W * 0.07) }
         if (thing && land!.resource === 'clay') layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
-        else if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('front'))
+        // something built here: it takes the far side, and loose debris from the deposit shows on the near side
+        else if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('debris'))
         // clay shows as red banks along the river instead; salt is common and low: just the near half
         else if (land!.resource === 'clay') { if (natural) layers.push({ name: natural, alpha: 1, dy: 0 }) }
         else if (land!.resource === 'salt') layers.push(...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
