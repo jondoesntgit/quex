@@ -465,7 +465,7 @@ def feat_ore(kind, part):
         if part == "debris":
             debris(11, 0.34)
             return
-        debris(10, 0.42)
+        debris(10, 0.38)
         if kind == "iron":
             for k, (dx, dy) in enumerate(spots[:4]):
                 x, y = at(dx, dy)
@@ -515,7 +515,7 @@ def feat_ore(kind, part):
 
 
 ORES = ("iron", "copper", "stone", "tin", "salt")  # clay is drawn in the game, as red riverbanks
-ORE_SCALE = 1.15
+ORE_SCALE = 0.38  # an outcrop is about one villager tall across (villagers are drawn 9 px tall at 64 px tiles)
 ORE_FLAT = 0.34  # outcrops lie low: a third of their modelled height
 
 
