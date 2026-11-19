@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GameEvent } from '../game/types'
 import type { EventStore } from './store'
 import { FAMILY_WORLD, SANDBOX_WORLD } from './worlds'
+import { savedSession, saveSession } from './accounts'
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -20,6 +21,14 @@ let client: Promise<SupabaseClient> | null = null
 function getClient(): Promise<SupabaseClient> {
   return (client ??= import('@supabase/supabase-js').then(({ createClient }) =>
     createClient(URL_!, KEY!, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })))
+    .then((sb) => {
+      // keep this account's newest tokens for switching back to it later
+      sb.auth.onAuthStateChange((_ev, session) => {
+        const email = session?.user.email
+        if (session && email && !session.user.is_anonymous) saveSession(email, session)
+      })
+      return sb
+    })
 }
 
 /** The shared world, or 'signin' when nobody is signed in with an email yet
@@ -440,8 +449,43 @@ export const account = {
     return (o.data?.length || g.data?.length) ? FAMILY_WORLD : SANDBOX_WORLD
   },
 
+  /** Sign out for good: this account's session ends everywhere it was kept on this device. */
   async signOut() {
     const sb = await getClient()
-    await sb.auth.signOut()
+    const { data: s } = await sb.auth.getSession()
+    if (s.session?.user.email) saveSession(s.session.user.email, null)
+    await sb.auth.signOut({ scope: 'local' })
+  },
+
+  /** Step away from this account but keep its session, so it's one tap to come back.
+   *  (Any signOut, even scope 'local', revokes the session on the server, so
+   *  instead this only drops it from this device's current slot.) */
+  async stepAway() {
+    const sb = await getClient()
+    const { data: s } = await sb.auth.getSession()
+    const email = s.session?.user.email
+    if (s.session && email) saveSession(email, s.session)
+    try {
+      for (const k of Object.keys(localStorage)) if (/^sb-.*-auth-token$/.test(k)) localStorage.removeItem(k)
+    } catch { /* ignore */ }
+  },
+
+  /** Is there a kept session for this account? */
+  hasSession(email: string): boolean { return !!savedSession(email) },
+
+  /** Switch to another account kept on this device. Throws if its session has
+   *  run out (then it needs signing in again). */
+  async switchTo(email: string) {
+    const sb = await getClient()
+    const saved = savedSession(email)
+    if (!saved) throw new Error('Sign in to that account again.')
+    // keep the current account's newest tokens, then take the other's place (no sign-out, which would revoke it)
+    const { data: cur } = await sb.auth.getSession()
+    if (cur.session?.user.email) saveSession(cur.session.user.email, cur.session)
+    const { data, error } = await sb.auth.setSession(saved)
+    if (error || data.session?.user.email !== email) {
+      saveSession(email, null)
+      throw new Error(`The saved sign-in for ${email} has run out: sign in again.`)
+    }
   },
 }

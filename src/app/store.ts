@@ -276,3 +276,7 @@ export class Game {
     this.saveMeta()
   }
 }
+/** Forget which world and villages this device plays (another account is signing in). */
+export function clearMeta() {
+  try { localStorage.removeItem(META_KEY) } catch { /* ignore */ }
+}

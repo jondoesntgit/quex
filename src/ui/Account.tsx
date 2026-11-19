@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { account, SupabaseStore, type AccountInfo, type AssistantLink } from '../app/supabase'
-import { eventId, type Game } from '../app/store'
+import { clearMeta, eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
 import { Help } from './Help'
@@ -84,7 +84,12 @@ export function SignIn() {
                 <label>Accounts on this device</label>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                   {recent.map((e) => (
-                    <span key={e} className={`btn chipbtn ${email === e ? 'primary' : ''}`} onClick={() => setEmail(e)}>
+                    <span key={e} className={`btn chipbtn ${email === e ? 'primary' : ''}`}
+                      title={account.hasSession(e) ? 'Switch to this account' : 'Sign in again to this account'}
+                      onClick={() => {
+                        setEmail(e)
+                        if (account.hasSession(e)) void run(async () => { await account.switchTo(e); clearMeta(); location.reload() })
+                      }}>
                       {e}<button type="button" className="x" title="Forget on this device" onClick={(ev) => { ev.stopPropagation(); forgetAccount(e); setRecent(rememberedAccounts()) }}>×</button>
                     </span>
                   ))}
@@ -132,12 +137,14 @@ export function SignIn() {
   )
 }
 
-async function signOutAndClear(game: Game) {
-  await account.signOut()
-  game.meta.localPlayers = []
-  game.meta.activePlayer = null
-  game.meta.labels = {}
-  game.saveMeta()
+/** Leave this account. Switching keeps its session on this device, so it's one
+ *  tap to come back; signing out ends it. Either way the next account chooses
+ *  its own world and villages. */
+async function leave(how: 'switch' | 'signOut', to?: string) {
+  if (to) await account.switchTo(to)
+  else if (how === 'switch') await account.stepAway()
+  else await account.signOut()
+  clearMeta()
   location.reload()
 }
 
@@ -226,6 +233,23 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
 
         {remote && info && !info.guest && <AssistantLinks notify={notify} />}
 
+        {info?.email && (() => {
+          const others = rememberedAccounts().filter((e) => e !== info.email && account.hasSession(e))
+          return others.length > 0 && (
+            <>
+              <label>Other accounts on this device</label>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {others.map((e) => (
+                  <button key={e} className="btn" title="Switch to this account"
+                    onClick={() => leave('switch', e).catch((x) => { setMsg(x instanceof Error ? x.message : String(x)); setTimeout(() => location.reload(), 2500) })}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </>
+          )
+        })()}
+
         <form onSubmit={(e) => { e.preventDefault(); savePw() }}>
           <label>Set or change password <span className="muted">(optional)</span></label>
           <div className="row" style={{ gap: 6 }}>
@@ -235,7 +259,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           {msg && <p className="muted">{msg}</p>}
         </form>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={() => signOutAndClear(game)} title="Sign out and sign in as someone else on this device">Switch account</button>
+          <button className="btn" onClick={() => void leave('signOut')} title="Sign out of this account on this device">Sign out</button>
+          <button className="btn" onClick={() => void leave('switch')} title="Sign in as someone else; this account stays one tap away">Switch account</button>
           <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
