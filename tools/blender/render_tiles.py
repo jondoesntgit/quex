@@ -484,7 +484,7 @@ def feat_ore(kind, part):
     return build
 
 
-ORES = ("iron", "copper", "stone", "tin", "clay", "salt")
+ORES = ("iron", "copper", "stone", "tin", "salt")  # clay is drawn in the game, as red riverbanks
 ORE_SCALE = 1.15
 
 

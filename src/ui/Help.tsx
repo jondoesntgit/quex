@@ -131,7 +131,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           </ul>
           <p>
             <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, dark rock with green-blue veins for
-            copper, pale slabs for building stone, dark crystals for rare tin, red banks of river clay and white salt
+            copper, pale slabs for building stone, dark crystals for rare tin, red clay banks along rivers and white salt
             crusts. In the mountains, ore streaks the rock itself: green-blue for copper, rust for iron. Tap a hex to see
             what you could build there, or press ⛏ by the zoom buttons to dim everything except deposits.
           </p>

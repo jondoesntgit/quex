@@ -366,9 +366,11 @@ export class MapView {
       const ore = (part: 'front' | 'back') => ({ name: `f_ore_${land!.resource}_${part}`, alpha: 1, dy: 0 })
       if (outcrop) {
         const far = { dx: -Math.round(W * 0.15), dy: -Math.round(W * 0.07) }
-        if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('front'))
-        // clay and salt are common and low: just the near half
-        else if (land!.resource === 'clay' || land!.resource === 'salt') layers.push(...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
+        if (thing && land!.resource === 'clay') layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
+        else if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('front'))
+        // clay shows as red banks along the river instead; salt is common and low: just the near half
+        else if (land!.resource === 'clay') { if (natural) layers.push({ name: natural, alpha: 1, dy: 0 }) }
+        else if (land!.resource === 'salt') layers.push(...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
         else layers.push(ore('back'), ...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
       }
       else if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
@@ -598,12 +600,20 @@ export class MapView {
   private river(world: World, i: number, cx: number, cy: number): Graphics {
     const { width, mid, downLeg, upLegs } = this.riverShape(world, i, cx, cy)
     const g = new Graphics()
+    // river clay: a solid red bank a few pixels wide along both sides, wherever this hex or a neighbour holds clay
+    const cell = world.cells[i]
+    const clay = cell.resource === 'clay' || neighbours(cell.col, cell.row).some(([nc, nr]) =>
+      nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].resource === 'clay')
     // Flat ends that run 2 px past each edge, round only in the middle, and all
     // of the dark banks before any water: no dark line where hexes meet.
     const paint = (color: number, w: number) => {
       for (const leg of [downLeg, ...upLegs]) polyline(g, leg)
       g.stroke({ width: w, color, cap: 'butt', join: 'round' })
       g.circle(mid[0], mid[1], w / 2).fill(color)
+    }
+    if (clay) {
+      paint(0x843c20, width + 2 + 8)
+      paint(0xb8643c, width + 2 + 6)
     }
     paint(0x2868b8, width + 2)
     paint(0x50a8f0, width)
