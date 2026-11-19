@@ -16,9 +16,12 @@ import type { World } from '../world/types'
 
 const K = Math.sqrt(3) // ground y -> true distance (the hex top is drawn half as tall as wide)
 
-// palette (matches the Blender rock and snow)
-const ROCK = [[0xe0, 0x90, 0x68], [0xc0, 0x68, 0x48], [0x88, 0x40, 0x30]] // light, mid, dark
-const SNOW = [[0xff, 0xff, 0xff], [0xe4, 0xec, 0xf8], [0xb8, 0xc8, 0xe8]]
+// palettes: light, mid, dark, darkest (gullies and strata go one step darker)
+const GRAY = [[0xc4, 0xc6, 0xcc], [0x96, 0x98, 0xa6], [0x66, 0x68, 0x7a], [0x4a, 0x4c, 0x5e]] // granite and limestone
+const RED = [[0xe0, 0x90, 0x68], [0xc0, 0x68, 0x48], [0x88, 0x40, 0x30], [0x62, 0x2c, 0x22]] // sandstone, near deserts
+const SNOW = [[0xff, 0xff, 0xff], [0xe4, 0xec, 0xf8], [0xb8, 0xc8, 0xe8], [0x9c, 0xb0, 0xd8]]
+const PINE = [[0x6c, 0xa8, 0x44], [0x4c, 0x88, 0x34], [0x36, 0x62, 0x28], [0x28, 0x4a, 0x20]] // forest on the lower slopes
+const WARM_TERRAIN = new Set(['desert', 'savannah'])
 
 const isMountain = (f: string | null) => f === 'mountain' || f === 'mountain_snow'
 
@@ -66,6 +69,28 @@ export class Mountains {
     this.seed = (h % 1000) + 0.5
   }
 
+  private warm = new Map<number, boolean>()
+  /** Is this mountain hex's whole connected range sandstone? (a third or more of the land around it is desert or savannah) */
+  private warmRange(i: number): boolean {
+    const known = this.warm.get(i)
+    if (known !== undefined) return known
+    const { world } = this
+    const range = [i], seen = new Set([i]), rim = new Set<number>()
+    for (let k = 0; k < range.length; k++) {
+      const c = world.cells[range[k]]
+      for (const [nc, nr] of neighbours(c.col, c.row)) {
+        if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
+        const j = nr * world.width + nc
+        if (isMountain(world.cells[j].feature)) { if (!seen.has(j)) { seen.add(j); range.push(j) } }
+        else if (world.cells[j].tier > 0) rim.add(j)
+      }
+    }
+    const warmRim = [...rim].filter((j) => WARM_TERRAIN.has(world.cells[j].terrain)).length
+    const warm = rim.size > 0 && warmRim / rim.size >= 1 / 3
+    for (const j of range) this.warm.set(j, warm)
+    return warm
+  }
+
   /** Upload slices drawn since the last frame. */
   flush() { for (const s of this.sheets) if (s.dirty) { s.source.update(); s.dirty = false } }
 
@@ -83,7 +108,7 @@ export class Mountains {
   private near(i: number) {
     const { world } = this
     const c = world.cells[i]
-    const out: { x: number; y: number; tier: number; cold: number; m: boolean }[] = []
+    const out: { x: number; y: number; tier: number; cold: number; warm: number; m: boolean }[] = []
     const seen = new Set<number>([i])
     let ring = [i]
     for (let r = 0; r < 3; r++) {
@@ -91,7 +116,7 @@ export class Mountains {
       for (const j of ring) {
         const cj = world.cells[j]
         const p = hexToPixel(cj.col, cj.row, this.W)
-        out.push({ x: p.x, y: p.y * K, tier: cj.tier, cold: cj.feature === 'mountain_snow' ? 1 : 0, m: isMountain(cj.feature) })
+        out.push({ x: p.x, y: p.y * K, tier: cj.tier, cold: cj.feature === 'mountain_snow' || cj.terrain === 'snow' || cj.terrain === 'tundra' ? 1 : 0, warm: WARM_TERRAIN.has(cj.terrain) ? 1 : 0, m: isMountain(cj.feature) })
         if (r < 2) for (const [nc, nr] of neighbours(cj.col, cj.row)) {
           if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
           const k = nr * world.width + nc
@@ -115,11 +140,13 @@ export class Mountains {
       const x = gx, y = gy * K
       let m = 0, wt = 0, tsum = 0, cold = 0
       let mm = 0, all = 0 // soft mountain mask: share of nearby land that is mountain
+      let warm = 0, chill = 0 // the land around: deserts warm the rock's colour, snowfields keep trees off
       let dM = Infinity, dN = Infinity
       for (const p of pts) {
         const d2 = (x - p.x) ** 2 + (y - p.y) ** 2
         const wm = Math.exp(-d2 * km)
         all += wm
+        warm += wm * p.warm; chill += wm * p.cold
         if (p.m) dM = Math.min(dM, d2)
         else dN = Math.min(dN, d2)
         if (p.m) {
@@ -128,7 +155,7 @@ export class Mountains {
           mm += wm
         }
       }
-      if (wt <= 0) return { alt: 0, snow: Infinity, ground: 0 }
+      if (wt <= 0) return { alt: 0, snow: Infinity, ground: 0, warm: 0, cold: 0 }
       // rounded outline and gentle foothills from the blurred mask (no per-hex bumps)
       // the mask is 1/2 on the border with lowland hexes: height falls to nothing there
       const fade = Math.max(0, Math.min(1, (mm / all - 0.5) / 0.42))
@@ -148,7 +175,7 @@ export class Mountains {
       const snowLine = TP * 6 + W * (0.85 - 0.45 * (cold / wt))
       // jaggedness: mid-sized knobs over the whole surface, strongest up high
       const h = eased * Math.pow(edge, 0.8) + fine * W * (0.05 + 0.1 * Math.min(1, eased / W)) * edge
-      return { alt: tier * TP + Math.max(0, h), snow: snowLine, ground: tier * TP }
+      return { alt: tier * TP + Math.max(0, h), snow: snowLine, ground: tier * TP, warm: Math.min(1, (warm / all) * 2.5), cold: Math.min(1, chill / all + cold / wt) }
     }
   }
 
@@ -171,6 +198,7 @@ export class Mountains {
     const STEP = 0.5
     const rows = Math.round((2 * hh) / STEP) + 1
     const Z = new Float32Array(rows * w), SN = new Float32Array(rows * w), ALT = new Float32Array(rows * w)
+    const GR = new Float32Array(rows * w), WM = new Float32Array(rows * w), CD = new Float32Array(rows * w)
     for (let r = 0; r < rows; r++) {
       const dy = -hh + r * STEP
       for (let col = 0; col < w; col++) {
@@ -181,6 +209,9 @@ export class Mountains {
         Z[r * w + col] = f.alt - base
         ALT[r * w + col] = f.alt
         SN[r * w + col] = f.snow
+        GR[r * w + col] = f.ground
+        WM[r * w + col] = f.warm
+        CD[r * w + col] = f.cold
       }
     }
     // round off the sharpest tips: two light smoothing passes over the grid
@@ -193,6 +224,8 @@ export class Mountains {
         Z[k] = src[k] * 0.5 + n * 0.5
       }
     }
+    // one rock colour per range: sandstone beside deserts, granite elsewhere
+    const warmHex = this.warmRange(i)
     const zg = (r: number, col: number) => Z[Math.max(0, Math.min(rows - 1, r)) * w + Math.max(0, Math.min(w - 1, col))]
     for (let col = 0; col < w; col++) {
       const dx = col + 0.5 - hw
@@ -213,9 +246,32 @@ export class Mountains {
         const nx = -dzx, ny = -dzy, nz = 1.2
         const lit = (-0.6 * nx + 0.5 * ny + 0.6 * nz) / Math.hypot(nx, ny, nz)
         const tone = lit > 0.7 ? 0 : lit > 0.42 ? 1 : 2
-        const snowy = ALT[r * w + col] + (hash2(p.x + dx, p.y + dy, 3) - 0.5) * 2 > SN[r * w + col]
-        const rgb = (snowy ? SNOW : ROCK)[tone]
+        const k = r * w + col
+        const gx = p.x + dx, gy = p.y + dy
+        const steep = Math.min(1, Math.hypot(dzx, dzy) / 1.6)
+        // rock colour: gray, warming to sandstone near deserts (blended)
+        const ROCK = warmHex ? RED : GRAY
         for (let y = Math.max(0, sy); y < floor; y++) {
+          // each painted row is a little lower down the slope than the one above it
+          const alt = ALT[k] - (y - sy)
+          const rel = alt - GR[k]
+          let t = tone
+          let pal: number[][] | null = null
+          // erosion gullies: long streaks running down the steeper slopes
+          const gully = vnoise(gx / (0.08 * W), alt / (0.8 * W), this.seed + 21) > 0.74 && steep > 0.35
+          // strata: faint level bands of rock
+          const band = steep > 0.55 && Math.sin((alt / (0.16 * W)) * Math.PI * 2 + vnoise(gx / (0.9 * W), gy / (0.9 * W), this.seed + 31) * 5) > 0.96
+          if (gully || (band && hash2(Math.floor(gx / 3), Math.floor(alt), 13) < 0.55)) t = Math.min(3, t + 1) // bands break up into short dashes
+          // scree: speckled loose stone low down
+          if (rel < 0.32 * W && hash2(gx, y, 7) < 0.07) t = Math.max(0, Math.min(3, t + (hash2(gx, y, 8) < 0.5 ? -1 : 1)))
+          const snowLine = SN[k] + (hash2(gx, y, 3) - 0.5) * 2
+          if (alt > snowLine || (gully && alt > snowLine - 0.2 * W)) pal = SNOW // snow, and snow lingering in gullies
+          else if (!warmHex && CD[k] < 0.5) {
+            // treeline: solid forest low down, thinning out (dithered) over a narrow band at its top
+            const line = (0.13 + 0.12 * vnoise(gx / (0.5 * W), gy / (0.5 * W), this.seed + 41)) * W
+            if (rel < line - 2 || (rel < line + 2 && hash2(gx, y, 11) < (line + 2 - rel) / 4)) { pal = PINE; t = Math.min(3, tone + 1) }
+          }
+          const rgb = (pal ?? ROCK)[Math.min(t, 3)]
           const o = (y * w + col) * 4
           img[o] = rgb[0]; img[o + 1] = rgb[1]; img[o + 2] = rgb[2]; img[o + 3] = 255
         }
