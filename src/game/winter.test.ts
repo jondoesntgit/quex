@@ -47,4 +47,13 @@ describe('winter prep', () => {
     expect(item(thin, 'defence').ok).toBe(false)
     expect(item(thin, 'defence').todo[0].text).toMatch(/Palisade/)
   })
+
+  it('names the foods in store and suggests only ones not already there', () => {
+    const w = winterPrep(village({ goods: { grain: 5, berries: 2 } }), '2026-11-19', 0)
+    const v = item(w, 'variety')
+    expect(v.ok).toBe(false)
+    expect(v.status).toMatch(/2 kinds of food in store: grain and berries\. That's enough to keep spirits even/)
+    expect(v.todo[0].text).toBe('Gather fish or game on your land (small tasks) for a third kind of food.')
+    expect(item(winterPrep(village({ goods: { grain: 5, berries: 2, fish: 1 } }), '2026-11-19', 0), 'variety').ok).toBe(true)
+  })
 })

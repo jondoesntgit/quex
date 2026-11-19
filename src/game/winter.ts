@@ -122,20 +122,27 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
     todo: !hungry || has('palisade') ? [] : [{ size: BUILDINGS.palisade.size, text: `Build a Palisade: +${BUILDINGS.palisade.defence} defence (${costText(BUILDINGS.palisade.cost)}).` }],
   })
 
-  // 4. variety keeps spirits up
+  // 4. variety keeps spirits up (the tick: morale target + (kinds eaten - 2) * 3, so 2 is even, 3+ lifts)
   const kinds = (Object.keys(FOOD) as Good[]).filter((g) => (v.goods[g] ?? 0) >= 0.5)
+  const missing = (['fish', 'game', 'berries'] as Good[]).filter((g) => !kinds.includes(g))
+  const fresh = kinds.filter((g) => !FOOD[g]?.keeps)
+  const list = kinds.map(goodName).join(' and ')
   items.push({
     id: 'variety',
     ok: kinds.length >= 3,
     title: 'A varied larder',
-    status: `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of food in store.`,
-    impact: 'Eating three or more kinds of food lifts morale, and morale drives how much your buildings make.',
-    todo: kinds.length >= 3 ? [] : [{ size: 'small', text: 'Gather berries, fish or game on your land (small tasks) for something different to eat.' }],
+    status: kinds.length
+      ? `${kinds.length} kind${kinds.length === 1 ? '' : 's'} of food in store: ${list}.${kinds.length === 2 ? ' That\'s enough to keep spirits even; a third kind lifts them.' : ''}`
+      : 'No food in store.',
+    impact: `Villagers eat a little of each food they have. Three or more kinds lifts morale (+3 for each kind past two), one kind lowers it, and morale drives how much your buildings make.${fresh.length ? ` Fresh food (${fresh.map(goodName).join(', ')}) loses 30% a night, so gather it close to Saturday.` : ''}`,
+    todo: kinds.length >= 3 ? [] : [{ size: 'small', text: `Gather ${missing.length ? missing.map(goodName).join(', ').replace(/, ([^,]*)$/, ' or $1') : 'another food'} on your land (small tasks) for a ${kinds.length === 2 ? 'third' : 'new'} kind of food.` }],
   })
 
   const forecast = keeps >= target ? 'stocked' : keeps >= need ? 'tight' : 'hungry'
   return { days, need, target, keeps, forecast, tonight, items }
 }
+
+function goodName(g: Good) { return g.replace('_', ' ') }
 
 function costText(c: Partial<Record<Good, number>>) {
   return Object.entries(c).map(([g, n]) => `${n} ${g.replace('_', ' ')}`).join(', ')
