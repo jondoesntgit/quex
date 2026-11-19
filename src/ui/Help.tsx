@@ -124,7 +124,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <summary>The map: exploring, roads and monsters</summary>
           <ul>
             <li>The mist is unexplored land. <b>Scout</b> from the edge of what anyone knows: everyone in the world shares one map.</li>
-            <li><b>Roads</b> speed caravans, and your villagers love them. A road across a river needs a <b>bridge</b>: a medium task instead of a small one. <b>Fell trees</b> to clear land for building; <b>plant</b> them to grow a forest back.</li>
+            <li><b>Roads</b> speed caravans, and your villagers love them. A road across a river needs a <b>bridge</b>: a medium task instead of a small one. <b>Fell a tree</b> for timber: each one leaves a stump, and every winter the trees left standing double, back up to what the hex first had. Fell the last tree and the land is open for good, ready to build on. <b>Plant</b> two saplings to start a wood: they become trees in winter and spread from there.</li>
             <li>Monster lairs (goblins, orcs, trolls, a dragon) grow bolder as villages grow and sometimes raid your stores. A palisade helps.</li>
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
             <li>Merchant caravans pass through now and then on their way to trade. They're just passing; enjoy the view.</li>

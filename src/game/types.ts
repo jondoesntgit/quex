@@ -118,6 +118,24 @@ export interface GameState {
   log: LogEntry[]
   /** count of applied events (for sync) */
   version: number
+  /** hexes whose trees have been felled or planted, tree by tree (see TREES_FROM) */
+  woods?: Record<number, Stand>
+}
+
+/** The trees on one hex. Felling turns one tree into a stump; each winter the
+ *  standing trees double, up to the hex's original number, and saplings grow
+ *  into trees. A hex whose last tree is felled is open land for good. */
+export interface Stand {
+  /** standing trees */
+  n: number
+  /** saplings (planted), which become trees at winter */
+  young: number
+  /** the most trees this hex holds */
+  max: number
+  kind: 'oak' | 'pine'
+  /** the day of the last felling or planting, and the last winter that grew it */
+  since: ISODate
+  grew?: ISODate
 }
 
 // ------------------------------------------------------------------ events

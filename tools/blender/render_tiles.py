@@ -224,9 +224,12 @@ def terrain(name):
     return lambda W: hex_column(t["top"], t["sides"], (MAX_TIER + 1) * 0.30619)
 
 
-def feat_trees(kind, n, v=0):
+def feat_trees(kind, n, v=0, cut=0, young=False):
     """v = 0 is the original layout; v > 0 shuffles spacing, sizes and (in bigger
-    stands) slips in a tree of the other kind, so forests don't repeat."""
+    stands) slips in a tree of the other kind, so forests don't repeat.
+    cut = how many of the n trees are felled: they're drawn as stumps, in the
+    same spots, so a stand keeps its shape as it's cut and regrows.
+    young = saplings: small, thin trees."""
     p = PAL["features"]
     spots = {1: [(0, 0)], 2: [(-0.35, 0.1), (0.3, -0.15)],
              3: [(-0.45, 0.15), (0.4, 0.2), (0.0, -0.3)],
@@ -240,10 +243,25 @@ def feat_trees(kind, n, v=0):
         s = rng.uniform(0.78, 1.18) if v else 1.0
         other = v == 2 and n >= 3 and k == rng.randrange(n)
         trees.append((x, y, s, ("oak" if kind == "pine" else "pine") if other else kind))
+    # felled first: the front trees (nearest the viewer, so the stumps show), in a fixed order
+    # (smaller y is nearer; a little jitter so it isn't always a neat front row)
+    order = sorted(range(n), key=lambda k: trees[k][1] + 0.3 * random.Random(f"cut{kind}{n}{v}{k}").random())
+    stumps = set(order[:cut])
+    trees = [t + (k in stumps,) for k, t in enumerate(trees)]
     trees.sort(key=lambda t: -t[1])  # back to front
 
     def build(W):
-        for (x, y, s, kd) in trees:
+        for (x, y, s, kd, stump) in trees:
+            if stump:
+                # a cut stump: short trunk, pale cut face, a chip or two of wood beside it
+                box((x, y, 0), (0.1, 0.1, 0.06), p["plank"], (p["trunk"], p["trunk_dark"], p["trunk_dark"]))
+                box((x + 0.1, y - 0.06, 0), (0.06, 0.03, 0.02), p["plank_dark"], (p["trunk_dark"],) * 3, rot=0.6)
+                continue
+            if young:
+                s *= 0.42
+                box((x, y, 0), (0.04, 0.04, 0.2 * s), p["trunk"], (p["trunk"], p["trunk_dark"], p["trunk_dark"]))
+                cone((x, y, 0.16 * s), 0.3 * s, 0.55 * s, p["leaf_light"], segs=6, rot=0.3 * v, shade=(p["leaf_light"], p["leaf"]))
+                continue
             box((x, y, 0), (0.08, 0.08, 0.15 * s), p["trunk"], (p["trunk"], p["trunk_dark"], p["trunk_dark"]))
             if kd == "pine":
                 cone((x, y, 0.12 * s), 0.26 * s, 0.75 * s, p["pine"], segs=6, rot=0.2 * v, shade=(p["pine_light"], p["pine_dark"]))
@@ -706,14 +724,27 @@ FEATURES = {
     "lair": feat_lair(), "mine": feat_mine(), "farm": feat_farm(), "dock": feat_dock(),
     "reeds": feat_reeds(), "cactus": feat_cactus(),
 }
+# planted woods: two saplings, then two trees
+FEATURES["saplings"] = feat_trees("oak", 2, 0, young=True)
+for _k in ("pine", "oak"):
+    FEATURES[f"{_k}2"] = feat_trees(_k, 2)
+# felled stands: <kind><n>_c<stumps>, with the same variants as the full stand
+STUMPS = {2: (1,), 3: (1, 2), 5: (1, 2, 3, 4)}
+for _k in ("pine", "oak"):
+    for _n, _cs in STUMPS.items():
+        for _c in _cs:
+            FEATURES[f"{_k}{_n}_c{_c}"] = feat_trees(_k, _n, 0, cut=_c)
 for _o in ORES:
     for _part in ("front", "back", "debris"):
         FEATURES[f"ore_{_o}_{_part}"] = feat_ore(_o, _part)
 # variants (f_<name>_v1, f_<name>_v2) so forests and ranges don't look stamped
 for _v in (1, 2):
     for _k in ("pine", "oak"):
-        for _n in (1, 3, 5):
+        for _n in (1, 2, 3, 5):
             FEATURES[f"{_k}{_n}_v{_v}"] = feat_trees(_k, _n, _v)
+        for _n, _cs in STUMPS.items():
+            for _c in _cs:
+                FEATURES[f"{_k}{_n}_c{_c}_v{_v}"] = feat_trees(_k, _n, _v, cut=_c)
     FEATURES[f"mountain_v{_v}"] = feat_mountain(False, _v)
     FEATURES[f"mountain_snow_v{_v}"] = feat_mountain(True, _v)
     FEATURES[f"hills_v{_v}"] = feat_hills(_v)

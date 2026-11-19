@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { actionSize, apply, BRIDGES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { actionSize, apply, BRIDGES_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
@@ -105,6 +105,80 @@ describe('land: clear ground, trees, mountains', () => {
     const med = s.players.ann.tokens[0]
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'house', ...m }))).toMatch(/steep/)
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: med.id, action: 'build', building: 'quarry', ...m }))).toBeNull()
+  })
+})
+
+describe('trees, one at a time (from the tree rule on)', () => {
+  const SUN2 = '2026-11-22' // the Sunday after the rule
+  const at = (d: string) => `${d}T10:00:00Z`
+  function forester() {
+    const s = newGame(world, SUN2)
+    const site = sites.find((x) => x.role === 'forestry')!
+    apply(s, world, ev('join', 'ann', `${SUN2}T08:00:00Z`, { name: 'Ann', role: 'forestry', site, resetHour: 0, tz: 0 }))
+    return s
+  }
+  function fell(s: GameState, t: { col: number; row: number }, date: string) {
+    apply(s, world, ev('progress', 'ann', at(date), { date, slot: 3, status: 'full' }))
+    const small = s.players.ann.tokens.find((x) => x.size === 'small')!
+    apply(s, world, ev('act', 'ann', at(date), { tokenId: small.id, action: 'clear', ...t }))
+  }
+  /** ticks every night from `from` through `to` */
+  function nights(s: GameState, from: string, to: string) {
+    for (let d = from; d <= to; d = addDays(d, 1)) apply(s, world, ev('tick', 'ann', `${addDays(d, 1)}T00:05:00Z`, { date: d }))
+  }
+  it('is the rule after its start', () => expect(`${SUN2}T00:00:00Z` > TREES_FROM).toBe(true))
+
+  it('felling takes one tree, leaving a stump; winter doubles the rest back up to the hex\'s number', () => {
+    const s = forester()
+    const t = findIn(s, (i) => world.cells[i].feature === 'pine3')!
+    expect(t).toBeTruthy()
+    const i = cellIndex(world, t.col, t.row)
+    const timber = s.villages.v_ann.goods.timber!
+    fell(s, t, SUN2); fell(s, t, addDays(SUN2, 1))
+    expect(s.villages.v_ann.goods.timber).toBe(timber + 6)
+    let land = landAt(world, s, i)
+    expect(land.terrain).toBe('forest')
+    expect(land.stumps).toBe(2) // 1 standing
+    nights(s, SUN2, addDays(SUN2, 5))
+    expect(landAt(world, s, i).stumps).toBe(2) // nothing regrows before winter
+    nights(s, addDays(SUN2, 6), addDays(SUN2, 6)) // Saturday: 1 -> 2
+    expect(landAt(world, s, i).stumps).toBe(1)
+    nights(s, addDays(SUN2, 7), addDays(SUN2, 13)) // next winter: 2 -> 3, never 4
+    land = landAt(world, s, i)
+    expect(land.stumps).toBeUndefined()
+    expect(land.feature).toBe(world.cells[i].feature)
+    expect(s.woods?.[i]).toBeUndefined()
+  })
+
+  it('felling the last tree opens the land for good', () => {
+    const s = forester()
+    const t = findIn(s, (i) => world.cells[i].feature === 'oak3' || world.cells[i].feature === 'pine3' || world.cells[i].feature === 'pine1' || world.cells[i].feature === 'oak1')!
+    const i = cellIndex(world, t.col, t.row)
+    const trees = Number(world.cells[i].feature!.slice(-1))
+    for (let k = 0; k < trees; k++) fell(s, t, addDays(SUN2, k))
+    let land = landAt(world, s, i)
+    expect(hasTrees(land)).toBe(false)
+    nights(s, SUN2, addDays(SUN2, 6))
+    land = landAt(world, s, i)
+    expect(hasTrees(land)).toBe(false) // zero doubled is zero
+    expect(land.terrain).not.toBe('forest')
+  })
+
+  it('planting puts in two saplings that become trees at winter', () => {
+    const s = forester()
+    const t = findIn(s, (i) => ['grass', 'meadow'].includes(world.cells[i].terrain) && !world.cells[i].feature)!
+    const i = cellIndex(world, t.col, t.row)
+    apply(s, world, ev('progress', 'ann', at(SUN2), { date: SUN2, slot: 3, status: 'full' }))
+    const small = s.players.ann.tokens.find((x) => x.size === 'small')!
+    apply(s, world, ev('act', 'ann', at(SUN2), { tokenId: small.id, action: 'plant', ...t }))
+    expect(landAt(world, s, i).feature).toBe('saplings')
+    expect(hasTrees(landAt(world, s, i))).toBe(false)
+    nights(s, SUN2, addDays(SUN2, 5))
+    expect(landAt(world, s, i).feature).toBe('saplings')
+    nights(s, addDays(SUN2, 6), addDays(SUN2, 6))
+    const land = landAt(world, s, i)
+    expect(land.feature).toBe('oak2')
+    expect(land.terrain).toBe('forest')
   })
 })
 

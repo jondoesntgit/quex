@@ -5,7 +5,10 @@ export const TERRAINS = [
 export type Terrain = (typeof TERRAINS)[number]
 
 export const FEATURES = [
-  'pine1', 'pine3', 'pine5', 'oak1', 'oak3', 'oak5', 'mountain', 'mountain_snow',
+  'pine1', 'pine3', 'pine5', 'oak1', 'oak3', 'oak5',
+  // grown from planting (two saplings)
+  'pine2', 'oak2', 'saplings',
+  'mountain', 'mountain_snow',
   'hills', 'reeds', 'cactus',
   // built / placed things (drawn by the game layer, not the generator)
   'hut', 'village', 'lair', 'mine', 'farm', 'dock',

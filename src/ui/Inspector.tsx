@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { actionSize, buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
-import { hasTrees, isDeposit } from '../world/land'
+import { hasTrees, isDeposit, treeCount } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, shareSpot, tryAction } from './helpers'
@@ -39,6 +39,10 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const land = landAt(world, state, i, game.today(p.id))
   const terr = land.terrain
   const trees = hasTrees(land)
+  const stand = state.woods?.[i]
+  const count = trees ? treeCount(land) - (land.stumps ?? 0) : 0
+  const treeNote = stand?.young ? `${stand.young} saplings (trees by winter)`
+    : trees ? `${count} tree${count === 1 ? '' : 's'}${land.stumps ? `, ${land.stumps} stump${land.stumps === 1 ? '' : 's'}` : ''}` : null
   const mine = inTerritory(v, col, row)
 
   const share = async () => {
@@ -66,7 +70,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   }
 
   const title = village ? village.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
-  const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, trees && 'trees', cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
+  const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
   if (mode === 'build') {
     const defs = Object.values(BUILDINGS)

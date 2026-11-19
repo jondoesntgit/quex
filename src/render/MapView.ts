@@ -378,8 +378,10 @@ export class MapView {
       // hills are the raised ground itself: no mounds drawn on top
       // (development review, ?roadtest&bare: no trees, to see the waterways)
       const bare = import.meta.env.DEV && typeof location !== 'undefined' && location.search.includes('bare') && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
+      // a felled stand: the same trees, with stumps where some were cut
+      const base = land!.stumps ? `${land!.feature}_c${land!.stumps}` : land!.feature
       const natural = land!.feature && land!.feature !== 'hills' && !bare
-        ? (variant && this.atlas.tex(`f_${land!.feature}_v${variant}`) ? `f_${land!.feature}_v${variant}` : `f_${land!.feature}`)
+        ? (variant && this.atlas.tex(`f_${base}_v${variant}`) ? `f_${base}_v${variant}` : this.atlas.tex(`f_${base}`) ? `f_${base}` : `f_${land!.feature}`)
         : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')

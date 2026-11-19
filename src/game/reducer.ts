@@ -5,14 +5,14 @@
  */
 import { distance, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
-import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, type Land } from '../world/land'
+import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, playerDate, weekSeason, weekday } from './calendar'
 import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
-import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Village } from './types'
+import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
@@ -24,6 +24,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
     lairs: world.lairs.map((l) => ({ ...l, cleared: false })),
     revealed: [],
     log: [],
+    woods: {},
     version: 0,
   }
 }
@@ -129,7 +130,11 @@ export function foundingBlockedCells(world: World, s: GameState): number[] {
   return [...out]
 }
 
-export interface LandNow extends Land { resource: Resource | null }
+export interface LandNow extends Land {
+  resource: Resource | null
+  /** stumps among the trees (felled ones that haven't regrown yet) */
+  stumps?: number
+}
 
 const WOOD_RESOURCES: readonly Resource[] = ['timber', 'game', 'berries']
 
@@ -153,7 +158,32 @@ export function landAt(world: World, s: GameState, i: number, today?: ISODate): 
       feature = grown ? 'oak3' : 'oak1'
     }
   }
+  const w = s.woods?.[i]
+  if (w) {
+    const forest = terrain === 'forest'
+    const open: Terrain = forest ? 'grass' : terrain
+    const wood = resource && WOOD_RESOURCES.includes(resource) ? null : resource
+    if (w.n > 0) {
+      feature = `${w.kind}${w.max}` as Feature
+      // planted trees make a forest once there are two of them
+      return { terrain: forest || w.n >= 2 ? 'forest' : terrain, feature, resource, tier: cell.tier, stumps: w.max - w.n }
+    }
+    return { terrain: open, feature: w.young > 0 ? 'saplings' : null, resource: wood, tier: cell.tier }
+  }
   return { terrain, feature, resource, tier: cell.tier }
+}
+
+/** Each winter: saplings become trees, and standing trees double up to the hex's number. */
+function growWoods(s: GameState, world: World, winterDate: ISODate) {
+  for (const [k, w] of Object.entries(s.woods ?? {})) {
+    if (w.since > winterDate || (w.grew && w.grew >= winterDate)) continue
+    if (w.young > 0) { w.n += w.young; w.young = 0 }
+    else w.n = Math.min(w.max, w.n * 2)
+    w.grew = winterDate
+    const cell = world.cells[Number(k)]
+    // back to how the world made it (planted woods on open land stay on the books)
+    if (w.n >= w.max && w.max === treeCount(cell) && cell.feature?.startsWith(w.kind)) delete s.woods![Number(k)]
+  }
 }
 
 export function effectiveTerrain(world: World, s: GameState, i: number, today?: ISODate): Terrain {
@@ -331,6 +361,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!['grass', 'meadow', 'savannah', 'hills'].includes(terr)) return 'Trees need open grassland'
       if (hasTrees(land)) return 'There are trees here already'
       if (buildingAt(s, ev.col, ev.row) || villageAt(s, ev.col, ev.row) || v.planted.some((x) => x.cell === i)) return 'Something is already here'
+      if (s.woods?.[i]?.young) return 'Saplings are already growing here'
       return null
     case 'road':
       if (cell.tier === 0) return 'Roads need land'
@@ -397,6 +428,12 @@ export function fmtGoods(g: Goods, k = 1) {
 }
 
 // ------------------------------------------------------------------ apply
+
+/** From this moment trees are felled one at a time (each leaves a stump), the
+ *  standing trees double each winter up to the hex's original number, and
+ *  planting puts in two saplings that grow at winter. Before it, felling
+ *  cleared the whole hex and saplings grew into forest in three days. */
+export const TREES_FROM = '2026-11-19T13:00:00.000Z'
 
 export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   const err = validate(s, world, ev)
@@ -601,6 +638,19 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'clear': {
       const wood = land0.terrain === 'forest' ? 3 : 1
       const n = round2(wood * k)
+      if (ev.at >= TREES_FROM) {
+        // one tree comes down; the rest stand, and double back at winter
+        const woods = (s.woods ??= {})
+        const max = s.woods[i]?.max ?? treeCount(land0)
+        const w: Stand = woods[i] ??= { n: max, young: 0, max, kind: land0.feature?.startsWith('pine') ? 'pine' : 'oak', since: ev.at.slice(0, 10) }
+        w.n = Math.max(0, w.n - 1)
+        w.since = ev.at.slice(0, 10)
+        addGoods(v, { timber: n })
+        log(s, ev.at, p.id, w.n === 0
+          ? `Felled the last tree: +${n} timber. The land is open.`
+          : `Felled a tree: +${n} timber. ${w.n} still standing; they spread back over the stumps in winter.`, 'good')
+        break
+      }
       v.planted = v.planted.filter((x) => x.cell !== i)
       if (!v.cleared.includes(i)) v.cleared.push(i)
       addGoods(v, { timber: n })
@@ -608,6 +658,13 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       break
     }
     case 'plant':
+      if (ev.at >= TREES_FROM) {
+        const woods = (s.woods ??= {})
+        const was = treeCount(world.cells[i])
+        woods[i] = { n: 0, young: 2, max: Math.max(2, was), kind: world.cells[i].feature?.startsWith('pine') ? 'pine' : 'oak', since: ev.at.slice(0, 10) }
+        log(s, ev.at, p.id, 'Two saplings planted. They take root in winter, and the trees spread from there.', 'good')
+        break
+      }
       v.cleared = v.cleared.filter((x) => x !== i)
       v.planted.push({ cell: i, date: ev.at.slice(0, 10) })
       log(s, ev.at, p.id, 'Saplings planted. A forest in three days.', 'good')
@@ -852,6 +909,9 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
     const needWinter = Math.floor(v.population) * 0.5
     v.winterForecast = keeps >= needWinter * 1.5 ? 'stocked' : keeps >= needWinter ? 'tight' : 'hungry'
   }
+
+  // trees spread back each winter (felled ones were stumps until now)
+  if (winter && ev.at >= TREES_FROM) growWoods(s, _world, ev.date)
 
   // 8. tokens are for spending: unspent ones expire at the end of winter
   // (before the weekly rule: a day after they were earned)

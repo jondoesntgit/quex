@@ -2,7 +2,12 @@
  *  game rules (buildings, outposts, felling trees). */
 import type { Cell, Feature, Terrain } from './types'
 
-export const TREE_FEATURES: ReadonlySet<Feature> = new Set(['pine1', 'pine3', 'pine5', 'oak1', 'oak3', 'oak5'])
+export const TREE_FEATURES: ReadonlySet<Feature> = new Set(['pine1', 'pine2', 'pine3', 'pine5', 'oak1', 'oak2', 'oak3', 'oak5'])
+/** How many trees a tree feature stands for (a forest with no drawn trees counts as three). */
+export function treeCount(l: Pick<Land, 'terrain' | 'feature'>): number {
+  if (l.feature && TREE_FEATURES.has(l.feature)) return Number(l.feature.slice(-1))
+  return l.terrain === 'forest' ? 3 : 0
+}
 /** too steep for anything but mines and quarries */
 export const MOUNTAIN_TERRAIN: readonly Terrain[] = ['rock', 'snow']
 /** open ground once any trees are gone */
