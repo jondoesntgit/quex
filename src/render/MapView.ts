@@ -576,7 +576,7 @@ export class MapView {
   private riverShape(world: World, i: number, cx: number, cy: number) {
     const W = this.W, TP = this.atlas.meta.tier
     const cell = world.cells[i]
-    const width = Math.max(2, Math.round(W / 24) + Math.min(3, Math.floor(cell.riverFlow / 6)))
+    const width = Math.max(3, Math.round(W / 18) + Math.min(3, Math.floor(cell.riverFlow / 6)))
     const down = world.cells[cell.riverTo]
     const dp = hexToPixel(down.col, down.row, W)
     const p = hexToPixel(cell.col, cell.row, W)
@@ -590,33 +590,69 @@ export class MapView {
         ups.push([Math.round((p.x + up.x) / 2), Math.round((p.y + up.y) / 2 - cell.tier * TP)])
       }
     }
-    const mid = bendPoint(i + 0.5, cx, cy, W)
+    // One smooth curve from each inlet (or from a spring in the middle) to the
+    // outlet. Each end crosses its edge heading straight across it, so the
+    // curve runs on smoothly into the next hex: no elbows. A slight sideways
+    // push on the control points gives every hex its own gentle bend.
+    const c: [number, number] = [cx, cy]
+    const b = bendPoint(i + 0.5, cx, cy, W)
+    const push: [number, number] = [(b[0] - cx) * 0.9, (b[1] - cy) * 0.9]
+    const curve = (a: [number, number], spring: boolean) => {
+      const p1: [number, number] = spring ? [cx + push[0], cy + push[1]] : [a[0] + (c[0] - a[0]) * 0.55 + push[0], a[1] + (c[1] - a[1]) * 0.55 + push[1]]
+      const p2: [number, number] = [lip[0] + (c[0] - lip[0]) * 0.55 + push[0], lip[1] + (c[1] - lip[1]) * 0.55 + push[1]]
+      const start: [number, number] = spring ? [cx + push[0], cy + push[1]] : a
+      const out: [number, number][] = []
+      const N = 12
+      for (let k = 0; k <= N; k++) {
+        const t = k / N, u = 1 - t
+        out.push([
+          u * u * u * start[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * lip[0],
+          u * u * u * start[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * lip[1],
+        ])
+      }
+      return out
+    }
+    const flows = ups.length ? ups.map((u) => curve(u, false)) : [curve(c, true)]
+    // drawn paths run 2 px past each edge so neighbouring hexes overlap (no seam)
     const OVER = 2
-    const downLeg = curvedLeg(mid, [cx, cy], lip, OVER)
-    const upLegs = ups.map((u) => curvedLeg(mid, [cx, cy], u, OVER).reverse())
-    return { width, lip, mid, downLeg, upLegs }
+    const extend = (pts: [number, number][], spring: boolean) => {
+      const out = pts.slice()
+      const ext = (from: [number, number], to: [number, number]) => {
+        const dx = to[0] - from[0], dy = to[1] - from[1], len = Math.hypot(dx, dy) || 1
+        return [to[0] + (dx / len) * OVER, to[1] + (dy / len) * OVER] as [number, number]
+      }
+      out.push(ext(pts[pts.length - 2], pts[pts.length - 1]))
+      if (!spring) out.unshift(ext(pts[1], pts[0]))
+      return out
+    }
+    const paths = flows.map((f) => extend(f, !ups.length))
+    return { width, lip, paths, flows, spring: !ups.length }
   }
 
   private river(world: World, i: number, cx: number, cy: number): Graphics {
-    const { width, mid, downLeg, upLegs } = this.riverShape(world, i, cx, cy)
+    const { width, paths, spring } = this.riverShape(world, i, cx, cy)
+    // Drawn on the ground plane and then foreshortened (half height), so the
+    // water and its banks are thinner where the river runs across the screen
+    // than where it runs up it, as they would be lying on the ground.
     const g = new Graphics()
-    // river clay: a solid red bank a few pixels wide along both sides, wherever this hex or a neighbour holds clay
+    const flat = (pts: [number, number][]) => pts.map(([x, y]) => [x, cy + (y - cy) * 2] as [number, number])
     const cell = world.cells[i]
+    // river clay: a low red bank along both sides, wherever this hex or a neighbour holds clay
     const clay = cell.resource === 'clay' || neighbours(cell.col, cell.row).some(([nc, nr]) =>
       nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].resource === 'clay')
-    // Flat ends that run 2 px past each edge, round only in the middle, and all
-    // of the dark banks before any water: no dark line where hexes meet.
     const paint = (color: number, w: number) => {
-      for (const leg of [downLeg, ...upLegs]) polyline(g, leg)
+      for (const path of paths) polyline(g, flat(path))
       g.stroke({ width: w, color, cap: 'butt', join: 'round' })
-      g.circle(mid[0], mid[1], w / 2).fill(color)
+      if (spring) { const [sx, sy] = flat(paths[0])[0]; g.circle(sx, sy, w / 2).fill(color) }
     }
     if (clay) {
-      paint(0x843c20, width + 2 + 8)
-      paint(0xb8643c, width + 2 + 6)
+      paint(0xa85c38, width + 2 + 8) // the clay, fading out into the ground (no outline)
+      paint(0xc47a4c, width + 2 + 4) // its sunlit crest by the water
     }
     paint(0x2868b8, width + 2)
     paint(0x50a8f0, width)
+    g.scale.set(1, 0.5)
+    g.y = cy / 2
     return g
   }
 
@@ -625,13 +661,8 @@ export class MapView {
     const TP = this.atlas.meta.tier
     const cell = world.cells[i]
     const down = world.cells[cell.riverTo]
-    const { width, lip, downLeg, upLegs } = this.riverShape(world, i, cx, cy)
-    // trim the 2 px overlap so the current stops at the edge and picks up in the next hex
-    const trimEnd = (pts: [number, number][]) => [...pts.slice(0, -1), lip] as [number, number][]
-    const main = trimEnd(downLeg)
-    const legs: [number, number][][] = upLegs.length
-      ? upLegs.map((u, k) => (k === 0 ? [...u.slice(1, -1), ...main] : u.slice(1)))
-      : [main]
+    const { width, lip, flows } = this.riverShape(world, i, cx, cy)
+    const legs = flows
     const zr = z(i, 1.1)
     const animate = !this.last?.showAll
     if (animate) this.ambient.add(cx, cy, () => legs.flatMap((pts, k) => this.ambient.stream(pts, width, i * 7 + k).map((n) => [n, zr] as [Container, number])))
