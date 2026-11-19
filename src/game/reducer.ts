@@ -70,6 +70,15 @@ export function territoryCells(world: World, v: Village): number[] {
  *  - half-done (½) action tokens can no longer be spent;
  *  - unspent tokens last until the end of winter (Saturday night) instead of a day. */
 export const WEEKLY_TOKENS_FROM = '2026-11-18T22:00:00.000Z'
+/** From this moment, yesterday's tasks can still be ticked off (raised, never
+ *  lowered) after its night has passed: the late ticks earn their action and
+ *  score, and the village gets the extra share of that night's harvest. */
+export const LATE_TICKS_FROM = '2026-11-19T02:15:00.000Z'
+
+/** Is this a late tick: raising a task on a day whose night has already passed, the day before the event's own day? */
+function lateTick(p: Player, ev: { at: string; date: ISODate }) {
+  return ev.at >= LATE_TICKS_FROM && !!p.days[ev.date]?.ticked && ev.date === addDays(playerDate(ev.at, p.resetHour, p.tz), -1)
+}
 
 export const VILLAGE_RADIUS = 2
 export const FOUNDING_GAP = 2
@@ -211,8 +220,12 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   switch (ev.t) {
     case 'progress': {
       const d = p.days[ev.date]
-      if (d?.ticked) return 'That day is already over'
       if (ev.slot < 0 || ev.slot >= PLAN_SIZES.length) return 'No such slot'
+      if (d?.ticked) {
+        if (!lateTick(p, ev)) return 'That day is already over'
+        const val = (st: string) => (st === 'full' ? 1 : st === 'half' ? 0.5 : 0)
+        if (val(ev.status) <= val(d.slots[ev.slot]?.status ?? 'none')) return "Yesterday's tasks can only be ticked off, not undone"
+      }
       return null
     }
     case 'habit':
@@ -502,6 +515,23 @@ function reveal(world: World, s: GameState, at: { col: number; row: number }, ra
 }
 
 function progress(s: GameState, p: Player, ev: Extract<GameEvent, { t: 'progress' }>) {
+  const late = lateTick(p, ev)
+  const before = late ? dayScore(p.days[ev.date]) : 0
+  const res = progressInner(s, p, ev)
+  if (late) {
+    // the night already passed: harvest the extra the better score would have made
+    const v = s.villages[p.villageId]
+    const d = p.days[ev.date]
+    const gain = dayScore(d) - before
+    if (v && gain > 0 && weekSeason(ev.date) !== 'winter') {
+      const made = produce(v, p, d, ev.date, 0.85 * (gain / 100))
+      log(s, ev.at, p.id, `${P(p)} finished a task from ${ev.date}${Object.keys(made).length ? `: the village made ${fmtGoods(made)} more` : ''}.`, 'good')
+    }
+  }
+  return res
+}
+
+function progressInner(s: GameState, p: Player, ev: Extract<GameEvent, { t: 'progress' }>) {
   const d = ensureDay(p, ev.date)
   const slot = d.slots[ev.slot]
   const val = (st: string) => (st === 'full' ? 1 : st === 'half' ? 0.5 : 0)
@@ -674,18 +704,10 @@ function deliverCaravans(s: GameState, at: string) {
 
 // ------------------------------------------------------------------ nightly tick
 
-function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
-  const v = s.villages[p.villageId]
-  const d = ensureDay(p, ev.date)
-  const season = weekSeason(ev.date)
-  const winter = season === 'winter'
-  const rng = rngFor(s.worldSeed, 'tick', p.id, ev.date)
+/** A night's work by the village's buildings at production level `prod` (0..1 of a perfect day). */
+function produce(v: Village, p: Player, d: DayRecord, date: ISODate, prod: number): Goods {
+  const season = weekSeason(date)
   const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
-  const score = d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
-  const notes: string[] = []
-
-  // 1. production
-  const prod = winter ? 0 : 0.15 + 0.85 * (score / 100)
   const moraleK = 0.75 + v.morale / 200
   const libraryK = habitOn('library') && done(v).some((b) => b.type === 'library') ? 1.05 : 1
   const made: Goods = {}
@@ -706,6 +728,22 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
     addGoods(v, def.produces, k)
     for (const [g, n] of Object.entries(def.produces)) made[g as Good] = round2((made[g as Good] ?? 0) + (n ?? 0) * k)
   }
+  return made
+}
+
+function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
+  const v = s.villages[p.villageId]
+  const d = ensureDay(p, ev.date)
+  const season = weekSeason(ev.date)
+  const winter = season === 'winter'
+  const rng = rngFor(s.worldSeed, 'tick', p.id, ev.date)
+  const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
+  const score = d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
+  const notes: string[] = []
+
+  // 1. production
+  const prod = winter ? 0 : 0.15 + 0.85 * (score / 100)
+  const made = produce(v, p, d, ev.date, prod)
   if (Object.keys(made).length) notes.push(`made ${fmtGoods(made)}`)
 
   // 2. eating (fresh food first, it spoils anyway)

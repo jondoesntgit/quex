@@ -265,6 +265,7 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
   border: 2px solid var(--ink); border-radius: var(--radius); background: var(--paper-2); padding: 3px 0 4px; cursor: pointer; overflow: hidden;
 }
 .daystrip .day.on { background: var(--paper); box-shadow: var(--shadow); }
+.daystrip .day.past { background: #ddd2b0; }
 .daystrip .planned { font-size: 1rem; font-size: round(nearest, 1rem, 8px); letter-spacing: 0; color: var(--ink-soft); line-height: 0.6; }
 .slot.plan { grid-template-columns: 46px 1fr; }
 

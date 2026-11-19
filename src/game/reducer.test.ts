@@ -236,6 +236,26 @@ describe('nightly tick', () => {
     apply(s, world, ev('progress', 'ann', at, { date: SUN2, slot: 3, status: 'full' }))
     expect(validate(s, world, ev('act', 'ann', at, scout))).toBeNull()
   })
+  it('from the late-tick rule on, yesterday can still be ticked off (raised, never lowered)', () => {
+    const s = setup()
+    const D = addDays(SUN, 7) // a Sunday after LATE_TICKS_FROM
+    apply(s, world, ev('progress', 'ann', `${D}T10:00:00Z`, { date: D, slot: 0, status: 'half' }))
+    apply(s, world, ev('tick', 'ann', `${addDays(D, 1)}T00:05:00Z`, { date: D }))
+    const next = `${addDays(D, 1)}T09:00:00Z` // the next morning
+    const raise = ev('progress', 'ann', next, { date: D, slot: 0, status: 'full' })
+    expect(validate(s, world, raise)).toBeNull()
+    expect(validate(s, world, ev('progress', 'ann', next, { date: D, slot: 0, status: 'none' }))).toMatch(/not undone/)
+    apply(s, world, raise)
+    expect(dayScore(s.players.ann.days[D])).toBe(30)
+    expect(s.players.ann.tokens.find((t) => t.date === D && t.slot === 0)?.strength).toBe(1)
+    // two days later it's too late
+    expect(validate(s, world, ev('progress', 'ann', `${addDays(D, 2)}T09:00:00Z`, { date: D, slot: 1, status: 'full' }))).toMatch(/already over/)
+  })
+  it('before the late-tick rule, a passed day stays closed (old events replay unchanged)', () => {
+    const s = setup()
+    apply(s, world, ev('tick', 'ann', `${addDays(SUN, 1)}T00:05:00Z`, { date: SUN }))
+    expect(validate(s, world, ev('progress', 'ann', `${addDays(SUN, 1)}T09:00:00Z`, { date: SUN, slot: 0, status: 'full' }))).toMatch(/already over/)
+  })
   it('pendingTicks lists missed days but never today', () => {
     const s = setup()
     expect(pendingTicks(s.players.ann, addDays(SUN, 3), SUN)).toEqual([SUN, addDays(SUN, 1), addDays(SUN, 2)])

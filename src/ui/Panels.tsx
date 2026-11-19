@@ -13,19 +13,52 @@ import { Icon } from './Icon'
 /** Today plus the next six days: a strip to pick which day you're looking at. */
 function DayStrip({ game, p, today, ahead, setAhead }: { game: Game; p: Player; today: string; ahead: number; setAhead: (n: number) => void }) {
   return (
-    <div className="daystrip" role="tablist" aria-label="Plan the week">
-      {Array.from({ length: 7 }, (_, k) => {
+    <div className="daystrip" role="tablist" aria-label="Yesterday, today and the week ahead">
+      {Array.from({ length: 8 }, (_, j) => {
+        const k = j - 1 // yesterday, today, then six days ahead
         const d = addDays(today, k)
         const planned = PLAN_SIZES.filter((_, i) => game.label(p.id, d, i).trim()).length
         const name = new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })
         return (
-          <button key={d} role="tab" aria-selected={ahead === k} className={`day ${ahead === k ? 'on' : ''} ${k === 0 ? 'today' : ''}`} onClick={() => setAhead(k)}
-            title={`${k === 0 ? 'Today: ' : ''}${planned} of 6 tasks named`}>
+          <button key={d} role="tab" aria-selected={ahead === k} className={`day ${ahead === k ? 'on' : ''} ${k === 0 ? 'today' : ''} ${k < 0 ? 'past' : ''}`} onClick={() => setAhead(k)}
+            title={k < 0 ? `Yesterday: ${dayScore(p.days[d])}/100` : `${k === 0 ? 'Today: ' : ''}${planned} of 6 tasks named`}>
             <span>{name}</span>
-            <span className="planned" aria-hidden>{'•'.repeat(planned)}{'·'.repeat(6 - planned)}</span>
+            <span className="planned" aria-hidden>{k < 0 ? `${dayScore(p.days[d])}` : `${'•'.repeat(planned)}${'·'.repeat(6 - planned)}`}</span>
           </button>
         )
       })}
+    </div>
+  )
+}
+
+/** Yesterday: tick off anything you finished but didn't mark (raise only). */
+function Yesterday({ game, p, date, editable }: { game: Game; p: Player; date: string; editable: boolean }) {
+  const day = p.days[date]
+  const slots = day?.slots ?? PLAN_SIZES.map((size) => ({ size, status: 'none' as TaskStatus }))
+  const val = (st: TaskStatus) => (st === 'full' ? 1 : st === 'half' ? 0.5 : 0)
+  const set = (slot: number, status: TaskStatus) =>
+    game.dispatch({ t: 'progress', id: eventId(), at: game.now().toISOString(), playerId: p.id, date, slot, status })
+  return (
+    <div>
+      <h3 style={{ margin: '4px 0' }}>Yesterday · {dayScore(day)}/100</h3>
+      <p className="muted" style={{ margin: '0 0 6px' }}>
+        Did something yesterday but forgot to tick it? Tick it off here: it still earns its action and the extra harvest.
+        Yesterday's ticks can be raised, not undone.
+      </p>
+      {slots.map((s, i) => (
+        <div className="slot" key={i}>
+          <span className={`size ${s.size}`}>{SIZE_LABEL[s.size as keyof typeof SIZE_LABEL]} {SIZE_POINTS[s.size as keyof typeof SIZE_POINTS]}</span>
+          <LabelInput game={game} pid={p.id} date={date} slot={i} readOnly={!editable} placeholder="—" />
+          <div className="tri" role="group" aria-label="progress">
+            {(['none', 'half', 'full'] as TaskStatus[]).map((st) => (
+              <button key={st} className={`${st} ${s.status === st ? 'on' : ''}`} disabled={!editable || val(st) <= val(s.status)}
+                onClick={() => set(i, st)} title={st}>
+                {st === 'none' ? '·' : st === 'half' ? '½' : '✓'}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -67,10 +100,12 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   const guardians = game.guardianNames(p.id)
   const mine = game.meta.localPlayers.includes(p.id)
 
-  if (ahead > 0) return (
+  if (ahead !== 0) return (
     <div>
       <DayStrip game={game} p={p} today={today} ahead={ahead} setAhead={setAhead} />
-      <PlanDay game={game} p={p} date={addDays(today, ahead)} editable={editable} />
+      {ahead < 0
+        ? <Yesterday game={game} p={p} date={addDays(today, -1)} editable={editable} />
+        : <PlanDay game={game} p={p} date={addDays(today, ahead)} editable={editable} />}
     </div>
   )
 

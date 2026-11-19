@@ -37,7 +37,8 @@ export function Help({ onClose }: { onClose: () => void }) {
           <p>Your day ends overnight, not at midnight, so late-evening ticks still count for today.</p>
           <p>
             <b>Plan ahead:</b> the row of days at the top of the Today tab goes a week ahead. Pick a day to write its
-            tasks now; the dots show how many are named. You tick them off when the day comes.
+            tasks now; the dots show how many are named. You tick them off when the day comes. Its first day is <b>yesterday</b>:
+            forgot to tick something off? Do it there the next day. It still earns its action and the extra harvest.
           </p>
         </details>
 
