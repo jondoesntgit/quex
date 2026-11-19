@@ -30,3 +30,12 @@ export function saveSession(email: string, s: SavedSession | null) {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(all))
   } catch { /* private mode */ }
 }
+
+/** The account this device stepped away from to sign in as someone else (so the sign-in screen can offer a way back). */
+const AWAY_KEY = 'quex:away:v1'
+export function awayAccount(): string | null {
+  try { return localStorage.getItem(AWAY_KEY) } catch { return null }
+}
+export function setAway(email: string | null) {
+  try { if (email) localStorage.setItem(AWAY_KEY, email); else localStorage.removeItem(AWAY_KEY) } catch { /* private mode */ }
+}

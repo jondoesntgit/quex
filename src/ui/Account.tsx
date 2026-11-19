@@ -4,7 +4,7 @@ import { clearMeta, eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
 import { Help } from './Help'
-import { forgetAccount, rememberedAccounts } from '../app/accounts'
+import { awayAccount, forgetAccount, rememberAccount, rememberedAccounts } from '../app/accounts'
 import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldName, worldUrl } from '../app/worlds'
 
 /** Full-screen sign-in in front of the shared world: Google, an emailed
@@ -22,6 +22,8 @@ export function SignIn() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const emailOk = /.+@.+\..+/.test(email)
+  const away = awayAccount()
+  const canGoBack = !!away && account.hasSession(away)
 
   // tapping the emailed link (another tab or device) signs in too: follow it
   useEffect(() => {
@@ -121,6 +123,11 @@ export function SignIn() {
           </>
         )}
         {err && <p style={{ color: 'var(--danger)' }}>{err}</p>}
+        {!sent && canGoBack && (
+          <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
+            <button className="btn" disabled={busy} onClick={() => run(async () => { await account.switchTo(away!); clearMeta(); location.reload() })}>← Back to {away}</button>
+          </div>
+        )}
         {!sent && (
           <p className="muted" style={{ textAlign: 'center', marginBottom: 0 }}>
             Just curious? <button type="button" className="linkbtn" onClick={() => account.enterGuest()}>Look around as a guest</button>.
@@ -137,13 +144,9 @@ export function SignIn() {
   )
 }
 
-/** Leave this account. Switching keeps its session on this device, so it's one
- *  tap to come back; signing out ends it. Either way the next account chooses
- *  its own world and villages. */
-async function leave(how: 'switch' | 'signOut', to?: string) {
-  if (to) await account.switchTo(to)
-  else if (how === 'switch') await account.stepAway()
-  else await account.signOut()
+/** Sign out for good on this device; the next account chooses its own world and villages. */
+async function signOut() {
+  await account.signOut()
   clearMeta()
   location.reload()
 }
@@ -154,6 +157,7 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
   const [info, setInfo] = useState<AccountInfo | null>(null)
   const [pw, setPw] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
   const p = game.meta.activePlayer ? game.state.players[game.meta.activePlayer] : null
   const [name, setName] = useState(p?.name ?? '')
   useEffect(() => { account.info().then(setInfo) }, [])
@@ -184,6 +188,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
   }
   const guardians = p ? game.guardianNames(p.id) : []
   const wards = game.wards()
+
+  if (picking && info?.email) return <AccountPicker current={info.email} onCancel={() => setPicking(false)} />
 
   return (
     <div className="modal account" onClick={onClose}>
@@ -233,22 +239,6 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
 
         {remote && info && !info.guest && <AssistantLinks notify={notify} />}
 
-        {info?.email && (() => {
-          const others = rememberedAccounts().filter((e) => e !== info.email && account.hasSession(e))
-          return others.length > 0 && (
-            <>
-              <label>Other accounts on this device</label>
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                {others.map((e) => (
-                  <button key={e} className="btn" title="Switch to this account"
-                    onClick={() => leave('switch', e).catch((x) => { setMsg(x instanceof Error ? x.message : String(x)); setTimeout(() => location.reload(), 2500) })}>
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </>
-          )
-        })()}
 
         <form onSubmit={(e) => { e.preventDefault(); savePw() }}>
           <label>Set or change password <span className="muted">(optional)</span></label>
@@ -259,8 +249,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
           {msg && <p className="muted">{msg}</p>}
         </form>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={() => void leave('signOut')} title="Sign out of this account on this device">Sign out</button>
-          <button className="btn" onClick={() => void leave('switch')} title="Sign in as someone else; this account stays one tap away">Switch account</button>
+          <button className="btn" onClick={() => void signOut()} title="Sign out of this account on this device">Sign out</button>
+          <button className="btn" onClick={() => setPicking(true)} title="Switch to another account on this device">Switch account</button>
           <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
@@ -401,5 +391,41 @@ function AssistantLinks({ notify }: { notify: (s: string) => void }) {
       )}
       <button className="btn" disabled={busy} onClick={make}>+ Connect an AI assistant</button>
     </>
+  )
+}
+
+/** Pick another account on this device. Nothing changes until you pick one, and Cancel goes back. */
+function AccountPicker({ current, onCancel }: { current: string; onCancel: () => void }) {
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const others = rememberedAccounts().filter((e) => e !== current)
+  const go = async (f: () => Promise<void>) => {
+    setBusy(true); setErr(null)
+    try { await f(); clearMeta(); location.reload() } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false) }
+  }
+  return (
+    <div className="modal" onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Switch account</h2>
+        <p className="muted" style={{ marginTop: 0 }}>You're signed in as <b>{current}</b>.</p>
+        {others.map((e) => {
+          const kept = account.hasSession(e)
+          return (
+            <button key={e} className="btn choice" disabled={busy}
+              onClick={() => go(async () => {
+                if (kept) await account.switchTo(e)
+                else { rememberAccount(e); await account.stepAway() } // sign in to it again, with its email filled in
+              })}>
+              {e}{!kept && <span className="muted"> · sign in again</span>}
+            </button>
+          )
+        })}
+        <button className="btn choice" disabled={busy} onClick={() => go(() => account.stepAway())}>+ Another account</button>
+        {err && <p style={{ color: 'var(--danger)' }}>{err}</p>}
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+          <button className="btn primary" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
   )
 }

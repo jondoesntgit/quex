@@ -4,7 +4,7 @@ import { account, createSupabaseStore, PrivateWorldError, SupabaseStore } from '
 import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/worlds'
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
-import { rememberAccount } from './app/accounts'
+import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
@@ -80,7 +80,7 @@ export default function App() {
           const r = remote
           r.watch((row) => g!.remoteLabel(row), async () => { g!.setAccess(await r.access()); await g!.syncLabels() })
           const info = await account.info()
-          if (info?.email) rememberAccount(info.email)
+          if (info?.email) { rememberAccount(info.email); setAway(null) }
         }
         setGame(g)
       } catch (e) {

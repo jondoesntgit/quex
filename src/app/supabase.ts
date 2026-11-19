@@ -10,7 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GameEvent } from '../game/types'
 import type { EventStore } from './store'
 import { FAMILY_WORLD, SANDBOX_WORLD } from './worlds'
-import { savedSession, saveSession } from './accounts'
+import { savedSession, saveSession, setAway } from './accounts'
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -464,7 +464,7 @@ export const account = {
     const sb = await getClient()
     const { data: s } = await sb.auth.getSession()
     const email = s.session?.user.email
-    if (s.session && email) saveSession(email, s.session)
+    if (s.session && email) { saveSession(email, s.session); setAway(email) }
     try {
       for (const k of Object.keys(localStorage)) if (/^sb-.*-auth-token$/.test(k)) localStorage.removeItem(k)
     } catch { /* ignore */ }
@@ -485,7 +485,10 @@ export const account = {
     const { data, error } = await sb.auth.setSession(saved)
     if (error || data.session?.user.email !== email) {
       saveSession(email, null)
-      throw new Error(`The saved sign-in for ${email} has run out: sign in again.`)
+      // stay who you were
+      if (cur.session) await sb.auth.setSession({ access_token: cur.session.access_token, refresh_token: cur.session.refresh_token })
+      throw new Error(`The saved sign-in for ${email} has run out: sign in to it again.`)
     }
+    setAway(null)
   },
 }
