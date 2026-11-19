@@ -262,6 +262,15 @@ export function generateWorld(seed: string, opts: GenOptions = {}): World {
       default:
         break
     }
+    // Copper beyond the hills: the same seams run on under low country, showing
+    // most often in dry basins (red-bed copper, like Zambia's) and more rarely
+    // under grass or forest (native copper in low ridges, like the Keweenaw).
+    // Only where nothing else claimed the hex, so existing deposits never change.
+    if (res === null) {
+      const bar: Partial<Record<string, number>> = { desert: 0.6, savannah: 0.62, grass: 0.8, meadow: 0.8, forest: 0.82, tundra: 0.84 }
+      const b = bar[cell.terrain]
+      if (b !== undefined && veinCu > b) res = 'copper'
+    }
     // riverbank clay overrides weak claims in the lowlands
     if (!isWater(i) && cell.tier <= 2 && nearRiver[i] <= 1 && (res === null || res === 'grain') && r > 0.55) {
       res = 'clay'

@@ -154,8 +154,8 @@
   "iron": "#9c5434",
   "iron_light": "#c87a4c",
   "iron_dark": "#64301c",
-  "copper_rock": "#6c6458",
-  "copper_rock_dark": "#48423a",
+  "copper_rock": "#7c7266",
+  "copper_rock_dark": "#544c42",
   "copper": "#3cc0a0",
   "copper_light": "#7ce8c8",
   "stone": "#b4b0a4",
@@ -168,7 +168,15 @@
   "clay_light": "#d88858",
   "clay_dark": "#843c20",
   "salt": "#f4f2ec",
-  "salt_dark": "#c8c4b8"
+  "salt_dark": "#c8c4b8",
+  "copper_rock_light": "#9c9082",
+  "malachite": "#3a9a68",
+  "malachite_light": "#70cc94",
+  "azurite": "#3c5cac",
+  "azurite_light": "#6c8cdc",
+  "gossan": "#b4642e",
+  "gossan_light": "#d48c4c",
+  "gossan_dark": "#7c3e1c"
  },
  "creatures": {
   "troll": "#7890a8",

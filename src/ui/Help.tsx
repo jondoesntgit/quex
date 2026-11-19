@@ -130,9 +130,10 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>Merchant caravans pass through now and then on their way to trade. They're just passing; enjoy the view.</li>
           </ul>
           <p>
-            <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, dark rock with green-blue veins for
-            copper, pale slabs for building stone, dark crystals for rare tin, red clay banks along rivers and white salt
-            crusts. In the mountains, ore streaks the rock itself: green-blue for copper, rust for iron. Tap a hex to see
+            <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, weathered rock crusted with green
+            malachite and blue azurite on a rust-stained patch for copper (in the hills and mountains, and now and then in
+            dry basins and lowland), pale slabs for building stone, dark crystals for rare tin, red clay banks along rivers and white salt
+            crusts. In the mountains, ore streaks the rock itself: green and blue with a rusty halo for copper, rust for iron. Tap a hex to see
             what you could build there, or press ⛏ by the zoom buttons to dim everything except deposits.
           </p>
           <p>Drag to move around; pinch, scroll or use ＋/－ to zoom. Zoom right out to see the whole continent.</p>

@@ -24,11 +24,13 @@ const PINE = [[0x6c, 0xa8, 0x44], [0x4c, 0x88, 0x34], [0x36, 0x62, 0x28], [0x28,
 const WARM_TERRAIN = new Set(['desert', 'savannah'])
 // ore showing through the rock: copper's green-blue, iron's rust, tin's dark slate with pale glints
 const STAIN: Record<string, number[][]> = {
-  copper: [[0x7c, 0xe0, 0xc0], [0x3c, 0xb0, 0x90], [0x2a, 0x7c, 0x6c], [0x1e, 0x58, 0x50]],
+  copper: [[0x70, 0xcc, 0x94], [0x3a, 0x9a, 0x68], [0x2a, 0x76, 0x50], [0x1e, 0x56, 0x3c]], // malachite
   iron: [[0xd0, 0x84, 0x58], [0xa8, 0x5c, 0x38], [0x78, 0x3e, 0x26], [0x56, 0x2c, 0x1c]],
   tin: [[0xb0, 0xb8, 0xe8], [0x68, 0x6c, 0x98], [0x4a, 0x4c, 0x70], [0x34, 0x36, 0x52]],
 }
 const ORES = ['copper', 'iron', 'tin'] as const
+const AZURITE = [[0x6c, 0x8c, 0xdc], [0x3c, 0x5c, 0xac], [0x2c, 0x44, 0x86], [0x1e, 0x30, 0x60]]
+const GOSSAN = [[0xd4, 0x8c, 0x4c], [0xb4, 0x64, 0x2e], [0x7c, 0x3e, 0x1c], [0x5a, 0x2c, 0x14]] // the rusty cap over copper ore
 
 const isMountain = (f: string | null) => f === 'mountain' || f === 'mountain_snow'
 
@@ -291,13 +293,18 @@ export class Mountains {
             if (rel < line - 2 || (rel < line + 2 && hash2(gx, y, 11) < (line + 2 - rel) / 4)) { pal = PINE; t = Math.min(3, tone + 1) }
           }
           // ore: streaks of colour down the rock near a deposit, densest at its heart
-          if (!pal && OK[k] >= 0 && OW[k] > 0.2) {
+          if (!pal && OK[k] >= 0 && OW[k] > 0.15) {
+            const kind = ORES[OK[k]]
             const streak = vnoise(gx / (0.11 * W), alt / (0.45 * W), this.seed + 51 + OK[k])
-            if (streak > 0.86 - 0.16 * Math.min(1, OW[k]) && hash2(Math.floor(gx / 2), Math.floor(alt / 3), 19) < 0.8) {
-              const kind = ORES[OK[k]]
+            if (OW[k] > 0.2 && streak > 0.86 - 0.16 * Math.min(1, OW[k]) && hash2(Math.floor(gx / 2), Math.floor(alt / 3), 19) < 0.8) {
               pal = STAIN[kind]
+              // copper: green malachite, with the odd patch of blue azurite
+              if (kind === 'copper' && vnoise(gx / (0.06 * W), alt / (0.1 * W), this.seed + 61) > 0.72) pal = AZURITE
               // tin glints: the odd pale speck
               if (kind === 'tin' && hash2(gx, y, 17) < 0.12) t = 0
+            } else if (kind === 'copper' && vnoise(gx / (0.2 * W), alt / (0.25 * W), this.seed + 71) > 0.7 - 0.25 * Math.min(1, OW[k])) {
+              // a rusty gossan stain spreading round the copper, weathering out of the rock
+              pal = GOSSAN
             }
           }
           const rgb = (pal ?? ROCK)[Math.min(t, 3)]

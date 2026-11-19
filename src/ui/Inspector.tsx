@@ -11,7 +11,7 @@ import { Icon } from './Icon'
 /** What a deposit is good for (shown on the hex card). */
 const DEPOSIT_NOTE: Record<string, string> = {
   iron: 'Iron deposit: a Deep iron mine could go here (big task). Iron makes better tools and weapons.',
-  copper: 'Copper deposit: a Copper mine could go here (big task). Copper plus a little tin makes bronze.',
+  copper: 'Copper deposit (green malachite and blue azurite on rust-stained rock): a Copper mine could go here (big task). Copper plus a little tin makes bronze.',
   tin: 'Tin! Rare: gather it (small task) and trade it. A little tin turns copper into bronze.',
   stone: 'Building stone: a Quarry could go here (medium task), or gather stone by hand (small task).',
   clay: 'River clay: gather it (small task) for a Brick kiln.',

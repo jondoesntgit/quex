@@ -448,15 +448,21 @@ def feat_ore(kind, part):
                 boulder(x, y, rng.uniform(0.13, 0.2) * (1.3 if k == 0 else 1), rng.uniform(0.16, 0.26) * (1.5 if k == 0 else 1),
                         p["iron"], p["iron_light"], p["iron_dark"])
         elif kind == "copper":
+            # weathered rock crusted with green malachite and flecks of blue azurite,
+            # on a rusty gossan stain (the iron-oxide cap over copper ore)
+            x, y = at(0, 0)
+            cone((x, y, 0), 0.3, 0.02, p["gossan"], segs=7, r_top=0.26, shade=(p["gossan_light"], p["gossan_dark"]))
             for k, (dx, dy) in enumerate(spots[:3]):
-                x, y = at(dx, dy)
-                r, h = rng.uniform(0.14, 0.2), rng.uniform(0.18, 0.3)
-                boulder(x, y, r, h, p["copper_rock"], p["copper_rock"], p["copper_rock_dark"])
-                # bright green-blue veins breaking out of the rock
-                for j in range(2):
+                x, y = at(dx * 0.9, dy * 0.9)
+                r, h = rng.uniform(0.12, 0.18), rng.uniform(0.14, 0.24)
+                boulder(x, y, r, h, p["copper_rock"], p["copper_rock_light"], p["copper_rock_dark"])
+                # a green crust over the top, and a blue fleck or two
+                cone((x, y, h * 0.72), r * 0.55, h * 0.3, p["malachite"], segs=5, r_top=r * 0.2,
+                     rot=rng.uniform(0, 1.2), shade=(p["malachite_light"], p["malachite"]))
+                if k < 2:
                     a = rng.uniform(0, 6.28)
-                    cone((x + math.cos(a) * r * 0.6, y + math.sin(a) * r * 0.6, h * rng.uniform(0.2, 0.6)), 0.075, 0.11,
-                         p["copper"], segs=4, shade=(p["copper_light"], p["copper"]))
+                    cone((x + math.cos(a) * r * 0.7, y + math.sin(a) * r * 0.7, h * 0.35), 0.045, 0.06,
+                         p["azurite"], segs=4, shade=(p["azurite_light"], p["azurite"]))
         elif kind == "stone":
             # pale slabs and a cut ledge: a quarry waiting to happen
             x, y = at(0, 0.05)
