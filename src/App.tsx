@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { eventId, Game, LocalStore, loadMeta, newMeta, saveMeta, type EventStore } from './app/store'
 import { account, createSupabaseStore, PrivateWorldError, SupabaseStore } from './app/supabase'
-import { familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/worlds'
+import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/worlds'
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
 import { rememberAccount } from './app/accounts'
@@ -29,7 +29,8 @@ export default function App() {
         // which world: the link's ?seed=, else this device's world, else the
         // family world for its players and the sandbox for everyone else
         const q = new URLSearchParams(location.search)
-        const asked = q.get('seed')
+        // links from before worlds were named (they all pointed at a hex) are family-world links
+        const asked = q.get('seed') ?? (q.get('at') || q.get('invite') ? FAMILY_WORLD : null)
         const preview = q.get('preview') === '1'
         let meta = loadMeta()
         if (asked && meta && meta.worldSeed !== asked) meta = null
@@ -60,6 +61,7 @@ export default function App() {
           saveMeta(meta)
           remote.onStatus = () => g!.poke()
           g.setAccess(await remote.access())
+          void remote.loadInvite()
           // opened from a parent link: become this child's guardian
           const params = new URLSearchParams(location.search)
           const token = params.get('guardian')

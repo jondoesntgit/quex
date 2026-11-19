@@ -39,7 +39,9 @@ export async function createSupabaseStore(worldSeed: string, preview = false): P
     return 'signin'
   }
   if (account.isGuest()) account.leaveGuest(false) // signed in now: no longer a guest
-  const { error } = await sb.rpc('join_world', { p_world: worldSeed })
+  // a shared link may carry an invite, which lets a new player into a closed world
+  const invite = new URLSearchParams(location.search).get('invite')
+  const { error } = await sb.rpc('join_world', invite ? { p_world: worldSeed, p_invite: invite } : { p_world: worldSeed })
   // a world that isn't taking new players: look around it instead (it's public)
   if (error && /WORLD_CLOSED/.test(error.message)) return new SupabaseStore(sb, worldSeed, true, true)
   if (error) console.warn('join_world', error.message)
@@ -104,6 +106,15 @@ export class SupabaseStore implements EventStore {
     const { error } = await this.sb.rpc('set_world_public', { p_world: this.world, p_public: on })
     if (error) throw new Error(error.message)
   }
+  /** This player's invite into the world, fetched ahead of time so sharing stays instant. */
+  invite: string | null = null
+  async loadInvite() {
+    if (this.guest) return
+    const { data, error } = await this.sb.rpc('world_invite', { p_world: this.world })
+    if (error) console.warn('world_invite', error.message)
+    else this.invite = data as string
+  }
+
   async setClosed(on: boolean) {
     const { error } = await this.sb.rpc('set_world_closed', { p_world: this.world, p_closed: on })
     if (error) throw new Error(error.message)

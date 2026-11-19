@@ -58,6 +58,9 @@ export function spotLink(game: Game, at: Spot): string {
   const u = new URL(location.origin + location.pathname)
   u.searchParams.set('seed', game.meta.worldSeed)
   u.searchParams.set('at', `${at.col},${at.row}`)
+  // lets the person it's sent to join, even if the world is closed to new players
+  const invite = (game.store as { invite?: string | null }).invite
+  if (invite) u.searchParams.set('invite', invite)
   return u.toString()
 }
 
