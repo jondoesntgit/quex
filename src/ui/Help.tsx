@@ -35,6 +35,10 @@ export function Help({ onClose }: { onClose: () => void }) {
             The ✓ inside a task box means its name is saved.
           </p>
           <p>Your day ends overnight, not at midnight, so late-evening ticks still count for today.</p>
+          <p>
+            <b>Plan ahead:</b> the row of days at the top of the Today tab goes a week ahead. Pick a day to write its
+            tasks now; the dots show how many are named. You tick them off when the day comes.
+          </p>
         </details>
 
         <details>
@@ -130,7 +134,7 @@ export function Help({ onClose }: { onClose: () => void }) {
         <details>
           <summary>Playing together</summary>
           <ul>
-            <li>The <b>Party</b> tab shows your neighbours and today's pips: whether they finished their tasks, never what they were.</li>
+            <li>The <b>Party</b> tab shows your neighbours: today's pips, and a bar for each of the last seven days (gold for a perfect day, blue for a frozen one) with their average. Whether they finished their tasks, never what they were.</li>
             <li>Send a <b>caravan</b> (medium action) to share goods with a neighbour. It takes time on the road; walking habits speed it up.</li>
             <li>Tap a hex and <b>🔗 Share</b>, or use <b>Invite someone to settle nearby</b> in the Village tab, to text someone a link to that spot.</li>
             <li>Villages need a little space: you can't settle right next to someone else's land (shown in red while choosing).</li>

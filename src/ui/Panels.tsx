@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, SIZE_POINTS, type Good } from '../game/data'
+import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
 import { dayScore, defence, foodStock, logText, popCap, storageCap } from '../game/reducer'
 import type { Habit, Player, TaskStatus } from '../game/types'
 import { addDays, weekday } from '../game/calendar'
@@ -10,8 +10,50 @@ import { FAMILY_WORLD, SANDBOX_WORLD, worldUrl } from '../app/worlds'
 import { winterPrep } from '../game/winter'
 import { Icon } from './Icon'
 
+/** Today plus the next six days: a strip to pick which day you're looking at. */
+function DayStrip({ game, p, today, ahead, setAhead }: { game: Game; p: Player; today: string; ahead: number; setAhead: (n: number) => void }) {
+  return (
+    <div className="daystrip" role="tablist" aria-label="Plan the week">
+      {Array.from({ length: 7 }, (_, k) => {
+        const d = addDays(today, k)
+        const planned = PLAN_SIZES.filter((_, i) => game.label(p.id, d, i).trim()).length
+        const name = new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })
+        return (
+          <button key={d} role="tab" aria-selected={ahead === k} className={`day ${ahead === k ? 'on' : ''} ${k === 0 ? 'today' : ''}`} onClick={() => setAhead(k)}
+            title={`${k === 0 ? 'Today: ' : ''}${planned} of 6 tasks named`}>
+            <span>{name}</span>
+            <span className="planned" aria-hidden>{'•'.repeat(planned)}{'·'.repeat(6 - planned)}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** A day ahead: just the six task names, to tick off when the day comes. */
+function PlanDay({ game, p, date, editable }: { game: Game; p: Player; date: string; editable: boolean }) {
+  const label = new Date(date + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
+  return (
+    <div>
+      <h3 style={{ margin: '4px 0' }}>Plan · {label}</h3>
+      <p className="muted" style={{ margin: '0 0 6px' }}>
+        {editable ? 'Write the tasks for this day now; tick them off when it comes. One big, two medium, three small.' : 'Planned for this day.'}
+      </p>
+      {PLAN_SIZES.map((size, i) => (
+        <div className="slot plan" key={i}>
+          <span className={`size ${size}`}>{SIZE_LABEL[size]} {SIZE_POINTS[size]}</span>
+          <LabelInput game={game} pid={p.id} date={date} slot={i} readOnly={!editable}
+            placeholder={!editable ? '—' : size === 'big' ? 'The one big thing…' : size === 'medium' ? 'A medium task…' : 'A small task…'} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function TodayPanel({ game, p }: { game: Game; p: Player }) {
-  const date = game.today(p.id)
+  const today = game.today(p.id)
+  const [ahead, setAhead] = useState(0)
+  const date = today
   const day = p.days[date]
   const slots = day?.slots ?? ['big', 'medium', 'medium', 'small', 'small', 'small'].map((size) => ({ size, status: 'none' as TaskStatus }))
   const set = (slot: number, status: TaskStatus) =>
@@ -25,8 +67,16 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   const guardians = game.guardianNames(p.id)
   const mine = game.meta.localPlayers.includes(p.id)
 
+  if (ahead > 0) return (
+    <div>
+      <DayStrip game={game} p={p} today={today} ahead={ahead} setAhead={setAhead} />
+      <PlanDay game={game} p={p} date={addDays(today, ahead)} editable={editable} />
+    </div>
+  )
+
   return (
     <div>
+      <DayStrip game={game} p={p} today={today} ahead={ahead} setAhead={setAhead} />
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h3 style={{ margin: 0 }}>Today · {dayScore(day)}/100</h3>
         <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>
@@ -257,6 +307,29 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
   )
 }
 
+/** The last seven days (today on the right): a bar per day for the score, ❄ for a frozen day. */
+function WeekHistory({ game, o }: { game: Game; o: Player }) {
+  const today = game.today(o.id)
+  const days = Array.from({ length: 7 }, (_, k) => addDays(today, k - 6))
+  const scores = days.map((d) => ({ d, rec: o.days[d], score: dayScore(o.days[d]) }))
+  const past = scores.slice(0, 6).filter((x) => x.rec)
+  const avg = past.length ? Math.round(past.reduce((a, x) => a + (x.rec!.frozen ? Math.max(60, x.score) : x.score), 0) / past.length) : null
+  return (
+    <span className="week" title={avg === null ? 'No days yet' : `Average over the last ${past.length} day${past.length === 1 ? '' : 's'}: ${avg}/100`}>
+      {scores.map(({ d, rec, score }, k) => {
+        const name = new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })
+        return (
+          <span key={d} className={`wday ${k === 6 ? 'today' : ''}`} title={`${name}: ${rec ? (rec.frozen ? 'frozen' : `${score}/100`) : 'no check-in'}`}>
+            <i className={rec?.frozen ? 'frozen' : score >= 100 ? 'perfect' : ''} style={{ height: Math.round(rec?.frozen ? 22 : Math.max((score / 100) * 22, rec ? 2 : 0)) }} />
+            <small>{name.slice(0, 1)}</small>
+          </span>
+        )
+      })}
+      {avg !== null && <small className="avg">{avg} avg</small>}
+    </span>
+  )
+}
+
 export function PartyPanel({ game, p, onAddFriend, onManage }: { game: Game; p: Player; onAddFriend: () => void; onManage: (pid: string) => void }) {
   const players = Object.values(game.state.players)
   return (
@@ -278,6 +351,7 @@ export function PartyPanel({ game, p, onAddFriend, onManage }: { game: Game; p: 
                 {(d?.slots ?? []).map((s, i) => <span key={i} className={`pip ${s.status} ${d?.frozen ? 'frozen' : ''}`} title={s.size} />)}
                 {!d && <span className="muted">no check-in yet today</span>}
               </span>
+              <WeekHistory game={game} o={o} />
               {local && o.id !== p.id && (
                 <button className="btn" onClick={() => { game.meta.activePlayer = o.id; game.saveMeta() }}>Play as</button>
               )}

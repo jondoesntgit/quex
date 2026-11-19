@@ -256,3 +256,25 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 
 /* build stamp at the foot of the Help page */
 .help .build { text-align: center; margin: 14px 0 0; }
+
+/* Today tab: today plus the next six days, to plan the week */
+.daystrip { display: flex; gap: 4px; margin: 0 0 8px; }
+.daystrip .day.today span:first-child { text-decoration: underline; text-shadow: 0.0625em 0 0 currentColor; }
+.daystrip .day {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  border: 2px solid var(--ink); border-radius: var(--radius); background: var(--paper-2); padding: 3px 0 4px; cursor: pointer; overflow: hidden;
+}
+.daystrip .day.on { background: var(--paper); box-shadow: var(--shadow); }
+.daystrip .planned { font-size: 1rem; font-size: round(nearest, 1rem, 8px); letter-spacing: 0; color: var(--ink-soft); line-height: 0.6; }
+.slot.plan { grid-template-columns: 46px 1fr; }
+
+/* Party tab: each player's last seven days */
+.week { display: inline-flex; align-items: flex-end; gap: 3px; }
+.week .wday { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; }
+.week .wday { height: 36px; justify-content: flex-end; }
+.week .wday i { display: block; width: 8px; background: var(--good); box-shadow: 0 0 0 1px var(--ink); }
+.week .wday i.perfect { background: var(--gold); }
+.week .wday i.frozen { background: #8cc4f4; }
+.week .wday.today small { text-decoration: underline; }
+.week small { line-height: 0.8; }
+.week .avg { align-self: center; margin-left: 4px; }
