@@ -183,6 +183,9 @@ export function Help({ onClose }: { onClose: () => void }) {
             change tasks a parent sets. Treat the link like a password; <b>Turn off</b> in Account stops it at once.
           </p>
         </details>
+        <p className="muted build" title={`Built ${new Date(__BUILD_TIME__).toLocaleString()}`}>
+          Version {__BUILD_COMMIT__} · built {new Date(__BUILD_TIME__).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+        </p>
       </div>
     </div>
   )

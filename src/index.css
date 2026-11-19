@@ -253,3 +253,6 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .checklist .todo { display: flex; gap: 6px; align-items: baseline; margin-top: 4px; }
 .checklist .todo .size { flex: none; padding: 0 4px; min-width: 3.2em; }
 .winter-nudge { background: #eef4fb; border: 2px solid var(--ink); border-radius: var(--radius); padding: 6px 8px; margin: 6px 0; }
+
+/* build stamp at the foot of the Help page */
+.help .build { text-align: center; margin: 14px 0 0; }
