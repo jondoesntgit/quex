@@ -94,10 +94,11 @@ const SHORE_B = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'oLLLLo', 'oL
 const SHORE_BASE = 4 // rows below the seat
 // On a walk together, one points out something nearby (arm out to the side)
 const POINT = ['.oooo....', '.oHHo....', '.oHHooooo', 'ooSSSSSHo', 'oSSSSoooo', 'ooSSoo...', '.oLLo....', '.oLLo....', '.oooo....']
-// little Z's rising from a napper, and speech bubbles: "..." (index 0) mostly, a heart now and then
+// little Z's rising from a napper; speech bubbles are mostly "...", sometimes "!", now and then a heart
 const ZS = [['kkkk', '..k.', '.k..', 'kkkk'], ['kkkkk', '...k.', '..k..', '.k...', 'kkkkk']]
-const DOTS = 0, HEART = 2
-const HEART_CHANCE = 0.1
+const DOTS = 0, BANG = 1, HEART = 2
+/** A bubble's topic from a roll in [0, 1): a heart one time in ten, "!" two in ten, else "...". */
+const topicFor = (roll: number) => (roll < 0.1 ? HEART : roll < 0.3 ? BANG : DOTS)
 // Praying: kneeling, sitting back on the heels, head bowed forward over hands
 // clasped under the chin; faint gold sparkles rise above (drawn separately).
 const PRAY = ['..oooo..', '..oHHo..', '.ooHHoo.', 'oSSooHHo', 'oSSSHHo.', 'oSSSSo..', 'oSSLLLLo', 'oooooooo']
@@ -614,8 +615,8 @@ export class People {
         a.chatAgain = b.chatAgain = later
         if (a.rng() > CHAT_CHANCE) continue
         const until = this.clock + CHAT_TIME[0] + a.rng() * (CHAT_TIME[1] - CHAT_TIME[0])
-        a.chat = { with: b, until, first: true, topic: a.rng() < HEART_CHANCE ? HEART : DOTS }
-        b.chat = { with: a, until, first: false, topic: a.rng() < HEART_CHANCE ? HEART : DOTS }
+        a.chat = { with: b, until, first: true, topic: topicFor(a.rng()) }
+        b.chat = { with: a, until, first: false, topic: topicFor(a.rng()) }
         a.chatAgain = b.chatAgain = until + (later - this.clock)
         break
       }
@@ -721,7 +722,7 @@ export class People {
     if (speaker !== true) return
     const pal = r.pal?.pose, me = w.pose
     const mirror = !!pal && !!me && pal.x < me.x
-    const topic = ((beat * 2654435761) >>> 0) % 10 === 0 ? HEART : DOTS
+    const topic = topicFor((((beat * 2654435761) >>> 0) % 1000) / 1000)
     const b = BUBBLES[topic]
     b.forEach((rowStr, ry) => {
       for (let c = 0; c < rowStr.length; c++) {
