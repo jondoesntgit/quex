@@ -286,6 +286,7 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .week .wday i { display: block; width: 8px; background: var(--good); box-shadow: 0 0 0 1px var(--ink); }
 .week .wday i.perfect { background: var(--gold); }
 .week .wday i.frozen { background: #8cc4f4; }
+.week .wday i.rest { background: var(--paper-2); }
 .week .wday.today small { text-decoration: underline; }
 .week small { line-height: 0.8; }
 .week .avg { align-self: center; margin-left: 4px; }
@@ -299,3 +300,5 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .caravan-list li { padding: 6px 0; border-bottom: 2px dashed var(--paper-2); }
 .caravan-list li:last-child { border-bottom: 0; }
 .caravan-list .mine { color: var(--medium); }
+
+.sabbath { background: var(--paper-2); border: 2px solid var(--ink); border-radius: var(--radius); padding: 8px 10px; margin: 6px 0; }

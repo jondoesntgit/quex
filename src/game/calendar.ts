@@ -23,6 +23,11 @@ export function weekday(d: ISODate): number {
   return new Date(d + 'T00:00:00Z').getUTCDay() // 0 = Sunday
 }
 
+/** Saturday is the Sabbath: no tasks, just habits (see SABBATH_FROM). */
+export function isSabbath(d: ISODate): boolean {
+  return weekday(d) === 6
+}
+
 export function weekSeason(d: ISODate): WeekSeason {
   const w = weekday(d)
   if (w <= 1) return 'spring'

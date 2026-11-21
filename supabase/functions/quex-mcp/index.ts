@@ -14,6 +14,7 @@ const INSTRUCTIONS = `Quex is a co-op village game driven by real life. Each day
 1 big task (slot 0: the one thing that matters most), 2 medium tasks (slots 1-2) and 3 small tasks (slots 3-5, quick wins).
 Finishing tasks earns actions to spend on their village. The player ticks tasks off themselves in the app; you can't.
 A player's day rolls over overnight at their own reset hour, so use the "today" date the tools give, not your own clock.
+Saturday is the Sabbath, a day of rest: it has no tasks (only habits), so never plan tasks for a Saturday.
 Some players are children whose tasks are set by a parent or guardian ("set_by_parent"): only the parent's account can change them.
 Planning tips: keep each task short and concrete (under ~60 characters), one big task a day, small tasks really small, and leave
 room for school, work and rest. Ask before overwriting tasks that are already written. Task names are private to the player and
@@ -45,7 +46,7 @@ const TOOLS = [
   {
     name: 'quex_set_tasks',
     title: 'Plan tasks',
-    description: 'Write task names for one or more days, from yesterday up to 14 days ahead, for the user or a child they look after. Only the slots you give are changed; an empty string clears a slot. This never marks anything done.',
+    description: 'Write task names for one or more days, from yesterday up to 14 days ahead, for the user or a child they look after. Saturdays are rest days with no tasks and are refused. Only the slots you give are changed; an empty string clears a slot. This never marks anything done.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -99,6 +100,10 @@ async function callTool(token: string, name: string, a: Json): Promise<unknown> 
       if (!days.length) throw new Error('Give at least one day to plan')
       const saved = []
       for (const d of days) {
+        // the Sabbath: no tasks on a Saturday
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d.date) && new Date(d.date + 'T00:00:00Z').getUTCDay() === 6) {
+          throw new Error(`${d.date} is a Saturday, the Sabbath: a day of rest with no tasks. Plan the other days.`)
+        }
         const tasks: { slot: number; task: string }[] = []
         if (typeof d.big === 'string') tasks.push({ slot: 0, task: d.big })
         ;(d.medium ?? []).slice(0, 2).forEach((t, i) => tasks.push({ slot: 1 + i, task: String(t) }))

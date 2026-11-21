@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
 import { dayScore, defence, foodStock, logText, popCap, storageCap } from '../game/reducer'
 import type { Habit, Player, TaskStatus } from '../game/types'
-import { addDays, weekday } from '../game/calendar'
+import { addDays, isSabbath, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
@@ -18,12 +18,13 @@ function DayStrip({ game, p, today, ahead, setAhead }: { game: Game; p: Player; 
         const k = j - 1 // yesterday, today, then six days ahead
         const d = addDays(today, k)
         const planned = PLAN_SIZES.filter((_, i) => game.label(p.id, d, i).trim()).length
+        const rest = isSabbath(d)
         const name = new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })
         return (
           <button key={d} role="tab" aria-selected={ahead === k} className={`day ${ahead === k ? 'on' : ''} ${k === 0 ? 'today' : ''} ${k < 0 ? 'past' : ''}`} onClick={() => setAhead(k)}
-            title={k < 0 ? `Yesterday: ${dayScore(p.days[d])}/100` : `${k === 0 ? 'Today: ' : ''}${planned} of 6 tasks named`}>
+            title={rest ? `${k === 0 ? 'Today: ' : ''}Sabbath, a day of rest: just your habits` : k < 0 ? `Yesterday: ${dayScore(p.days[d])}/100` : `${k === 0 ? 'Today: ' : ''}${planned} of 6 tasks named`}>
             <span>{name}</span>
-            <span className="planned" aria-hidden>{k < 0 ? `${dayScore(p.days[d])}` : `${'•'.repeat(planned)}${'·'.repeat(6 - planned)}`}</span>
+            <span className="planned" aria-hidden>{rest ? 'rest' : k < 0 ? `${dayScore(p.days[d])}` : `${'•'.repeat(planned)}${'·'.repeat(6 - planned)}`}</span>
           </button>
         )
       })}
@@ -36,6 +37,7 @@ function Yesterday({ game, p, date, editable }: { game: Game; p: Player; date: s
   const day = p.days[date]
   const slots = day?.slots ?? PLAN_SIZES.map((size) => ({ size, status: 'none' as TaskStatus }))
   const val = (st: TaskStatus) => (st === 'full' ? 1 : st === 'half' ? 0.5 : 0)
+  if (isSabbath(date)) return <Sabbath when="Yesterday" />
   const set = (slot: number, status: TaskStatus) =>
     game.dispatch({ t: 'progress', id: eventId(), at: game.now().toISOString(), playerId: p.id, date, slot, status })
   return (
@@ -63,9 +65,20 @@ function Yesterday({ game, p, date, editable }: { game: Game; p: Player; date: s
   )
 }
 
+/** Saturday, past or ahead: nothing to tick or plan. */
+function Sabbath({ when }: { when: string }) {
+  return (
+    <div>
+      <h3 style={{ margin: '4px 0' }}>{when} · Sabbath</h3>
+      <p className="sabbath">A day of rest: no tasks, just your habits.</p>
+    </div>
+  )
+}
+
 /** A day ahead: just the six task names, to tick off when the day comes. */
 function PlanDay({ game, p, date, editable }: { game: Game; p: Player; date: string; editable: boolean }) {
   const label = new Date(date + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
+  if (isSabbath(date)) return <Sabbath when={label} />
   return (
     <div>
       <h3 style={{ margin: '4px 0' }}>Plan · {label}</h3>
@@ -99,6 +112,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
   const editable = game.canEditTasks(p.id)
   const guardians = game.guardianNames(p.id)
   const mine = game.meta.localPlayers.includes(p.id)
+  const rest = isSabbath(date)
 
   if (ahead !== 0) return (
     <div>
@@ -113,14 +127,15 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
     <div>
       <DayStrip game={game} p={p} today={today} ahead={ahead} setAhead={setAhead} />
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>Today · {dayScore(day)}/100</h3>
-        <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>
+        <h3 style={{ margin: 0 }}>Today · {rest ? 'Sabbath' : `${dayScore(day)}/100`}</h3>
+        {!rest && <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>}
       </div>
+      {rest && <p className="sabbath">A day of rest: no tasks today, just your habits. The village rests too, and tonight counts like a frozen day.</p>}
       <WinterNudge game={game} p={p} />
       {mine && !editable && (
         <p className="supervised">👪 Your tasks are set and checked off by {guardians.join(' & ') || 'your parent'}. Spend the actions you earn on the map!</p>
       )}
-      {slots.map((s, i) => (
+      {!rest && slots.map((s, i) => (
         <div className="slot" key={i}>
           <span className={`size ${s.size}`}>{SIZE_LABEL[s.size as keyof typeof SIZE_LABEL]} {SIZE_POINTS[s.size as keyof typeof SIZE_POINTS]}</span>
           <LabelInput game={game} pid={p.id} date={date} slot={i} readOnly={!editable}
@@ -161,6 +176,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
         </div>
       )}
 
+      {!rest && <>
       <h3><Icon name="freeze" size={16} /> Freezes</h3>
       <div className="row">
         <span className="muted">{p.freezes} left this week. A frozen day is shown to neighbours.</span>
@@ -169,6 +185,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
           {day?.frozen ? 'Frozen ❄' : 'Freeze today'}
         </button>
       </div>
+      </>}
     </div>
   )
 }
@@ -346,13 +363,19 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
 function WeekHistory({ game, o }: { game: Game; o: Player }) {
   const today = game.today(o.id)
   const days = Array.from({ length: 7 }, (_, k) => addDays(today, k - 6))
-  const scores = days.map((d) => ({ d, rec: o.days[d], score: dayScore(o.days[d]) }))
-  const past = scores.slice(0, 6).filter((x) => x.rec)
+  const scores = days.map((d) => ({ d, rec: o.days[d], score: dayScore(o.days[d]), rest: isSabbath(d) }))
+  const past = scores.slice(0, 6).filter((x) => x.rec && !x.rest)
   const avg = past.length ? Math.round(past.reduce((a, x) => a + (x.rec!.frozen ? Math.max(60, x.score) : x.score), 0) / past.length) : null
   return (
     <span className="week" title={avg === null ? 'No days yet' : `Average over the last ${past.length} day${past.length === 1 ? '' : 's'}: ${avg}/100`}>
-      {scores.map(({ d, rec, score }, k) => {
+      {scores.map(({ d, rec, score, rest }, k) => {
         const name = new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })
+        if (rest) return (
+          <span key={d} className={`wday ${k === 6 ? 'today' : ''}`} title={`${name}: Sabbath, a day of rest`}>
+            <i className="rest" style={{ height: 22 }} />
+            <small>{name.slice(0, 1)}</small>
+          </span>
+        )
         return (
           <span key={d} className={`wday ${k === 6 ? 'today' : ''}`} title={`${name}: ${rec ? (rec.frozen ? 'frozen' : `${score}/100`) : 'no check-in'}`}>
             <i className={rec?.frozen ? 'frozen' : score >= 100 ? 'perfect' : ''} style={{ height: Math.round(rec?.frozen ? 22 : Math.max((score / 100) * 22, rec ? 2 : 0)) }} />

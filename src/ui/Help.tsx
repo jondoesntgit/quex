@@ -95,7 +95,8 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>🌱 <b>Spring</b> (Sunday, Monday): crops at 70%.</li>
             <li>☀️ <b>Summer</b> (Tuesday, Wednesday): crops at 110%.</li>
             <li>🍂 <b>Autumn</b> (Thursday, Friday): crops at 140%, so harvest and stock up.</li>
-            <li>❄️ <b>Winter</b> (Saturday): a day of rest. Nothing grows and the village lives off its stores.</li>
+            <li>❄️ <b>Winter</b> (Saturday): the Sabbath, a day of rest. There are no tasks, just your habits. Nothing grows,
+              the village lives off its stores, and the day counts like a frozen one.</li>
           </ul>
           <p>On Thursday and Friday the Village tab forecasts winter as <i>stocked</i>, <i>tight</i> or <i>hungry</i>. A season lasts {SEASON_WEEKS} weeks.</p>
           <p>

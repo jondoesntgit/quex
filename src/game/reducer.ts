@@ -7,7 +7,7 @@ import { distance, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
 import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
-import { addDays, CROP_SEASON, daysBetween, playerDate, weekSeason, weekday } from './calendar'
+import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
@@ -75,6 +75,13 @@ export const WEEKLY_TOKENS_FROM = '2026-11-18T22:00:00.000Z'
 /** From this moment unspent actions never expire: they keep until the world's
  *  season ends (before it, winter cleared them each Saturday night). */
 export const KEEP_TOKENS_FROM = '2026-11-21T12:00:00.000Z'
+
+/** From this moment Saturday is the Sabbath: there are no tasks to tick (only
+ *  habits), and the night counts the day like a frozen one, so resting never
+ *  costs the village morale or growth. */
+export const SABBATH_FROM = '2026-11-21T12:00:00.000Z'
+/** A Sabbath's score for the night's tick: the same floor a freeze gives. */
+const REST_SCORE = 60
 /** From this moment, yesterday's tasks can still be ticked off (raised, never
  *  lowered) after its night has passed: the late ticks earn their action and
  *  score, and the village gets the extra share of that night's harvest. */
@@ -270,6 +277,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
     case 'progress': {
       const d = p.days[ev.date]
       if (ev.slot < 0 || ev.slot >= PLAN_SIZES.length) return 'No such slot'
+      if (isSabbath(ev.date) && ev.at >= SABBATH_FROM) return 'Saturday is a day of rest: no tasks, just your habits'
       if (d?.ticked) {
         if (!lateTick(p, ev)) return 'That day is already over'
         const val = (st: string) => (st === 'full' ? 1 : st === 'half' ? 0.5 : 0)
@@ -303,6 +311,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       return null
     }
     case 'freeze':
+      if (isSabbath(ev.date) && ev.at >= SABBATH_FROM) return 'Saturday is already a day of rest'
       if (p.freezes <= 0) return 'No freezes left this week'
       if (p.days[ev.date]?.frozen) return 'Already frozen'
       if (p.days[ev.date]?.ticked) return 'That day is already over'
@@ -837,7 +846,8 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
   const winter = season === 'winter'
   const rng = rngFor(s.worldSeed, 'tick', p.id, ev.date)
   const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
-  const score = d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
+  const rest = isSabbath(ev.date) && ev.at >= SABBATH_FROM
+  const score = rest ? REST_SCORE : d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
   const notes: string[] = []
 
   // 1. production

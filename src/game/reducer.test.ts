@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { actionSize, apply, BRIDGES_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { actionSize, apply, BRIDGES_FROM, SABBATH_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
@@ -227,6 +227,22 @@ describe('half-done actions merge in pairs', () => {
     apply(s, world, ev('progress', 'ann', at, { date: day, slot: 4, status: 'half' }))
     const [a, b] = p.tokens
     expect(validate(s, world, ev('act', 'ann', at, { tokenId: a.id, tokenId2: b.id, action: 'scout', col: v.col + 4, row: v.row }))).toMatch(/half-done/)
+  })
+})
+
+describe('the Sabbath (Saturday)', () => {
+  const sat = '2026-11-28'
+  it('has no tasks to tick, but habits still count', () => {
+    const s = setup()
+    const at = `${sat}T10:00:00Z`
+    expect(at >= SABBATH_FROM).toBe(true)
+    expect(validate(s, world, ev('progress', 'ann', at, { date: sat, slot: 0, status: 'full' }))).toMatch(/rest/)
+    expect(validate(s, world, ev('freeze', 'ann', at, { date: sat }))).toMatch(/rest/)
+    apply(s, world, ev('habitAdd', 'ann', at, { habit: { id: 'walk', name: 'Walk', effect: 'movement' } }))
+    apply(s, world, ev('habit', 'ann', at, { date: sat, habitId: 'walk', done: true }))
+    const streak = s.players.ann.perfectStreak
+    apply(s, world, ev('tick', 'ann', `${addDays(sat, 1)}T00:05:00Z`, { date: sat }))
+    expect(s.players.ann.perfectStreak).toBe(streak + 1)
   })
 })
 
