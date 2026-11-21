@@ -89,6 +89,9 @@ export interface Caravan {
   goods: Goods
   departAt: string
   arriveAt: string
+  /** on arrival: the two villages' names, kept in case one is later abandoned */
+  fromName?: string
+  toName?: string
 }
 
 export interface LairState {
@@ -112,6 +115,8 @@ export interface GameState {
   players: Record<string, Player>
   villages: Record<string, Village>
   caravans: Caravan[]
+  /** the latest caravans to arrive (newest last), for the world's caravan page */
+  arrived?: Caravan[]
   lairs: LairState[]
   /** hexes any player has seen: fog of war is shared by the whole world */
   revealed: number[]
@@ -153,7 +158,7 @@ export type GameEvent =
   /** log progress toward a habit's daily goal (negative to correct a mistake) */
   | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
-  | (Base & { t: 'act'; tokenId: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
+  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */

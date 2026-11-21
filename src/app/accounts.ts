@@ -39,3 +39,17 @@ export function awayAccount(): string | null {
 export function setAway(email: string | null) {
   try { if (email) localStorage.setItem(AWAY_KEY, email); else localStorage.removeItem(AWAY_KEY) } catch { /* private mode */ }
 }
+
+/** An account picked on this device whose kept session has gone: the sign-in
+ *  screen emails it a code straight away (this tab only). */
+const SIGNIN_AS_KEY = 'quex:signin-as'
+export function takeSignInAs(): string | null {
+  try { const e = sessionStorage.getItem(SIGNIN_AS_KEY); sessionStorage.removeItem(SIGNIN_AS_KEY); return e } catch { return null }
+}
+export function setSignInAs(email: string) {
+  try { sessionStorage.setItem(SIGNIN_AS_KEY, email) } catch { /* private mode */ }
+}
+
+/** Load the app fresh as whoever is signed in now, in that account's own
+ *  world (no ?seed= or sign-in leftovers from the account before). */
+export function reloadAsAccount() { location.replace(location.origin + location.pathname) }

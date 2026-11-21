@@ -104,14 +104,24 @@ input { -webkit-user-select: text; user-select: text; }
 
 /* tokens tray */
 .tray { position: absolute; left: 8px; right: 8px; z-index: 3; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+/* A disk per action, in font pixels (1/16 em, 2px at 32px): the 7-pixel-tall
+   letter (B/S 5 wide, M 7 wide) with 1 pixel clear all round = a 9-pixel disk,
+   plus a 1-pixel ink rim. line-height 0.5em puts the baseline 8 pixels down
+   (checked in Chrome: 1 pixel clear above and below). Padding-left + width 8
+   centres each letter's ink, whose advance carries 1 pixel of spacing on the right. */
 .token {
-  --c: var(--ink); pointer-events: auto; border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
-  min-width: 2em; padding: 2px 6px 4px; text-align: center; color: white; background: var(--c);
+  --c: var(--ink); pointer-events: auto; font-size: 32px; box-sizing: content-box;
+  width: 0.5em; height: 0.5625em; padding-left: 0.0625em; line-height: 0.5em;
+  border: 0.0625em solid var(--ink); border-radius: 50%; box-shadow: 0 0.0625em 0 var(--ink);
+  text-align: center; color: white; background: var(--c); align-self: center;
 }
 .token.big { --c: var(--big); } .token.medium { --c: var(--medium); } .token.small { --c: var(--small); }
-/* half done: only the bottom half is filled, and it can't be spent yet */
+/* half done: only the bottom half is filled, and it can't be spent until another half joins it */
 .token.half { color: var(--ink); background: linear-gradient(to top, var(--c) 50%, var(--paper) 50%); }
-.token.hint { background: var(--ink); min-width: 0; }
+.tray-hint {
+  pointer-events: auto; border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 2px 6px 4px; color: white; background: var(--ink);
+}
 
 /* today slots */
 .slot { display: grid; grid-template-columns: 46px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--paper-2); }
@@ -223,7 +233,7 @@ body {
 input, textarea, select { font-size: inherit; }
 h1, h2, h3 { font-size: inherit; }
 /* tiny notes: one font pixel per screen pixel */
-small, .size, .token small, .water-hist small, .btn small, .action small {
+small, .size, .water-hist small, .btn small, .action small {
   font-size: 1rem; font-size: round(nearest, 1rem, 8px); line-height: 0.85;
 }
 .card h1 { font-size: 3rem; font-size: round(nearest, 3rem, 16px); letter-spacing: 0.0625em; }
@@ -283,3 +293,9 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 /* prospecting button (on while dimming everything but deposits) */
 .btn.icon.on { background: var(--gold); }
 .inspector .deposit { color: var(--ink); }
+
+/* caravan page */
+.caravan-list { list-style: none; margin: 0; padding: 0; }
+.caravan-list li { padding: 6px 0; border-bottom: 2px dashed var(--paper-2); }
+.caravan-list li:last-child { border-bottom: 0; }
+.caravan-list .mine { color: var(--medium); }

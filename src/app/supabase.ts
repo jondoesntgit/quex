@@ -17,18 +17,20 @@ const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
 export const supabaseEnabled = !!(URL_ && KEY)
 
+/** A suffix that makes each realtime channel's topic unique. */
+const topicId = () => Math.random().toString(36).slice(2, 10)
+
 let client: Promise<SupabaseClient> | null = null
 function getClient(): Promise<SupabaseClient> {
-  return (client ??= import('@supabase/supabase-js').then(({ createClient }) =>
-    createClient(URL_!, KEY!, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })))
-    .then((sb) => {
-      // keep this account's newest tokens for switching back to it later
-      sb.auth.onAuthStateChange((_ev, session) => {
-        const email = session?.user.email
-        if (session && email && !session.user.is_anonymous) saveSession(email, session)
-      })
-      return sb
+  return (client ??= import('@supabase/supabase-js').then(({ createClient }) => {
+    const sb = createClient(URL_!, KEY!, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+    // keep this account's newest tokens for switching back to it later (registered once)
+    sb.auth.onAuthStateChange((_ev, session) => {
+      const email = session?.user.email
+      if (session && email && !session.user.is_anonymous) saveSession(email, session)
     })
+    return sb
+  }))
 }
 
 /** The shared world, or 'signin' when nobody is signed in with an email yet
@@ -246,7 +248,9 @@ export class SupabaseStore implements EventStore {
   }
 
   subscribe(cb: (ev: GameEvent) => void) {
-    const ch = this.sb.channel(`events:${this.world}`)
+    // a topic of its own: supabase-js hands back an existing channel for a
+    // repeated topic, and adding callbacks to one already subscribed throws
+    const ch = this.sb.channel(`events:${this.world}:${topicId()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: `world=eq.${this.world}` },
         (msg) => { const ev = (msg.new as { body: GameEvent }).body; this.remember(ev); cb(ev) })
       .subscribe()
@@ -311,7 +315,7 @@ export class SupabaseStore implements EventStore {
 
   /** Live task-name edits (from a parent or child) and guardian changes. */
   watch(onLabel: (r: { player_id: string; date: string; slot: number; text: string }) => void, onAccess: () => void) {
-    const ch = this.sb.channel(`private:${this.world}`)
+    const ch = this.sb.channel(`private:${this.world}:${topicId()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_labels' },
         (msg) => { if (msg.new && 'player_id' in msg.new) onLabel(msg.new as { player_id: string; date: string; slot: number; text: string }) })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_guardians', filter: `world=eq.${this.world}` }, () => onAccess())

@@ -4,7 +4,7 @@ import { clearMeta, eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
 import { TodayPanel } from './Panels'
 import { Help } from './Help'
-import { awayAccount, forgetAccount, rememberAccount, rememberedAccounts } from '../app/accounts'
+import { awayAccount, forgetAccount, reloadAsAccount, rememberAccount, rememberedAccounts, setSignInAs, takeSignInAs } from '../app/accounts'
 import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldName, worldUrl } from '../app/worlds'
 
 /** Full-screen sign-in in front of the shared world: Google, an emailed
@@ -39,7 +39,24 @@ export function SignIn() {
     setBusy(true); setErr(null)
     try { await f() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
-  const send = () => run(async () => { await account.sendCode(email.trim()); setSent('email') })
+  const sendTo = (to: string) => run(async () => { await account.sendCode(to); setSent('email') })
+  const send = () => sendTo(email.trim())
+  // picked on the account switcher, but its kept sign-in had gone: email it a code now
+  useEffect(() => {
+    const e = takeSignInAs()
+    if (e) { setEmail(e); setMode('code'); void sendTo(e) }
+  }, [])
+  /** Tap a remembered account: switch to its kept sign-in, or (gone or run
+   *  out) email it a code, so a tap always leads into that account. */
+  const pickAccount = (e: string) => run(async () => {
+    setEmail(e); setMode('code'); setCode('')
+    if (account.hasSession(e)) {
+      try { await account.switchTo(e); clearMeta(); reloadAsAccount(); return } catch { /* run out: sign in again below */ }
+    }
+    setRecent(rememberedAccounts())
+    await account.sendCode(e)
+    setSent('email')
+  })
   const verify = () => run(async () => { await account.verify(email.trim(), code, sent ?? 'email'); location.reload() })
   const signInPw = () => run(async () => { await account.signInPassword(email.trim(), password); location.reload() })
   const signUpPw = () => run(async () => {
@@ -86,12 +103,10 @@ export function SignIn() {
                 <label>Accounts on this device</label>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                   {recent.map((e) => (
-                    <span key={e} className={`btn chipbtn ${email === e ? 'primary' : ''}`}
-                      title={account.hasSession(e) ? 'Switch to this account' : 'Sign in again to this account'}
-                      onClick={() => {
-                        setEmail(e)
-                        if (account.hasSession(e)) void run(async () => { await account.switchTo(e); clearMeta(); location.reload() })
-                      }}>
+                    <span key={e} role="button" tabIndex={0} className={`btn chipbtn ${email === e ? 'primary' : ''}`}
+                      title={account.hasSession(e) ? 'Switch to this account' : 'Email this account a sign-in code'}
+                      onClick={() => { if (!busy) void pickAccount(e) }}
+                      onKeyDown={(ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && !busy) { ev.preventDefault(); void pickAccount(e) } }}>
                       {e}<button type="button" className="x" title="Forget on this device" onClick={(ev) => { ev.stopPropagation(); forgetAccount(e); setRecent(rememberedAccounts()) }}>×</button>
                     </span>
                   ))}
@@ -125,7 +140,7 @@ export function SignIn() {
         {err && <p style={{ color: 'var(--danger)' }}>{err}</p>}
         {!sent && canGoBack && (
           <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
-            <button className="btn" disabled={busy} onClick={() => run(async () => { await account.switchTo(away!); clearMeta(); location.reload() })}>← Back to {away}</button>
+            <button className="btn" disabled={busy} onClick={() => run(async () => { await account.switchTo(away!); clearMeta(); reloadAsAccount() })}>← Back to {away}</button>
           </div>
         )}
         {!sent && (
@@ -401,8 +416,10 @@ function AccountPicker({ current, onCancel }: { current: string; onCancel: () =>
   const others = rememberedAccounts().filter((e) => e !== current)
   const go = async (f: () => Promise<void>) => {
     setBusy(true); setErr(null)
-    try { await f(); clearMeta(); location.reload() } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false) }
+    try { await f(); clearMeta(); reloadAsAccount() } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false) }
   }
+  /** Sign in to this account again: step away to the sign-in screen, which emails it a code. */
+  const signInAgain = async (e: string) => { rememberAccount(e); setSignInAs(e); await account.stepAway() }
   return (
     <div className="modal" onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}>
       <div className="card">
@@ -413,10 +430,10 @@ function AccountPicker({ current, onCancel }: { current: string; onCancel: () =>
           return (
             <button key={e} className="btn choice" disabled={busy}
               onClick={() => go(async () => {
-                if (kept) await account.switchTo(e)
-                else { rememberAccount(e); await account.stepAway() } // sign in to it again, with its email filled in
+                if (kept) { try { await account.switchTo(e); return } catch { /* run out: sign in again */ } }
+                await signInAgain(e)
               })}>
-              {e}{!kept && <span className="muted"> · sign in again</span>}
+              {e}{!kept && <span className="muted"> · email a sign-in code</span>}
             </button>
           )
         })}

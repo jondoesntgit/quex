@@ -4,6 +4,7 @@ import { account, createSupabaseStore, PrivateWorldError, SupabaseStore } from '
 import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/worlds'
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
+import { Caravans } from './ui/Caravans'
 import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { MapView } from './render/MapView'
@@ -12,7 +13,7 @@ import { dayScore, foundingBlockedCells } from './game/reducer'
 import { Inspector } from './ui/Inspector'
 import { Onboarding, type Spot } from './ui/Onboarding'
 import { GuestPanel, LogPanel, PartyPanel, TodayPanel, VillagePanel } from './ui/Panels'
-import { linkedSpot, SIZE_LABEL, useGame } from './ui/helpers'
+import { linkedSpot, SIZE_LABEL, spendables, useGame } from './ui/helpers'
 import { Icon } from './ui/Icon'
 
 type Tab = 'today' | 'village' | 'party' | 'log'
@@ -24,6 +25,9 @@ export default function App() {
   const [privateWorld, setPrivateWorld] = useState(false)
   useEffect(() => {
     let g: Game | null = null
+    // React may run this twice (StrictMode in development): the first run's
+    // game is thrown away as soon as it's built, so only one stays subscribed
+    let gone = false
     ;(async () => {
       try {
         // which world: the link's ?seed=, else this device's world, else the
@@ -47,6 +51,7 @@ export default function App() {
           if (e instanceof PrivateWorldError) return setPrivateWorld(true)
           throw e
         }
+        if (gone) { g.dispose(); return }
         if (remote?.guest) {
           // looking around: nobody to play as, nothing to save
           g.meta = { ...meta, localPlayers: [], activePlayer: null }
@@ -82,13 +87,14 @@ export default function App() {
           const info = await account.info()
           if (info?.email) { rememberAccount(info.email); setAway(null) }
         }
+        if (gone) { g.dispose(); return }
         setGame(g)
       } catch (e) {
         console.error(e)
         setError(String(e))
       }
     })()
-    return () => g?.dispose()
+    return () => { gone = true; g?.dispose() }
   }, [])
   if (needSignIn) return <SignIn />
   if (privateWorld) return (
@@ -125,6 +131,7 @@ function Main({ game }: { game: Game }) {
   const [toast, setToast] = useState<string | null>(null)
   const [showAccount, setShowAccount] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [showCaravans, setShowCaravans] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
   // one-off message from startup (e.g. accepting a parent link)
   useEffect(() => {
@@ -250,6 +257,9 @@ function Main({ game }: { game: Game }) {
         {game.store instanceof SupabaseStore && game.store.offline && (
           <span className="chip" title="No connection: you're playing from this device's copy of the world. Your changes will send when you're back online.">📴 Offline</span>
         )}
+        <button className="chip" onClick={() => setShowCaravans(true)} title="Caravans on the road and lately arrived">
+          Caravans{game.state.caravans.length > 0 && ` · ${game.state.caravans.length}`}
+        </button>
         <button className="chip" onClick={() => setShowHelp(true)} title="How to play" aria-label="How to play">?</button>
         {game.guest && <span className="chip" title="You're looking around: you can't change anything here">👀 Visiting</span>}
         {game.guest && game.meta.worldSeed !== SANDBOX_WORLD && (
@@ -274,13 +284,14 @@ function Main({ game }: { game: Game }) {
 
       {p && p.tokens.length > 0 && !sel && (
         <div className="tray" style={{ bottom: collapsed ? 54 : 'calc(52% + 8px)' }}>
-          {p.tokens.map((t) => (
+          {spendables(p).map((t) => (
             <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''}`}
-              title={t.strength < 1 ? `Half-done ${t.size} task: finish it to use this action` : `${SIZE_LABEL[t.size]} action`}>
+              title={t.strength < 1 ? `Half-done ${t.size} task: finish it, or half-do another task, to use this action`
+                : t.tok2 ? `${SIZE_LABEL[t.size]} action (two half-done tasks)` : `${SIZE_LABEL[t.size]} action`}>
               {t.size === 'big' ? 'B' : t.size === 'medium' ? 'M' : 'S'}
             </span>
           ))}
-          <span className="token hint">{p.tokens.some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>
+          <span className="tray-hint">{spendables(p).some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>
         </div>
       )}
 
@@ -312,6 +323,7 @@ function Main({ game }: { game: Game }) {
       )}
       {showAccount && <Account game={game} onClose={() => setShowAccount(false)} notify={notify} />}
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
+      {showCaravans && <Caravans game={game} onClose={() => setShowCaravans(false)} />}
       {mapError && (
         <div className="modal"><div className="card">
           <h2 style={{ marginTop: 0 }}>The map didn't load</h2>

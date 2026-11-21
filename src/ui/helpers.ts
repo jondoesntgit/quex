@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from 'react'
-import { SIZE_RANK, type ActionKind, type BuildingId } from '../game/data'
+import { SIZE_RANK, type ActionKind, type BuildingId, type TaskSize } from '../game/data'
 import { actionSize, validate } from '../game/reducer'
 import type { World } from '../world/types'
 import type { GameEvent, Player, Token } from '../game/types'
@@ -14,16 +14,39 @@ export function useGame(game: Game | null) {
   }, [game])
 }
 
-/** Smallest sufficient whole token (half-done ones can't be spent). */
-export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Token | null {
-  const ok = p.tokens.filter((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
-  ok.sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size])
+/** An action a player can spend: a whole token, or two half-done ones of the
+ *  same size merged (the second in `tok2`) into a whole action of that size. */
+export interface Spendable { id: string; size: TaskSize; strength: number; tok: Token; tok2?: Token }
+
+/** Everything in the tray: whole tokens, then half-done ones paired with a
+ *  half of the same size into wholes, then the unpaired halves (at most one per
+ *  size), which can't be spent until another half of their size joins them. */
+export function spendables(p: Player): Spendable[] {
+  const one = (t: Token): Spendable => ({ id: t.id, size: t.size, strength: t.strength, tok: t })
+  const pair = (a: Token, b: Token): Spendable => ({ id: `${a.id}+${b.id}`, size: a.size, strength: Math.min(1, a.strength + b.strength), tok: a, tok2: b })
+  const out = p.tokens.filter((t) => t.strength >= 1).map(one)
+  const left: Spendable[] = []
+  for (const size of ['big', 'medium', 'small'] as const) {
+    const hs = p.tokens.filter((t) => t.strength < 1 && t.size === size)
+    for (let i = 0; i + 1 < hs.length; i += 2) out.push(pair(hs[i], hs[i + 1]))
+    if (hs.length % 2) left.push(one(hs[hs.length - 1]))
+  }
+  return [...out, ...left]
+}
+
+/** Smallest sufficient whole action (a lone half-done one can't be spent). */
+export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Spendable | null {
+  const ok = spendables(p).filter((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
+  ok.sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size] || (a.tok2 ? 1 : 0) - (b.tok2 ? 1 : 0))
   return ok[0] ?? null
 }
 
-export function actEvent(game: Game, p: Player, tok: Token, action: ActionKind, col: number, row: number,
+export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKind, col: number, row: number,
   extra: { building?: BuildingId; to?: string; goods?: Record<string, number> } = {}): GameEvent {
-  return { t: 'act', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: tok.id, action, col, row, ...extra }
+  return {
+    t: 'act', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: tok.tok.id,
+    ...(tok.tok2 ? { tokenId2: tok.tok2.id } : {}), action, col, row, ...extra,
+  }
 }
 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
@@ -33,7 +56,7 @@ export function tryAction(game: Game, p: Player, action: ActionKind, col: number
   if (!tok) {
     const need = size
     const half = p.tokens.some((t) => t.strength < 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
-    return { ev: null, error: half ? `Finish your half-done ${need} task to unlock this` : `Finish a ${need} task to unlock this` }
+    return { ev: null, error: half ? `Finish your half-done ${need} task (or half-do another ${need} one) to unlock this` : `Finish a ${need} task to unlock this` }
   }
   const ev = actEvent(game, p, tok, action, col, row, extra)
   const error = validate(game.state, game.world, ev)

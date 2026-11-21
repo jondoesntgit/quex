@@ -12,7 +12,7 @@ import {
   ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
-import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Village } from './types'
+import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
@@ -68,9 +68,13 @@ export function territoryCells(world: World, v: Village): number[] {
  *  village's territory and anyone else's. */
 /** Rules that changed on 2026-11-18 apply only to events from this moment on,
  *  so replaying older events still gives everyone the villages they had:
- *  - half-done (½) action tokens can no longer be spent;
- *  - unspent tokens last until the end of winter (Saturday night) instead of a day. */
+ *  - half-done (½) action tokens can no longer be spent (alone: see spentToken);
+ *  - unspent tokens last until the end of winter (Saturday night) instead of a day
+ *    (and from KEEP_TOKENS_FROM, for good). */
 export const WEEKLY_TOKENS_FROM = '2026-11-18T22:00:00.000Z'
+/** From this moment unspent actions never expire: they keep until the world's
+ *  season ends (before it, winter cleared them each Saturday night). */
+export const KEEP_TOKENS_FROM = '2026-11-21T12:00:00.000Z'
 /** From this moment, yesterday's tasks can still be ticked off (raised, never
  *  lowered) after its night has passed: the late ticks earn their action and
  *  score, and the village gets the extra share of that night's harvest. */
@@ -324,9 +328,22 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   }
 }
 
-function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extract<GameEvent, { t: 'act' }>): string | null {
+/** The action an act spends: one token, or two half-done tokens of the same
+ *  size merged into a whole action of that size. A string is why it can't. */
+export function spentToken(p: Player, ev: { tokenId: string; tokenId2?: string }): Token | string {
   const tok = p.tokens.find((t) => t.id === ev.tokenId)
   if (!tok) return 'That action token has been used'
+  if (!ev.tokenId2) return tok
+  const tok2 = p.tokens.find((t) => t.id === ev.tokenId2)
+  if (!tok2 || tok2.id === tok.id) return 'That action token has been used'
+  if (tok.strength >= 1 || tok2.strength >= 1) return 'Only half-done actions merge'
+  if (tok.size !== tok2.size) return 'Only half-done actions of the same size merge'
+  return { ...tok, strength: Math.min(1, tok.strength + tok2.strength) }
+}
+
+function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extract<GameEvent, { t: 'act' }>): string | null {
+  const tok = spentToken(p, ev)
+  if (typeof tok === 'string') return tok
   if (tok.strength < 1 && ev.at >= WEEKLY_TOKENS_FROM) return 'Finish the task to use this action'
   const need = actionSize(world, ev.action, ev.col, ev.row, ev.at)
   if (ev.action === 'build') {
@@ -613,12 +630,13 @@ function consumeToken(p: Player, id: string) {
 
 function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 'act' }>) {
   const v = s.villages[p.villageId]
-  const tok = p.tokens.find((t) => t.id === ev.tokenId)!
+  const tok = spentToken(p, ev) as Token
   const k = tok.strength
   const i = cellIndex(world, ev.col, ev.row)
   const rng = rngFor(s.worldSeed, ev.id)
   const land0 = landAt(world, s, i)
-  consumeToken(p, tok.id)
+  consumeToken(p, ev.tokenId)
+  if (ev.tokenId2) consumeToken(p, ev.tokenId2)
   switch (ev.action) {
     case 'scout': {
       const camp = done(v).some((b) => b.type === 'scout_camp') ? 1 : 0
@@ -686,9 +704,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'caravan': {
       const to = s.villages[ev.to!]
       addGoods(v, ev.goods!, -1)
-      const dist = distance(v, to)
-      const walked = p.days[ev.at.slice(0, 10)]?.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === 'movement')
-      const mins = dist * 20 * (walked ? 0.6 : 1)
+      const mins = caravanMinutes(p, v, to, ev.at)
       s.caravans.push({
         id: ev.id, from: v.id, to: to.id, goods: ev.goods!, departAt: ev.at,
         arriveAt: new Date(Date.parse(ev.at) + mins * 60_000).toISOString(),
@@ -759,6 +775,16 @@ const CHEEK = {
   },
 } as const
 
+/** How long a caravan from `from` to `to` sent at `at` takes on the road:
+ *  20 minutes a hex, less on a day its sender ticked a walking habit. */
+export function caravanMinutes(p: Player, from: Village, to: Village, at: string): number {
+  const walked = p.days[at.slice(0, 10)]?.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === 'movement')
+  return distance(from, to) * 20 * (walked ? 0.6 : 1)
+}
+
+/** How many arrived caravans the world remembers for its caravan page. */
+const ARRIVED_KEPT = 40
+
 function deliverCaravans(s: GameState, at: string) {
   const now = Date.parse(at)
   const arrived = s.caravans.filter((c) => Date.parse(c.arriveAt) <= now)
@@ -767,6 +793,7 @@ function deliverCaravans(s: GameState, at: string) {
   for (const c of arrived) {
     const to = s.villages[c.to]
     if (!to) continue
+    s.arrived = [...(s.arrived ?? []), { ...c, fromName: s.villages[c.from]?.name, toName: to.name }].slice(-ARRIVED_KEPT)
     addGoods(to, c.goods)
     const gift = Object.keys(c.goods).some((g) => ['berries', 'cheese', 'relic', 'cloth', 'bread', 'tin'].includes(g))
     if (gift) to.morale = Math.min(100, to.morale + 2)
@@ -913,10 +940,10 @@ function tick(s: GameState, _world: World, p: Player, ev: Extract<GameEvent, { t
   // trees spread back each winter (felled ones were stumps until now)
   if (winter && ev.at >= TREES_FROM) growWoods(s, _world, ev.date)
 
-  // 8. tokens are for spending: unspent ones expire at the end of winter
-  // (before the weekly rule: a day after they were earned)
+  // 8. unspent tokens keep (before KEEP_TOKENS_FROM they expired at the end of
+  // winter, and before the weekly rule a day after they were earned)
   if (ev.at < WEEKLY_TOKENS_FROM) p.tokens = p.tokens.filter((t) => t.date >= ev.date)
-  else if (winter) p.tokens = []
+  else if (winter && ev.at < KEEP_TOKENS_FROM) p.tokens = []
   d.ticked = true
   p.lastTick = ev.date
 

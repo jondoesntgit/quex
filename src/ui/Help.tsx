@@ -47,7 +47,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <p>
             Every task you finish earns an action of the same size, shown at the bottom of the map as <b>B</b>,{' '}
             <b>M</b> or <b>S</b>. A half-done task shows a half-filled action: it still counts toward your score,
-            but the action can only be spent once you finish the task. A bigger action can pay for a smaller one.
+            and two half-done actions of the same size join into a whole one you can spend. A bigger action can pay for a smaller one.
             Tap a hex on the map to see what you can do there.
           </p>
           <ul>
@@ -56,8 +56,8 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li><b>Big:</b> {bySize('big').map((a) => a.name).join(', ')}.</li>
           </ul>
           <p>
-            Unspent actions last all week and fade when winter ends on Saturday night. There's nothing to gain by
-            saving them: buildings start producing the night they're finished, and monster lairs only grow stronger.
+            Unspent actions keep until the season ends, so a half-done one can wait for a partner. There's little to
+            gain by saving them, though: buildings start producing the night they're finished, and monster lairs only grow stronger.
           </p>
         </details>
 

@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { actionSize, buildCost, buildingAt, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { actionSize, buildCost, buildingAt, caravanMinutes, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
+import { clockTime, span } from './Caravans'
 
 
 /** What a deposit is good for (shown on the hex card). */
@@ -168,10 +169,16 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
   const [load, setLoad] = useState<Record<string, number>>({})
   const total = Object.values(load).reduce((a, n) => a + n, 0)
   const have = Object.entries(v.goods).filter(([, n]) => (n ?? 0) >= 1) as [Good, number][]
+  const now = game.now()
+  const mins = caravanMinutes(p, v, game.state.villages[to], now.toISOString())
+  const arrive = new Date(now.getTime() + mins * 60_000)
   return (
     <Shell onClose={onBack} title={`Caravan to ${game.state.villages[to].name}`}>
       <button className="btn ghost" onClick={onBack}>← back</button>
-      <p className="muted">Up to 15 goods (6 on a half-finished task). Gifts of food or rare goods cheer them up.</p>
+      <p className="muted">Up to 15 goods. Gifts of food or rare goods cheer them up.</p>
+      <p style={{ margin: '4px 0 8px' }}>
+        Sent now, it arrives <b>{clockTime(arrive, now)}</b> <span className="muted">({span(mins * 60_000)} on the road, your phone's time)</span>
+      </p>
       {have.map(([g, n]) => (
         <div key={g} className="row" style={{ justifyContent: 'space-between' }}>
           <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(n)})</span></span>

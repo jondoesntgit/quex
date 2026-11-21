@@ -194,6 +194,42 @@ describe('bridges', () => {
   })
 })
 
+describe('half-done actions merge in pairs', () => {
+  const day = '2026-11-22' // a Sunday after half tokens stopped being spendable alone
+  const at = `${day}T10:00:00Z`
+  it('two halves spend as one whole action, and both are used up', () => {
+    const s = setup()
+    const p = s.players.ann
+    const v = s.villages[p.villageId]
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 3, status: 'half' }))
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: p.tokens[0].id, action: 'scout', col: v.col + 4, row: v.row }))).toMatch(/Finish/)
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 4, status: 'half' }))
+    const [a, b] = p.tokens
+    const before = s.revealed.length
+    apply(s, world, ev('act', 'ann', at, { tokenId: a.id, tokenId2: b.id, action: 'scout', col: v.col + 4, row: v.row }))
+    expect(s.revealed.length).toBeGreaterThan(before)
+    expect(p.tokens).toHaveLength(0)
+  })
+  it('halves of different sizes do not merge', () => {
+    const s = setup()
+    const p = s.players.ann
+    const v = s.villages[p.villageId]
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 1, status: 'half' }))
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 3, status: 'half' }))
+    const [a, b] = p.tokens
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: a.id, tokenId2: b.id, action: 'scout', col: v.col + 4, row: v.row }))).toMatch(/same size/)
+  })
+  it('a whole token cannot be merged', () => {
+    const s = setup()
+    const p = s.players.ann
+    const v = s.villages[p.villageId]
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 3, status: 'full' }))
+    apply(s, world, ev('progress', 'ann', at, { date: day, slot: 4, status: 'half' }))
+    const [a, b] = p.tokens
+    expect(validate(s, world, ev('act', 'ann', at, { tokenId: a.id, tokenId2: b.id, action: 'scout', col: v.col + 4, row: v.row }))).toMatch(/half-done/)
+  })
+})
+
 describe('actions', () => {
   it('small tokens cannot build; medium can, and half tokens half-build', () => {
     const s = setup()
@@ -231,6 +267,8 @@ describe('actions', () => {
     apply(s, world, ev('habit', 'bob', `${SUN}T23:00:00Z`, { date: SUN, habitId: 'nope', done: true })) // any later event
     expect(s.caravans).toHaveLength(0)
     expect(s.villages.v_bob.goods.berries).toBe(bobBefore + 3)
+    expect(s.arrived).toHaveLength(1) // kept for the caravan page, with both names
+    expect(s.arrived![0]).toMatchObject({ from: s.players.ann.villageId, to: 'v_bob', fromName: s.villages[s.players.ann.villageId].name, toName: s.villages.v_bob.name })
   })
   it('is deterministic: replaying the same log gives the same state', () => {
     const run = () => {
@@ -298,16 +336,15 @@ describe('nightly tick', () => {
     apply(s, world, ev('tick', 'ann', `${addDays(SUN, 2)}T00:05:00Z`, { date: addDays(SUN, 1) }))
     expect(s.players.ann.tokens).toHaveLength(0)
   })
-  it('from the weekly rule on, tokens last until the end of winter (Saturday night)', () => {
+  it('from the keep rule on, unspent tokens never expire, through winter and beyond', () => {
     const s = setup()
-    const SUN2 = addDays(SUN, 7) // after WEEKLY_TOKENS_FROM
+    const SUN2 = addDays(SUN, 7) // after KEEP_TOKENS_FROM
     apply(s, world, ev('progress', 'ann', `${SUN2}T12:00:00Z`, { date: SUN2, slot: 5, status: 'full' }))
-    for (let k = 0; k < 6; k++) {
+    apply(s, world, ev('progress', 'ann', `${SUN2}T12:00:00Z`, { date: SUN2, slot: 4, status: 'half' }))
+    for (let k = 0; k < 10; k++) {
       apply(s, world, ev('tick', 'ann', `${addDays(SUN2, k + 1)}T00:05:00Z`, { date: addDays(SUN2, k) }))
-      expect(s.players.ann.tokens).toHaveLength(1) // Sunday's token survives every weekday night
+      expect(s.players.ann.tokens).toHaveLength(2) // Saturday's winter included
     }
-    apply(s, world, ev('tick', 'ann', `${addDays(SUN2, 7)}T00:05:00Z`, { date: addDays(SUN2, 6) })) // Saturday: winter ends
-    expect(s.players.ann.tokens).toHaveLength(0)
   })
   it('from the weekly rule on, a half-done task gives a token that cannot be spent until finished', () => {
     const s = setup()
