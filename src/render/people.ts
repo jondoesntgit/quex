@@ -14,13 +14,19 @@
  *  hop, and those whose village it belongs to wander over for a look.
  *
  *  Villagers who cross paths sometimes stop for a natter: they face each
- *  other, gesture, and take turns with a little speech bubble, then carry on. */
+ *  other, gesture, and take turns with a little speech bubble, then carry on.
+ *
+ *  On the Sabbath (Saturday in the village owner's own day) nobody works:
+ *  some go off into nature to read or pray quietly, and the rest gather in
+ *  twos and threes to play the fiddle, flute or drum, little notes rising. */
 import { Container, Graphics } from 'pixi.js'
 import { distance, hexToPixel, neighbours } from '../world/hex'
 import { mulberry32, hashString } from '../world/rng'
 import type { World } from '../world/types'
 import type { GameState, Village } from '../game/types'
-import { territoryCells } from '../game/reducer'
+import { landAt, territoryCells } from '../game/reducer'
+import { isSabbath, playerDate } from '../game/calendar'
+import { hasTrees } from '../world/land'
 import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
 import { bridgeVia } from './waterways'
 
@@ -50,11 +56,50 @@ const CHAT_COOLDOWN: [number, number] = [18, 40] // seconds before chatting agai
 const TALK_A = ['.oooo..', '.oHHo..', '.oHHo..', 'ooSSoo.', 'oSSSSoH', 'ooSSoo.', '.oLLo..', '.oLLo..', '.oooo..']
 const TALK_B = ['.oooo..', '.oHHo.H', '.oHHooS', 'ooSSSo.', 'oSSSSo.', 'ooSSoo.', '.oLLo..', '.oLLo..', '.oooo..']
 // speech bubbles above the speaker: "..." then a little "!" or heart
+// The Sabbath, facing right (mirrored to face left). Sitting with an open
+// book (W pages, B cover); kneeling in prayer, hands together (P frame bows).
+const READ = ['.oooo....', '.oHHo....', '.oHHooo..', 'ooSHWWo..', 'oSSHWBo..', 'oSSSooooo', 'oLLLLLLLo', 'ooooooooo']
+const READ_TURN = ['.oooo....', '.oHHo....', '.oHHoooo.', 'ooSHWWWo.', 'oSSHWWBo.', 'oSSSooooo', 'oLLLLLLLo', 'ooooooooo']
+const PRAY = ['.oooo..', '.oHHo..', '.oHHoo.', 'ooSSoHo', 'oSSSHo.', 'oSSSSo.', 'oLLLLo.', 'oooooo.']
+const PRAY_BOW = ['.......', '.oooo..', '.oHHoo.', 'ooHHoHo', 'oSSSHo.', 'oSSSSo.', 'oLLLLo.', 'oooooo.']
+const LEGS = ['oSSSSo', 'ooSSoo', '.oLLo.', '.oLLo.', '.oooo.']
+// instruments: fiddle under the chin with a bow (F wood), a flute held out
+// at the mouth (I silver), a hand drum at the waist (R shell, W head)
+const PLAY: string[][][] = [
+  [
+    ['.oooo...', '.oHHoFo.', '.oHHFFFo', 'ooSSHFo.', 'oSSSSoTH', 'ooSSooT.', '.oLLo...', '.oLLo...', '.oooo...'],
+    ['.oooo...', '.oHHoFo.', '.oHHFFFo', 'ooSSHFoT', 'oSSSSoHT', 'ooSSoo..', '.oLLo...', '.oLLo...', '.oooo...'],
+  ],
+  [
+    ['.oooo....', '.oHHo....', '.oHHIIIIo', 'ooSHoHo..', ...LEGS],
+    ['.oooo....', '.oHHo....', '.oHHIIIIo', 'ooSoHoH..', ...LEGS],
+  ],
+  [
+    ['.oooo...', '.oHHo.H.', '.oHHo.o.', 'ooSSooo.', 'oSSSoWWo', 'ooSSoRRo', '.oLLoRRo', '.oLLoooo', '.oooo...'],
+    ['.oooo...', '.oHHo...', '.oHHo...', 'ooSSoHo.', 'oSSSoWWo', 'ooSSoRRo', '.oLLoRRo', '.oLLoooo', '.oooo...'],
+  ],
+]
+// a quarter note and an eighth note (k), drawn rising and fading above players
+const NOTES = [['..k', '..k', '..k', 'kkk', 'kk.'], ['..kk.', '..k.k', '..k..', 'kkk..', 'kk...']]
+const REST_TIME: [number, number] = [25, 55] // seconds at a quiet spot before maybe moving on
+const PLAY_TIME: [number, number] = [40, 80] // seconds a band plays before a breather
+
 const BUBBLES = [
   ['.ooooooo.', 'oWWWWWWWo', 'oWkWkWkWo', 'oWWWWWWWo', '.oooooWo.', '......o..'],
   ['.ooooo.', 'oWWWWWo', 'oWWkWWo', 'oWWkWWo', 'oWWWWWo', 'oWWkWWo', 'oWWWWWo', '.oooWo.', '....o..'],
   ['.ooooooo.', 'oWrrWrrWo', 'oWrrrrrWo', 'oWWrrrWWo', 'oWWWrWWWo', '.oooooWo.', '......o..'],
 ]
+
+/** What a villager does on the Sabbath, and where. */
+interface Rest {
+  kind: 'read' | 'pray' | 'play'
+  cell: number
+  p: Pt
+  /** instrument (index into PLAY) for players */
+  inst: number
+  /** face left (toward the band, or just to look the other way) */
+  left: boolean
+}
 
 interface Walker {
   g: Graphics
@@ -73,11 +118,14 @@ interface Walker {
   chat: { with: Walker; until: number; first: boolean; topic: number } | null
   chatAgain: number // clock time before which this villager won't stop to talk
   pose: Pose | null // last pose (for meeting checks)
+  rest: Rest | null // Sabbath plans (null on working days)
+  resting: boolean // at the Sabbath spot, reading / praying / playing
+  phase: number // offsets the music so a band doesn't play in lockstep
 }
 
 interface Puff { g: Graphics; cell: number; x: number; y: number; t: number }
 
-interface Plan { home: number; spots: number[]; land: Set<number>; blocked: Set<number> }
+interface Plan { home: number; spots: number[]; land: Set<number>; blocked: Set<number>; nature: number[]; open: number[] }
 
 export class People {
   private walkers: Walker[] = []
@@ -92,6 +140,10 @@ export class People {
   private puffs: Puff[] = []
   private clock = 0
   private parent: Container | null = null
+  private state: GameState | null = null
+  /** village id -> the owner's date when it is their Sabbath (absent otherwise) */
+  private sabbath = new Map<string, string>()
+  private sabbathCheck = 0
 
   constructor(W: number, TP: number) {
     this.W = W
@@ -113,6 +165,7 @@ export class People {
    *  new roads only update routes (and get a puff and an audience). */
   sync(world: World, state: GameState, revealed: Set<number>) {
     this.world = world
+    this.state = state
     const vs = Object.values(state.villages)
     const roads = new Set(vs.flatMap((v) => v.roads))
     const fresh = this.roadsSeen ? [...roads].filter((r) => !this.roads.has(r)) : []
@@ -128,10 +181,12 @@ export class People {
       for (const w of this.walkers) w.g.destroy()
       this.walkers = []
       for (const v of vs) this.spawn(world, v, revealed)
+      this.sabbath.clear() // fresh crowd: hand out Sabbath plans again
     } else if (roadsChanged) {
       for (const v of vs) this.plans.set(v.id, this.planFor(world, v, revealed))
     }
     for (const r of fresh) this.newRoad(r)
+    this.checkSabbath()
   }
 
   /** Where a village's people may go: its land and roads, and what's worth visiting. */
@@ -151,7 +206,12 @@ export class People {
     const rest = [...land].filter((i) => i !== home)
     const rng = mulberry32(hashString(v.id))
     for (let k = 0; k < 3 && rest.length; k++) spots.push(rest[Math.floor(rng() * rest.length)])
-    return { home, spots, land, blocked }
+    // for the Sabbath: quiet places among the trees (else any open land), and
+    // open ground (not a building's hex) where a band can gather
+    const open = rest.filter((i) => !blocked.has(i))
+    const wooded = this.state ? open.filter((i) => hasTrees(landAt(world, this.state!, i))) : []
+    const nature = wooded.length ? wooded : open.filter((i) => !v.roads.includes(i))
+    return { home, spots, land, blocked, nature: nature.length ? nature : open, open }
   }
 
   private spawn(world: World, v: Village, revealed: Set<number>) {
@@ -163,6 +223,7 @@ export class People {
       const r = mulberry32(hashString(`${v.id}-${k}`))
       const w: Walker = {
         g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null, chat: null, chatAgain: r() * 10, pose: null,
+        rest: null, resting: false, phase: r(),
         at: { cell: home, p: this.spot(home, blocked.has(home), r) }, rng: r,
         shirt: SHIRT[v.role] ?? 0xd0d0d0, skin: SKIN[Math.floor(r() * SKIN.length)],
       }
@@ -228,6 +289,8 @@ export class People {
 
   private plan(w: Walker) {
     const P = this.plans.get(w.vid)!
+    w.resting = false
+    if (w.rest) return this.planRest(w, P)
     const from = w.at.cell
     const goal = from === P.home && P.spots.length ? P.spots[Math.floor(w.rng() * P.spots.length)] : P.home
     const path = this.cells(from, goal, P.land)
@@ -239,6 +302,86 @@ export class People {
     w.end = routeTime(w.route)
     w.at = { cell: dest, p: end }
     w.working = dest !== P.home && P.blocked.has(dest)
+  }
+
+  // ------------------------------------------------------------ the Sabbath
+
+  /** Whose Sabbath it is: each village follows its owner's own day. Called on
+   *  sync and every 20 s, so the crowd notices Saturday arriving and ending. */
+  private checkSabbath() {
+    const s = this.state
+    if (!s) return
+    const now = new Date()
+    for (const v of Object.values(s.villages)) {
+      const o = s.players[v.playerId]
+      const date = o ? playerDate(now, o.resetHour, o.tz) : now.toISOString().slice(0, 10)
+      const was = this.sabbath.get(v.id)
+      const is = isSabbath(date) ? date : undefined
+      if (was === is) continue
+      if (is) this.sabbath.set(v.id, is)
+      else this.sabbath.delete(v.id)
+      this.assignRest(v.id, is)
+    }
+  }
+
+  /** Hand out Sabbath plans to a village's people (or take them back): about
+   *  half play in bands of two or three, the others go off to read or pray. */
+  private assignRest(vid: string, date: string | undefined) {
+    const ws = this.walkers.filter((w) => w.vid === vid)
+    const P = this.plans.get(vid)
+    for (const w of ws) { w.rest = null; w.resting = false; w.wait = Math.min(w.wait, 0.5) }
+    if (!date || !P) return
+    const rng = mulberry32(hashString(`${vid}-sabbath-${date}`))
+    const order = [...ws].sort(() => rng() - 0.5)
+    const pick = (xs: number[]) => xs[Math.floor(rng() * xs.length)]
+    // roughly half play; a pair of villagers either both play or both rest
+    const n = order.length
+    let band = n === 2 ? (rng() < 0.5 ? 2 : 0) : Math.round(n * (0.35 + rng() * 0.3))
+    if (band === 1) band = 2
+    while (band >= 2 && order.length >= 2 && P.open.length) {
+      const size = band >= 3 && order.length >= 3 && rng() < 0.5 ? 3 : 2
+      const cell = pick(P.open)
+      const c = this.spot(cell, false, rng)
+      // side by side facing in, the third a step behind in the middle
+      const seats = size === 2 ? [[-7, 0], [7, 0]] : [[-8, 1], [8, 1], [0, -3]]
+      const first = Math.floor(rng() * PLAY.length)
+      for (let k = 0; k < size; k++) {
+        const w = order.shift()!
+        const [dx, dy] = seats[k]
+        w.rest = { kind: 'play', cell, p: { x: c.x + dx, y: c.y + dy }, inst: (first + k) % PLAY.length, left: dx > 0 }
+      }
+      band -= size
+    }
+    for (const w of order) {
+      const cell = pick(P.nature.length ? P.nature : [P.home])
+      w.rest = { kind: rng() < 0.5 ? 'read' : 'pray', cell, p: this.spot(cell, false, rng), inst: 0, left: rng() < 0.5 }
+    }
+  }
+
+  /** Walk to the Sabbath spot (a quiet reader may move on to another). */
+  private planRest(w: Walker, P: Plan) {
+    const r = w.rest!
+    if (r.kind !== 'play' && w.at.cell === r.cell && w.rng() < 0.4 && P.nature.length) {
+      const cell = P.nature[Math.floor(w.rng() * P.nature.length)]
+      w.rest = { ...r, cell, p: this.spot(cell, false, w.rng), left: w.rng() < 0.5 }
+    }
+    const { cell, p: end } = w.rest!
+    const path = this.cells(w.at.cell, cell, P.land)
+    const dest = path[path.length - 1]
+    const hexes = path.map((i) => ({ ...this.hex(i), blocked: P.blocked.has(i), road: this.roads.has(i), via: this.via(i) }))
+    // couldn't get there: stay where the path ends (a nearby spot) instead
+    const goal = dest === cell ? end : this.spot(dest, P.blocked.has(dest), w.rng)
+    w.route = buildRoute(hexes, w.at.p, goal, this.W, this.TP)
+    w.t = 0
+    w.end = routeTime(w.route)
+    w.at = { cell: dest, p: goal }
+    w.working = false
+    if (w.end <= 0) { w.resting = true; w.wait = this.restTime(w) }
+  }
+
+  private restTime(w: Walker) {
+    const [a, b] = w.rest?.kind === 'play' ? PLAY_TIME : REST_TIME
+    return a + w.rng() * (b - a)
   }
 
   // ------------------------------------------------------------ new roads
@@ -334,6 +477,8 @@ export class People {
   update(dt: number) {
     if (!this.world) return
     this.clock += dt
+    this.sabbathCheck -= dt
+    if (this.sabbathCheck <= 0) { this.sabbathCheck = 20; this.checkSabbath() }
     for (const p of this.puffs) { p.t += dt; this.drawPuff(p) }
     for (const p of this.puffs.filter((x) => x.t >= PUFF_TIME)) p.g.destroy()
     this.puffs = this.puffs.filter((x) => x.t < PUFF_TIME)
@@ -367,15 +512,28 @@ export class People {
       if (w.t < w.end) {
         w.t = Math.min(w.end, w.t + dt)
         pose = sample(w.route, w.t, this.TP)
-        if (w.t >= w.end) w.wait = w.working ? 2 + w.rng() * 4 : 1 + w.rng() * 3
+        if (w.t >= w.end) {
+          w.resting = !!w.rest && w.at.cell === w.rest.cell
+          w.wait = w.resting ? this.restTime(w) : w.working ? 2 + w.rng() * 4 : 1 + w.rng() * 3
+        }
       } else if (w.wait > 0) {
         w.wait -= dt
         w.idle += dt
         const h = this.hex(w.at.cell)
-        pose = { x: w.at.p.x, y: w.at.p.y - h.tier * this.TP, cell: w.at.cell, front: w.at.p.y > h.cy, kind: w.working ? 'work' : 'stand', dist: 0 }
+        // resting counts as busy ('work'), so nobody stops them for a chat
+        pose = { x: w.at.p.x, y: w.at.p.y - h.tier * this.TP, cell: w.at.cell, front: w.at.p.y > h.cy, kind: w.working || w.resting ? 'work' : 'stand', dist: 0 }
+        if (w.resting && w.rest) {
+          w.pose = pose
+          this.place(w, pose)
+          this.drawRest(w, Math.round(pose.x), Math.round(pose.y), w.rest)
+          continue
+        }
       } else {
         this.plan(w)
-        pose = sample(w.route, 0, this.TP)
+        // already there (an empty route): stand on the spot rather than nowhere
+        const h = this.hex(w.at.cell)
+        pose = w.end > 0 ? sample(w.route, 0, this.TP)
+          : { x: w.at.p.x, y: w.at.p.y - h.tier * this.TP, cell: w.at.cell, front: w.at.p.y > h.cy, kind: w.resting ? 'work' : 'stand', dist: 0 }
       }
       w.pose = pose
       this.place(w, pose)
@@ -402,6 +560,42 @@ export class People {
     const other = c.with.pose
     const mirror = !!other && !!w.pose && other.x < w.pose.x
     return { mirror, speaking, topic: c.topic, gesture: speaking ? Math.floor(this.clock * 3) & 1 : 0 }
+  }
+
+  /** Reading, praying or playing on the Sabbath, feet at (x, y); players have
+   *  notes drifting up and fading. */
+  private drawRest(w: Walker, x: number, y: number, r: Rest) {
+    const t = this.clock + w.phase * 10
+    let fig = r.kind === 'read' ? (Math.floor(t / 6) % 4 === 3 ? READ_TURN : READ) // turn a page now and then
+      : r.kind === 'pray' ? (Math.floor(t / 4) & 1 ? PRAY_BOW : PRAY)
+      : PLAY[r.inst][Math.floor(t * (r.inst === 2 ? 4 : 3)) & 1]
+    const width = Math.max(...fig.map((row) => row.length))
+    // the body is the left 6 columns; mirrored, it moves to the right
+    let dx = -3
+    if (r.left) { fig = fig.map((row) => row.padEnd(width, '.').split('').reverse().join('')); dx = -(width - 3) }
+    const col: Record<string, number> = {
+      o: 0x1c1828, H: w.skin, S: w.shirt, L: 0x5a4630, T: 0xa08050, W: 0xf8f4e8, B: 0x8a3030,
+      F: 0xb06830, I: 0xd8d8e8, R: 0xc04838, k: 0x1c1828,
+    }
+    const g = w.g
+    g.clear()
+    const top = y - fig.length + 1
+    fig.forEach((rowStr, ry) => {
+      for (let c = 0; c < rowStr.length; c++) if (rowStr[c] !== '.') g.rect(x + dx + c, top + ry, 1, 1).fill(col[rowStr[c]])
+    })
+    if (r.kind !== 'play') return
+    // two notes at a time, rising about 12 px over 2.4 s with a little sway
+    for (let i = 0; i < 2; i++) {
+      const ph = (this.clock / 2.4 + w.phase + i / 2) % 1
+      const note = NOTES[(i + Math.floor(this.clock / 2.4 + w.phase + i / 2)) & 1]
+      const side = r.left ? -1 : 1
+      const nx = Math.round(x + side * (3 + ph * 4) + Math.sin(ph * Math.PI * 2) * 1.5) - 1
+      const ny = Math.round(top - 3 - ph * 12) - note.length
+      const alpha = ph < 0.6 ? 1 : (1 - ph) / 0.4
+      note.forEach((rowStr, ry) => {
+        for (let c = 0; c < rowStr.length; c++) if (rowStr[c] === 'k') g.rect(nx + c, ny + ry, 1, 1).fill({ color: 0x1c1828, alpha })
+      })
+    }
   }
 
   /** 6×9 px villager, feet at (x, y). Rows top to bottom; o outline, H skin,
