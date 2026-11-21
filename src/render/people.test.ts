@@ -155,7 +155,8 @@ describe('villagers stop to chat', async () => {
     apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
     s.villages.v_a.population = 12 // a busy village
     type W = { chat: { with: unknown; until: number } | null; t: number; chatAgain: number }
-    const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[] }
+    const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[]; now: () => Date }
+    people.now = () => new Date('2026-11-18T12:00:00Z') // a Wednesday: work and chatter
     people.sync(world, s, new Set(s.revealed))
     let chats = 0, frozen = true, mutual = true
     const seen = new Set<unknown>()
@@ -176,5 +177,37 @@ describe('villagers stop to chat', async () => {
     expect(frozen).toBe(true)
     // after chatting, a cooldown keeps them from stopping again straight away
     expect(people.walkers.some((w) => w.chatAgain > 0)).toBe(true)
+  })
+})
+
+describe('the Sabbath', async () => {
+  const { People } = await import('./people')
+  const { generateWorld } = await import('../world/generate')
+  const { newGame, apply } = await import('../game/reducer')
+  it('on Saturday nobody works: everyone has something restful to do, and keeps at it', () => {
+    const world = generateWorld('test-seed')
+    const s = newGame(world, '2026-11-15')
+    const site = world.regions[world.startRegion].sites[0]
+    apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
+    s.villages.v_a.population = 12
+    type W = { rest: { kind: string; pal?: unknown } | null; working: boolean; pose: { cell: number } | null }
+    const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[]; now: () => Date }
+    people.now = () => new Date('2026-11-21T12:00:00Z') // a Saturday
+    people.sync(world, s, new Set(s.revealed))
+    expect(people.walkers.length).toBeGreaterThan(2)
+    expect(people.walkers.every((w) => w.rest)).toBe(true)
+    // walks are in pairs that point at each other
+    for (const w of people.walkers) if (w.rest!.kind === 'stroll') expect((w.rest!.pal as W).rest!.pal).toBe(w)
+    for (let k = 0; k < 20 * 60 * 3; k++) { // three simulated minutes
+      people.update(0.05)
+      for (const w of people.walkers) {
+        expect(w.working).toBe(false)
+        expect(w.pose?.cell ?? 0).toBeGreaterThanOrEqual(0) // always somewhere on the map
+      }
+    }
+    // and on Sunday they're back at work
+    people.now = () => new Date('2026-11-22T12:00:00Z')
+    people.update(25) // past the next Sabbath check
+    expect(people.walkers.every((w) => !w.rest)).toBe(true)
   })
 })

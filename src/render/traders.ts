@@ -5,7 +5,10 @@
  *
  *  Routes: cheapest land path (roads preferred, gentle slopes only), through
  *  hex centres on roads and around buildings elsewhere (crossHex), with a
- *  short ramp where the ground steps up or down. */
+ *  short ramp where the ground steps up or down.
+ *
+ *  None travel on the Sabbath: no caravan sets off on a Saturday (this
+ *  device's own day). */
 import { Container, Sprite } from 'pixi.js'
 import { distance, hexToPixel, neighbours, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
@@ -35,6 +38,7 @@ export interface TraderTrip {
 /** The caravan (if any) for the time window containing `now`. Deterministic. */
 export function tripAt(world: World, s: GameState, now: number, W: number): TraderTrip | null {
   const window = Math.floor(now / PERIOD)
+  if (new Date(window * PERIOD).getDay() === 6) return null // the Sabbath: merchants rest too
   const villages = Object.values(s.villages).sort((a, b) => (a.id < b.id ? -1 : 1))
   if (!villages.length) return null
   const rng = rngFor(world.seed, `trader:${window}`)

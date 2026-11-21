@@ -14,6 +14,11 @@ function withVillage() {
 const T0 = Date.parse('2026-11-18T12:00:00Z')
 
 describe('merchant caravans', () => {
+  it('no caravans on the Sabbath (Saturday, this device\'s day)', () => {
+    const s = withVillage()
+    const sat = new Date(2026, 10, 21, 0, 0).getTime() // local Saturday midnight
+    for (let k = 0; k < 240; k++) expect(tripAt(world, s, sat + k * PERIOD, W)).toBeNull() // all day
+  })
   it('nothing comes through an empty world', () => {
     expect(tripAt(world, newGame(world, '2026-11-15'), T0, W)).toBeNull()
   })
