@@ -312,6 +312,14 @@ export function generateWorld(seed: string, opts: GenOptions = {}): World {
     if (cell.terrain === 'rock' && regions[cell.region].danger >= 2 && rng() < 0.05) cell.resource = 'tin'
   }
 
+  // silver (galena): a few mountains beyond the starting region. Its own random
+  // stream, so adding it changed nothing else in the world.
+  const srng = rngFor(seed, 'silver')
+  for (const cell of cells) {
+    if ((cell.feature === 'mountain' || cell.feature === 'mountain_snow') && (cell.resource === null || cell.resource === 'stone') &&
+      regions[cell.region].danger >= 1 && srng() < 0.03) cell.resource = 'silver'
+  }
+
   // ---------------------------------------------------------------- lairs
   const lairs: Lair[] = []
   const starterSites = sr.sites

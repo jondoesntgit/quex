@@ -20,6 +20,8 @@ export type Feature = (typeof FEATURES)[number]
 export const RESOURCES = [
   'grain', 'fish', 'timber', 'stone', 'clay', 'copper', 'iron', 'tin',
   'wool', 'berries', 'herbs', 'salt', 'game',
+  // galena: lead ore rich in silver, in a few far mountains
+  'silver',
 ] as const
 export type Resource = (typeof RESOURCES)[number]
 

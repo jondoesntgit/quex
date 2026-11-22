@@ -3,6 +3,7 @@ import { fmtGoods } from '../game/reducer'
 import type { Caravan } from '../game/types'
 import type { Game } from '../app/store'
 import { useGame } from './helpers'
+import { Market } from './Market'
 
 /** How long arrived caravans stay on the page. */
 const RECENT_MS = 3 * 86_400_000
@@ -36,6 +37,7 @@ export function Caravans({ game, onClose }: { game: Game; onClose: () => void })
   const now = game.now()
   const s = game.state
   const name = (id: string, kept?: string) => s.villages[id]?.name ?? kept ?? 'a village since abandoned'
+  const me = game.meta.activePlayer ? s.players[game.meta.activePlayer] : undefined
   const mine = new Set(game.meta.localPlayers.map((pid) => s.players[pid]?.villageId).filter(Boolean))
   const road = [...s.caravans].sort((a, b) => a.arriveAt.localeCompare(b.arriveAt))
   const recent = (s.arrived ?? []).filter((c) => now.getTime() - Date.parse(c.arriveAt) < RECENT_MS).reverse()
@@ -51,6 +53,7 @@ export function Caravans({ game, onClose }: { game: Game; onClose: () => void })
           <h2 style={{ margin: 0 }}>Caravans</h2>
           <button className="btn ghost" onClick={onClose} aria-label="close">✕</button>
         </div>
+        {me && <Market game={game} p={me} />}
         <h3>On the road</h3>
         {road.length === 0 && <p className="muted">No caravans on the road right now.</p>}
         <ul className="caravan-list">

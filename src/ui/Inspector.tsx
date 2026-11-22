@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { actionSize, buildCost, buildingAt, caravanMinutes, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
+import { GAME_REGROW, about, gameLeft, gameMax, leftAt } from '../game/deposits'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
 import { ROLE_INFO, shareSpot, tryAction } from './helpers'
@@ -12,7 +13,8 @@ import { clockTime, span } from './Caravans'
 /** What a deposit is good for (shown on the hex card). */
 const DEPOSIT_NOTE: Record<string, string> = {
   iron: 'Iron deposit: a Deep iron mine could go here (big task). Iron makes better tools and weapons.',
-  copper: 'Copper deposit (green malachite and blue azurite on rust-stained rock): a Copper mine could go here (big task). Copper plus a little tin makes bronze.',
+  copper: 'Copper deposit (green malachite and blue azurite on rust-stained rock): gather the surface ore by hand, or sink a Copper mine (big task) to reach the deep ore, which carries a little silver. Copper plus a little tin makes bronze.',
+  silver: 'Silver! Galena, heavy grey lead ore rich in silver. A Silver mine (big task) digs it, and a Silver refinery turns it into silver, the coin every merchant takes.',
   tin: 'Tin! Rare: gather it (small task) and trade it. A little tin turns copper into bronze.',
   stone: 'Building stone: a Quarry could go here (medium task), or gather stone by hand (small task).',
   clay: 'River clay: gather it (small task) for a Brick kiln.',
@@ -45,6 +47,8 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const treeNote = stand?.young ? `${stand.young} saplings (trees by winter)`
     : trees ? `${count} tree${count === 1 ? '' : 's'}${land.stumps ? `, ${land.stumps} stump${land.stumps === 1 ? '' : 's'}` : ''}` : null
   const mine = inTerritory(v, col, row)
+  const left = known ? leftAt(world, state, i) : null
+  const wild = known ? gameMax(world, i) : 0
 
   const share = async () => {
     const text = village ? `Come settle near ${village.name} in Quex!` : 'Check out this spot in Quex:'
@@ -97,7 +101,8 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   else {
     acts.push('scout')
     if (trees && !here && !village) acts.push('clear')
-    if (mine && land.resource) acts.push('gather')
+    if (mine && land.resource && land.resource !== 'stone') acts.push('gather')
+    if (mine && left?.ore === 'stone' && left.surface >= 1) acts.push('pick')
     if (mine && !here && !village && !trees) acts.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
     if (cell.tier > 0) acts.push('road')
@@ -109,6 +114,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
       {!here && !village && land.resource && DEPOSIT_NOTE[land.resource] && isDeposit(land.resource, land.feature) && (
         <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>
       )}
+      {!village && <Reserves left={left} wild={wild} game={wildNow(game, p, i)} building={here?.building.type} />}
       {village && <p style={{ margin: '4px 0' }}>{ROLE_INFO[village.role]?.name} · 👥 {Math.floor(village.population)} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}
@@ -125,6 +131,29 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
       </div>
     </Shell>
   )
+}
+
+const wildNow = (game: Game, p: Player, i: number) => gameLeft(game.world, game.state, i, game.today(p.id))
+
+const ORE_NAME: Record<string, string> = { copper: 'copper ore', iron: 'iron ore', tin: 'tin', silver: 'silver ore', stone: 'stone' }
+const DIGGER: Record<string, string> = { copper: 'a mine', iron: 'a mine', silver: 'a mine', stone: 'a quarry', tin: '' }
+
+/** How much the land here still holds, roughly. */
+function Reserves({ left, wild, game: animals, building }: {
+  left: ReturnType<typeof leftAt>; wild: number; game: number; building?: string
+}) {
+  const lines: string[] = []
+  if (left && (left.ore !== 'stone' || left.surface + left.deep > 0)) {
+    const name = ORE_NAME[left.ore]
+    const loose = left.ore === 'stone' ? 'loose stone' : `${name} at the surface`
+    if (left.surface >= 1) lines.push(`${about(left.surface)} ${loose}`)
+    else if (left.start > 0) lines.push(left.ore === 'stone' ? 'picked clean of stone' : `${name}: worked out at the surface`)
+    if (left.deep >= 1 && DIGGER[left.ore]) lines.push(`${about(left.deep)} more below${building && ['quarry', 'copper_mine', 'iron_mine', 'silver_mine'].includes(building) ? '' : ` (needs ${DIGGER[left.ore]})`}`)
+    else if (left.deep < 1 && left.surface < 1 && left.ore !== 'stone') lines.push('nothing left')
+  }
+  if (wild > 0) lines.push(animals >= wild ? `game: ${wild} animals` : `game: ${Math.floor(animals)} of ${wild}, about ${GAME_REGROW} back a day`)
+  if (!lines.length) return null
+  return <p className="muted" style={{ margin: '4px 0' }}>⛰ {lines.join(' · ')}</p>
 }
 
 function Shell({ title, children, onClose, onShare }: { title: string; children: React.ReactNode; onClose: () => void; onShare?: () => void }) {

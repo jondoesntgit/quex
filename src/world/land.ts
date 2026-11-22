@@ -32,7 +32,7 @@ export const cellLand = (c: Cell): Land => ({ terrain: c.terrain, feature: c.fea
 
 /** Deposits worth showing on the map: ores, building stone (off the mountains,
  *  where all rock is stone), clay and salt. */
-const DEPOSITS = new Set(['iron', 'copper', 'tin', 'stone', 'clay', 'salt'])
+const DEPOSITS = new Set(['iron', 'copper', 'tin', 'silver', 'stone', 'clay', 'salt'])
 export function isDeposit(resource: string | null | undefined, feature: string | null | undefined) {
   if (!resource || !DEPOSITS.has(resource)) return false
   return resource !== 'stone' || (feature !== 'mountain' && feature !== 'mountain_snow')

@@ -128,7 +128,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li><b>Roads</b> speed caravans, and your villagers love them. A road across a river needs a <b>bridge</b>: a medium task instead of a small one. <b>Fell a tree</b> for timber: each one leaves a stump, and every winter the trees left standing double, back up to what the hex first had. Fell the last tree and the land is open for good, ready to build on. <b>Plant</b> two saplings to start a wood: they become trees in winter and spread from there.</li>
             <li>Monster lairs (goblins, orcs, trolls, a dragon) grow bolder as villages grow and sometimes raid your stores. A palisade helps.</li>
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
-            <li>Merchant caravans pass through now and then on their way to trade. They're just passing; enjoy the view.</li>
+            <li>Merchants call at every village each day except the Sabbath (see <b>Caravans</b>). Barter goods from your stores for what's in their packs; copper and silver are coin every merchant takes. A coast, a river and long roads bring more merchants, bigger loads and better prices. Each merchant can only carry so much weight.</li>
           </ul>
           <p>
             <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, weathered rock crusted with green
@@ -136,6 +136,13 @@ export function Help({ onClose }: { onClose: () => void }) {
             dry basins and lowland), pale slabs for building stone, dark crystals for rare tin, red clay banks along rivers and white salt
             crusts. In the mountains, ore streaks the rock itself: green and blue with a rusty halo for copper, rust for iron. Tap a hex to see
             what you could build there, or press ⛏ by the zoom buttons to dim everything except deposits.
+          </p>
+          <p>
+            <b>It runs out:</b> every hex has some loose stone. <b>Clear stone</b> (small task) picks it up for building, and a field
+            cleared of stone grows a fifth more. Once it's picked clean, only a quarry reaches the rock below. Ore works the same way:
+            a little at the surface to gather by hand, and much more underground for a mine. Surface copper (malachite) has no silver;
+            a copper mine's deep ore brings up a trickle of silver ore. Rich silver ore (grey galena) lies in a few far mountains, streaking the rock
+            grey. Game hunted from a hex comes back slowly, about one animal a day. Tap a hex to see roughly how much is left.
           </p>
           <p>Drag to move around; pinch, scroll or use ＋/－ to zoom. Zoom right out to see the whole continent.</p>
         </details>

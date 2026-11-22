@@ -300,5 +300,18 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .caravan-list li { padding: 6px 0; border-bottom: 2px dashed var(--paper-2); }
 .caravan-list li:last-child { border-bottom: 0; }
 .caravan-list .mine { color: var(--medium); }
+.barter-row { justify-content: space-between; flex-wrap: nowrap; align-items: center; gap: 6px; padding: 3px 0; }
+.barter-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.barter-label small { display: block; font-size: .8em; }
+.barter-row .stepper { flex-wrap: nowrap; flex: none; }
+.barter-row .qty { width: 24px; text-align: center; }
+.barter-row .want { color: var(--medium); font-size: .85em; }
+.deal { margin: 10px 0 8px; }
+.deal-bar { height: 10px; border: 2px solid var(--ink, currentColor); background: var(--paper-2); }
+.deal-bar i { display: block; height: 100%; background: #c0503a; }
+.deal-bar i.ok { background: #4a9a4a; }
+.deal-yes, .deal-no { margin: 4px 0 0; font-weight: bold; }
+.deal-yes { color: #3d8a3d; }
+.deal-no { color: #b0443a; }
 
 .sabbath { background: var(--paper-2); border: 2px solid var(--ink); border-radius: var(--radius); padding: 8px 10px; margin: 6px 0; }

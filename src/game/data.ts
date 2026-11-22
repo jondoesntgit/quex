@@ -6,10 +6,10 @@ export const GOODS = [
   // raw (also world resources)
   'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game',
   // ores
-  'copper_ore', 'iron_ore',
+  'copper_ore', 'iron_ore', 'silver_ore',
   // processed
   'bread', 'smoked_fish', 'cheese', 'bricks', 'charcoal', 'planks', 'leather', 'cloth',
-  'copper', 'iron', 'bronze', 'steel',
+  'copper', 'iron', 'bronze', 'steel', 'silver',
   // loot
   'relic', 'dragon_scale',
 ] as const
@@ -19,7 +19,7 @@ export type Goods = Partial<Record<Good, number>>
 export const GOOD_LABEL: Record<Good, string> = {
   grain: 'Grain', fish: 'Fish', timber: 'Timber', stone: 'Stone', clay: 'Clay', tin: 'Tin',
   wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game',
-  copper_ore: 'Copper ore', iron_ore: 'Iron ore', bread: 'Bread', smoked_fish: 'Smoked fish',
+  copper_ore: 'Copper ore', iron_ore: 'Iron ore', silver_ore: 'Silver ore', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
   cheese: 'Cheese', bricks: 'Bricks', charcoal: 'Charcoal', planks: 'Planks', leather: 'Leather',
   cloth: 'Cloth', copper: 'Copper', iron: 'Iron', bronze: 'Bronze', steel: 'Steel',
   relic: 'Relic', dragon_scale: 'Dragon scale',
@@ -39,7 +39,7 @@ export const FOOD: Partial<Record<Good, { value: number; keeps: boolean }>> = {
 /** What a gather action on a hex yields. */
 export const GATHER: Partial<Record<Resource, Good>> = {
   grain: 'grain', fish: 'fish', timber: 'timber', stone: 'stone', clay: 'clay', copper: 'copper_ore',
-  iron: 'iron_ore', tin: 'tin', wool: 'wool', berries: 'berries', herbs: 'herbs', salt: 'salt', game: 'game',
+  iron: 'iron_ore', silver: 'silver_ore', tin: 'tin', wool: 'wool', berries: 'berries', herbs: 'herbs', salt: 'salt', game: 'game',
 }
 
 export type TaskSize = 'big' | 'medium' | 'small'
@@ -53,6 +53,7 @@ export type BuildingId =
   | 'garden' | 'field' | 'mill' | 'orchard' | 'irrigation'
   | 'shore_fishery' | 'smokehouse' | 'salt_pans' | 'docks' | 'shipyard'
   | 'quarry' | 'kiln' | 'copper_mine' | 'smelter' | 'iron_mine' | 'bloomery' | 'bronze_foundry'
+  | 'silver_mine' | 'silver_refinery'
   | 'forager_camp' | 'lumber_camp' | 'hunting_lodge' | 'charcoal_kiln' | 'sawmill'
   | 'pen' | 'dairy' | 'weaver'
   | 'scout_camp' | 'outfitter'
@@ -108,10 +109,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // mining
   quarry: B({ id: 'quarry', name: 'Quarry', role: 'mining', size: 'medium', cost: { timber: 2 }, nearTerrain: ['rock', 'hills'], mountain: true, produces: { stone: 2.5 }, blurb: 'Building stone from the hillside.' }),
   kiln: B({ id: 'kiln', name: 'Brick kiln', role: 'mining', size: 'medium', cost: { stone: 3 }, consumes: { clay: 2, timber: 0.5 }, produces: { bricks: 2 }, blurb: 'Fired bricks from river clay.' }),
-  copper_mine: B({ id: 'copper_mine', name: 'Copper mine', role: 'mining', size: 'big', cost: { timber: 4, stone: 2 }, resource: ['copper'], mountain: true, produces: { copper_ore: 2 }, blurb: 'Green-streaked ore.' }),
+  copper_mine: B({ id: 'copper_mine', name: 'Copper mine', role: 'mining', size: 'big', cost: { timber: 4, stone: 2 }, resource: ['copper'], mountain: true, produces: { copper_ore: 2, silver_ore: 0.1 }, blurb: 'Deep ore, past the surface malachite. It carries a trickle of silver ore.' }),
   smelter: B({ id: 'smelter', name: 'Smelter', role: 'mining', size: 'big', cost: { stone: 6, bricks: 4 }, consumes: { copper_ore: 2, charcoal: 1 }, produces: { copper: 2 }, blurb: 'Copper: cookware, pipes, bells, coins.' }),
   iron_mine: B({ id: 'iron_mine', name: 'Deep iron mine', role: 'mining', size: 'big', cost: { timber: 6, planks: 2 }, resource: ['iron'], mountain: true, produces: { iron_ore: 2 }, blurb: 'Needs timber shaft supports.' }),
   bloomery: B({ id: 'bloomery', name: 'Bloomery', role: 'mining', size: 'big', cost: { stone: 6, bricks: 6 }, consumes: { iron_ore: 2, charcoal: 3 }, produces: { iron: 1 }, blurb: 'Hot work. Lots of charcoal.' }),
+  silver_mine: B({ id: 'silver_mine', name: 'Silver mine', role: 'mining', size: 'big', cost: { timber: 6, planks: 2 }, resource: ['silver'], mountain: true, produces: { silver_ore: 1.5 }, blurb: 'Galena: heavy grey lead ore, rich in silver.' }),
+  silver_refinery: B({ id: 'silver_refinery', name: 'Silver refinery', role: 'mining', size: 'big', cost: { bricks: 6, stone: 4 }, consumes: { silver_ore: 2, charcoal: 2 }, produces: { silver: 0.25 }, blurb: 'Burns the lead off silver ore. Slow, and hungry for charcoal.' }),
   bronze_foundry: B({ id: 'bronze_foundry', name: 'Bronze foundry', role: 'mining', size: 'big', cost: { bricks: 6, copper: 2 }, consumes: { copper: 1.8, tin: 0.2, charcoal: 1 }, produces: { bronze: 2 }, blurb: 'Copper plus traded tin, about 9:1.' }),
   // forestry
   forager_camp: B({ id: 'forager_camp', name: 'Foraging camp', role: 'forestry', size: 'medium', cost: { timber: 1 }, terrain: ['forest', 'swamp', 'tundra'], produces: { berries: 1.5, game: 1 }, blurb: 'Berries, deadwood, game.' }),
@@ -130,11 +133,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'clear' | 'plant' | 'road' | 'build' | 'caravan' | 'outpost' | 'expedition'
+export type ActionKind = 'scout' | 'gather' | 'pick' | 'clear' | 'plant' | 'road' | 'build' | 'caravan' | 'outpost' | 'expedition'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
   gather: { size: 'small', name: 'Gather', blurb: "Collect a hex's resource by hand." },
+  pick: { size: 'small', name: 'Clear stone', blurb: 'Pick the loose stone off this land for building. Cleared fields grow more.' },
   clear: { size: 'small', name: 'Fell a tree', blurb: 'One tree for timber; the rest spread back in winter. Fell the last to open the land.' },
   plant: { size: 'small', name: 'Plant trees', blurb: 'Two saplings that take root in winter, then spread.' },
   road: { size: 'small', name: 'Dirt road', blurb: 'Faster caravans through this hex.' },

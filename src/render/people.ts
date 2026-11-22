@@ -79,18 +79,19 @@ const READ_TURN_A = READ.map((r, i) => (i === 6 ? r.slice(0, 6) + 'W' + r.slice(
 const READ_TURN_B = READ.map((r, i) => (i === 6 ? r.slice(0, 4) + 'W' + r.slice(5) : r))
 // Napping on their back in the grass: head on the left (eye shut, k), a hand
 // on the chest, one knee up; little Z's drift up from the head (drawn separately).
+// About as long as a standing villager is tall.
 const NAP = [
-  '.oooo....oo..',
-  'oDHHoooooLLo.',
-  'oDHkSHSSLoLLo',
-  'oDHHSSSSLooDo',
-  'ooooooooooooo',
+  '.ooo..oo..',
+  'oDHooooLo.',
+  'oDkSHSLoLo',
+  'ooooooooDo',
 ]
-const NAP_ANCHOR = 6
+const NAP_ANCHOR = 4
 // Sitting on the edge of a seaside hex facing us, feet dangling down the bank
 // toward the water and swinging; the rows from SHORE_BASE down hang below the rim.
 const SHORE_A = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'oLLLLo', 'oLooLo', 'oLooLo', 'oDooDo', 'oo..oo']
-const SHORE_B = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'oLLLLo', 'oLooLo', 'LooooL', 'Do..oD', 'o....o']
+// swinging: the lower legs and feet sway a pixel to the side and back (never up)
+const SHORE_B = ['.oooo..', '.oHHo..', '.oHHo..', 'ooSSoo.', 'oSSSSo.', 'oLLLLo.', 'oLooLo.', '.oLooLo', '.oDooDo', '.oo..oo']
 const SHORE_BASE = 4 // rows below the seat
 // On a walk together, one points out something nearby (arm out to the side)
 const POINT = ['.oooo....', '.oHHo....', '.oHHooooo', 'ooSSSSSHo', 'oSSSSoooo', 'ooSSoo...', '.oLLo....', '.oLLo....', '.oooo....']
@@ -743,7 +744,7 @@ export class People {
     let fig = r.kind === 'read' ? (turn < 1 ? READ_TURN_A : turn < 2 ? READ_TURN_B : READ)
       : r.kind === 'pray' ? PRAY
       : r.kind === 'nap' ? NAP
-      : r.kind === 'shore' ? (Math.floor(t * 1.5) & 1 ? SHORE_B : SHORE_A) // feet swinging
+      : r.kind === 'shore' ? (Math.floor(t * 1.2) & 1 ? SHORE_B : SHORE_A) // feet swinging
       : r.kind === 'stroll' ? (r.lead && r.met ? POINT : STAND)
       : PLAY[r.inst][Math.floor(t * (r.inst === 3 ? 4 : 3)) & 1]
     const width = Math.max(...fig.map((row) => row.length))
@@ -778,6 +779,19 @@ export class People {
       return
     }
     if (r.kind === 'stroll' && !r.lead && r.pal) this.strollTalk(w, x, top)
+    if (r.kind === 'read') {
+      // every so often the book gets to them: a "!" or a heart for a moment
+      const cycle = Math.floor(t / 11)
+      if (t % 11 > 9.7) {
+        const b = BUBBLES[((cycle * 2654435761) >>> 0) % 2 ? HEART : BANG]
+        b.forEach((rowStr, ry) => {
+          for (let c = 0; c < rowStr.length; c++) {
+            const ch = rowStr[c]
+            if (ch !== '.') g.rect(x + c - 1, top - b.length - 1 + ry, 1, 1).fill(ch === 'W' ? 0xffffff : ch === 'r' ? 0xe04858 : 0x1c1828)
+          }
+        })
+      }
+    }
     if (r.kind === 'pray') {
       // three faint gold sparkles drifting slowly up from the joined hands
       for (let i = 0; i < 3; i++) {

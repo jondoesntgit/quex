@@ -80,6 +80,8 @@ export interface Village {
   /** hexes whose trees were felled */
   cleared: number[]
   winterForecast: 'stocked' | 'tight' | 'hungry'
+  /** today's barters with the merchants: what was bought from each (see game/market) */
+  trade?: { date: ISODate; took: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>>; got?: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>> }
 }
 
 export interface Caravan {
@@ -123,6 +125,12 @@ export interface GameState {
   log: LogEntry[]
   /** count of applied events (for sync) */
   version: number
+  /** the merchants' purse has been handed out (see PURSE_FROM) */
+  purses?: boolean
+  /** ore and stone taken from each hex (see game/deposits) */
+  dug?: Record<number, number>
+  /** game left on each hunted hex, as of a day (it comes back slowly) */
+  hunted?: Record<number, { left: number; date: ISODate }>
   /** hexes whose trees have been felled or planted, tree by tree (see TREES_FROM) */
   woods?: Record<number, Stand>
 }
@@ -163,5 +171,7 @@ export type GameEvent =
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */
   | (Base & { t: 'rename'; name: string })
+  /** barter with a merchant calling at the village today (game/market) */
+  | (Base & { t: 'barter'; merchant: 'ship' | 'barge' | 'caravan' | 'pedlar'; give: Goods; take: Goods })
   /** give up this village entirely; the player can found a new one */
   | (Base & { t: 'abandon' })
