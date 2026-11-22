@@ -30,9 +30,9 @@ import { hasTrees, MOUNTAIN_TERRAIN } from '../world/land'
 import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
 import { bridgeVia } from './waterways'
 
-const SHIRT: Record<string, number> = {
-  farm: 0xe8c040, port: 0x4878d8, mining: 0x9a9ab0, forestry: 0x3c8c3c, herding: 0xe0e0d0, explorer: 0xc04878,
-}
+/** Each village dresses in its own colour (once by role; now by village). */
+const SHIRTS = [0xe8c040, 0x4878d8, 0x9a9ab0, 0x3c8c3c, 0xe0e0d0, 0xc04878, 0xd87838, 0x70b0b8]
+const shirtFor = (vid: string) => SHIRTS[hashString(`shirt-${vid}`) % SHIRTS.length]
 const SKIN = [0xf0c8a0, 0xd8a070, 0xa06840, 0x704828]
 const STAND = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'ooSSoo', '.oLLo.', '.oLLo.', '.oooo.']
 const WALK = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'ooSSoo', 'oLooLo', 'oLooLo', 'oooooo']
@@ -306,7 +306,7 @@ export class People {
         g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null, chat: null, chatAgain: r() * 10, pose: null,
         rest: null, resting: false, phase: r(),
         at: { cell: home, p: this.spot(home, blocked.has(home), r) }, rng: r,
-        shirt: SHIRT[v.role] ?? 0xd0d0d0, skin: SKIN[Math.floor(r() * SKIN.length)],
+        shirt: shirtFor(v.id), skin: SKIN[Math.floor(r() * SKIN.length)],
       }
       this.walkers.push(w)
       this.plan(w)

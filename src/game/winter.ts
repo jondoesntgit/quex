@@ -53,7 +53,7 @@ function keepsMade(v: Village, date: ISODate, score: number): number {
     if (b.progress < 1) continue
     const def = BUILDINGS[b.type]
     if (!def.produces) continue
-    let k = prod * moraleK * (def.role === v.role ? 1.25 : 1)
+    let k = prod * moraleK
     if (def.crop) k *= CROP_SEASON[season]
     for (const [g, n] of Object.entries(def.produces)) {
       const f = FOOD[g as Good]
@@ -70,7 +70,6 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
   const keeps = foodStock(v, true)
   const tonight = { now: keepsMade(v, today, score), full: keepsMade(v, today, 100) }
   const has = (id: BuildingId) => v.buildings.some((b) => b.type === id)
-  const mine = KEEPERS.filter((id) => BUILDINGS[id].role === v.role || BUILDINGS[id].role === 'any')
   const items: PrepItem[] = []
 
   // 1. food that keeps
@@ -78,11 +77,10 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
   if (tonight.full > 0.05 && days > 0) {
     foodTodo.push({ size: 'big', text: `Finish today's tasks: your buildings make about ${r1(tonight.full)} food that keeps tonight with a full day (${r1(tonight.now)} at your score so far).` })
   }
-  const next = mine.find((id) => !has(id)) ?? KEEPERS.find((id) => !has(id))
+  const next = KEEPERS.find((id) => !has(id))
   if (next) {
     const def = BUILDINGS[next]
-    const own = def.role === v.role || def.role === 'any'
-    foodTodo.push({ size: def.size, text: `Build a ${def.name}${own ? '' : ' (another role\'s building: costs double)'}: ${def.blurb}` })
+    foodTodo.push({ size: def.size, text: `Build a ${def.name}: ${def.blurb}` })
   }
   foodTodo.push({ size: 'small', text: 'Gather grain where it grows on your land: +3 grain for each small task.' })
   foodTodo.push({ size: 'medium', text: "A neighbour's caravan (one of their medium tasks) can bring grain, smoked fish or cheese: ask them." })

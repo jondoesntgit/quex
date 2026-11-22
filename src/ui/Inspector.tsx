@@ -5,7 +5,7 @@ import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { GAME_REGROW, about, gameLeft, gameMax, leftAt } from '../game/deposits'
 import type { Player } from '../game/types'
 import type { Game } from '../app/store'
-import { ROLE_INFO, shareSpot, tryAction } from './helpers'
+import { shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
 import { clockTime, span } from './Caravans'
 
@@ -79,14 +79,16 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
 
   if (mode === 'build') {
     const defs = Object.values(BUILDINGS)
-    const sorted = [...defs.filter((d) => d.role === v.role), ...defs.filter((d) => d.role === 'any'), ...defs.filter((d) => d.role !== v.role && d.role !== 'any')]
+    // what this hex allows first, then the rest (each says why it can't go here)
+    const ok = (d: (typeof defs)[number]) => !!tryAction(game, p, 'build', col, row, { building: d.id }, d.size).ev
+    const sorted = [...defs.filter(ok), ...defs.filter((d) => !ok(d))]
     return (
       <Shell onClose={onClose} title={`Build on ${TERRAIN_NAME[terr]}`}>
         <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
         <div className="actions">
           {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => run('build', { building: d.id }, d.size)} />)}
         </div>
-        <p className="muted">Other roles' buildings cost double: specialise and trade.</p>
+        <p className="muted">Any village can build anything. Neighbours who each specialise and trade get further than going it alone.</p>
       </Shell>
     )
   }
@@ -115,14 +117,14 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
         <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>
       )}
       {!village && <Reserves left={left} wild={wild} game={wildNow(game, p, i)} building={here?.building.type} />}
-      {village && <p style={{ margin: '4px 0' }}>{ROLE_INFO[village.role]?.name} · 👥 {Math.floor(village.population)} · morale {village.morale}</p>}
+      {village && <p style={{ margin: '4px 0' }}>👥 {Math.floor(village.population)} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}
       {lair && <p style={{ margin: '4px 0' }}>Strength {Math.round(lair.strength)}. Bring bronze, iron, leather and food to improve your odds.</p>}
       <div className="actions">
         {mine && !village && (!here || here.building.progress < 1) && (
           here
-            ? <button className="btn medium action" onClick={() => run('build', { building: here.building.type }, BUILDINGS[here.building.type].size)}>Finish building<small>{fmtGoods(buildCost(v, BUILDINGS[here.building.type]), 0.5)}</small></button>
+            ? <button className="btn medium action" onClick={() => run('build', { building: here.building.type }, BUILDINGS[here.building.type].size)}>Finish building<small>{fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
             : cell.tier > 0 && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>medium or big task</small></button>
         )}
         {acts.map((a) => a === 'caravan'
@@ -188,7 +190,7 @@ function BuildButton({ game, p, def, col, row, onRun }: { game: Game; p: Player;
   return (
     <button className={`btn ${r.ev ? def.size : ''} action`} disabled={!r.ev} onClick={onRun} title={def.blurb}>
       {def.name}
-      <small>{r.ev ? fmtGoods(buildCost(v, def), r.tok?.strength ?? 1) : r.error}</small>
+      <small>{r.ev ? fmtGoods(buildCost(v, def, game.now().toISOString()), r.tok?.strength ?? 1) : r.error}</small>
     </button>
   )
 }

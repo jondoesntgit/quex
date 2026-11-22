@@ -94,9 +94,10 @@ export function SignIn() {
                 <p className="muted" style={{ textAlign: 'center', margin: '10px 0 0' }}>or</p>
               </>
             )}
-            <div className="row" style={{ gap: 6, marginTop: 8 }}>
-              <button className={`btn ${mode === 'code' ? 'primary' : ''}`} onClick={() => { setMode('code'); setErr(null) }}>Email me a code</button>
-              <button className={`btn ${mode === 'password' ? 'primary' : ''}`} onClick={() => { setMode('password'); setErr(null) }}>Password</button>
+            {/* how to sign in: tabs, not buttons, so the only yellow button is the one that does it */}
+            <div className="tabs signin-tabs" role="tablist">
+              <button role="tab" aria-selected={mode === 'code'} className={`tab ${mode === 'code' ? 'on' : ''}`} onClick={() => { setMode('code'); setErr(null) }}>With an email code</button>
+              <button role="tab" aria-selected={mode === 'password'} className={`tab ${mode === 'password' ? 'on' : ''}`} onClick={() => { setMode('password'); setErr(null) }}>With a password</button>
             </div>
             {recent.length > 0 && (
               <>

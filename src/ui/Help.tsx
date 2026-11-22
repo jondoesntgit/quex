@@ -72,20 +72,19 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>Buildings produce every night. How much depends on how well your day went (a good day means a good harvest).</li>
             <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more.</li>
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
-            <li>Buildings that match your village's role produce 25% more. Other roles' buildings cost double.</li>
           </ul>
-          <p>Wrong spot or role? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
+          <p>Wrong spot? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
         </details>
 
         <details>
-          <summary>Roles: who does what</summary>
-          <p>Each village has a role, and neighbours depend on each other. When you settle, stars show what the land within 3 hexes suits, but any role works anywhere.</p>
+          <summary>Specialising: who does what</summary>
+          <p>Any village can build anything, at the same price. But no one village has the land, the hands or the tasks to do it all, so neighbours do best when they split the work: one farms, one mines, one fishes and trades, and caravans carry the rest. Who takes what is for you and your friends to work out, and you can change your mind as you go. When you settle, stars show what the land within 3 hexes suits.</p>
           <ul>
             {(['farm', 'port', 'mining', 'forestry', 'herding', 'explorer'] as const).map((r) => (
-              <li key={r}><b>{ROLE_INFO[r].name}:</b> {ROLE_INFO[r].blurb} <span className="muted">Builds: {roleBuildings(r)}.</span></li>
+              <li key={r}><b>{ROLE_INFO[r].name}:</b> {ROLE_INFO[r].blurb} <span className="muted">Buildings: {roleBuildings(r)}.</span></li>
             ))}
           </ul>
-          <p className="muted">Every village can also build: {roleBuildings('any')}.</p>
+          <p className="muted">And what every village wants: {roleBuildings('any')}.</p>
         </details>
 
         <details>

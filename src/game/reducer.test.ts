@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { actionSize, apply, BRIDGES_FROM, SABBATH_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { actionSize, apply, BRIDGES_FROM, ROLELESS_FROM, buildCost, SABBATH_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
+import { BUILDINGS } from './data'
 
 const world: World = generateWorld('test-seed')
 const sites = world.regions[world.startRegion].sites
@@ -574,5 +575,24 @@ describe('log and renames', () => {
     const s = setup()
     apply(s, world, ev('abandon', 'ann', `${SUN}T09:00:00Z`, {}))
     expect(logText(s, s.log[s.log.length - 1].text)).toMatch(/^Ann abandoned Ann's /)
+  })
+})
+
+describe('no village roles', () => {
+  it('until ROLELESS_FROM, another role\'s building cost double; now every building costs the same everywhere', () => {
+    const s = setup()
+    const ann = s.villages[s.players.ann.villageId]
+    const before = '2026-11-20T12:00:00.000Z'
+    const offRole = Object.values(BUILDINGS).find((d) => d.role !== 'any' && d.role !== ann.role)!
+    expect(buildCost(ann, offRole, before)).toEqual(Object.fromEntries(Object.entries(offRole.cost).map(([g, n]) => [g, n! * 2])))
+    expect(buildCost(ann, offRole, ROLELESS_FROM)).toEqual(offRole.cost)
+  })
+
+  it('new villages have no role', () => {
+    const s = newGame(world, SUN)
+    apply(s, world, ev('join', 'cat', ROLELESS_FROM, { name: 'Cat', site: sites[2], resetHour: 0, tz: 0 }))
+    const v = s.villages[s.players.cat.villageId]
+    expect(v.role).toBeUndefined()
+    expect(v.name).toBe("Cat's Village")
   })
 })

@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { HABIT_PRESETS } from '../game/data'
 import { foundingProblem, validate } from '../game/reducer'
 import type { GameEvent } from '../game/types'
-import { ROLES, type Role } from '../world/types'
+import { ROLES } from '../world/types'
 import { eventId, type Game } from '../app/store'
 import { ROLE_INFO, roleFits, type Fit, type Spot } from './helpers'
 
 export type { Spot }
 
 /** Found a village: name + first habit, then tap the map to pick the spot
- *  and choose a role (one is suggested from the land around it). */
+ *  (what the land around it suits is shown, but any village can do anything). */
 export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first }: {
   game: Game
   /** the hex last tapped on the map while choosing */
@@ -25,26 +25,21 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
   const [step, setStep] = useState<'about' | 'place'>('about')
   const [name, setName] = useState('')
   const [habit, setHabit] = useState('water')
-  const [picked, setPicked] = useState<{ key: string; role: Role } | null>(null)
   const pid = useState(() => 'p_' + Math.random().toString(36).slice(2, 10))[0]
   const tz = -new Date().getTimezoneOffset()
 
   useEffect(() => { onStep(step) }, [step, onStep])
   const fits = site ? roleFits(game.world, game.state, site) : null
-  // best-suited first, but every role stays on offer
-  const ranked = fits ? [...ROLES].sort((a, b) => RANK[fits[b].fit] - RANK[fits[a].fit]) : [...ROLES]
-  // a role pick sticks to the spot it was made for; a new spot starts on its best fit
-  const siteKey = site ? `${site.col},${site.row}` : ''
-  const role = picked?.key === siteKey ? picked.role : fits ? ranked[0] : null
-  const setRole = (r: Role) => setPicked({ key: siteKey, role: r })
+  // what the land within reach is good for, best first (a hint, not a commitment)
+  const suits = fits ? [...ROLES].filter((r) => fits[r].fit !== 'ok').sort((a, b) => RANK[fits[b].fit] - RANK[fits[a].fit]) : []
 
   const problem = site ? foundingProblem(game.state, game.world, site) : null
 
   const go = async () => {
-    if (!site || !role) return
+    if (!site) return
     const join: GameEvent = {
       t: 'join', id: eventId(), at: game.now().toISOString(), playerId: pid, name: name.trim() || 'Wanderer',
-      role, site: { col: site.col, row: site.row }, resetHour: 3, tz,
+      site: { col: site.col, row: site.row }, resetHour: 3, tz,
     }
     const err = validate(game.state, game.world, join)
     if (err) return
@@ -92,26 +87,19 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
       {site && problem && <p style={{ margin: 0 }}><b>Can't settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
       {site && !problem && fits && (
         <>
-          <p style={{ margin: '0 0 6px' }}><b>Settle here as…</b> <span className="muted">Any role works anywhere; stars rate what's within 3 hexes.</span></p>
-          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            {ranked.map((r) => (
-              <button key={r} className={`btn fit-${fits[r].fit} ${role === r ? 'primary' : ''}`} title={ROLE_INFO[r].blurb} onClick={() => setRole(r)}>
-                {STARS[fits[r].fit]}{ROLE_INFO[r].name}
-              </button>
-            ))}
-          </div>
-          {role && (
-            <p className="muted" style={{ margin: '6px 0 0' }}>
-              {ROLE_INFO[role].blurb}{' '}
-              {fits[role].fit === 'ok' ? <>Not much for it within reach ({fits[role].why}), but it's your call.</> : <>Within reach: {fits[role].why}.</>}
-            </p>
-          )}
+          <p style={{ margin: 0 }}><b>Good land for…</b> <span className="muted">(what's within 3 hexes)</span></p>
+          {suits.length ? (
+            <ul className="suits">
+              {suits.map((r) => <li key={r}>{STARS[fits[r].fit]}<b>{ROLE_INFO[r].name}</b> <span className="muted">· {fits[r].why}</span></li>)}
+            </ul>
+          ) : <p className="muted" style={{ margin: '4px 0 0' }}>Nothing stands out here, but you can build what you like and trade for the rest.</p>}
+          <p className="muted" style={{ margin: '6px 0 0' }}>Your village isn't tied to any of these: build whatever you like, and work out with your neighbours who makes what.</p>
         </>
       )}
       <p className="muted" style={{ margin: '8px 0 0' }}>You can abandon your village any time and settle somewhere new, but that resets your progress.</p>
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn" onClick={() => setStep('about')}>← Back</button>
-        <button className="btn primary" disabled={!site || !!problem || !role} onClick={go}>Found village</button>
+        <button className="btn primary" disabled={!site || !!problem} onClick={go}>Found village</button>
       </div>
     </div>
   )

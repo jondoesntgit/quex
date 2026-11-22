@@ -64,13 +64,15 @@ export function tryAction(game: Game, p: Player, action: ActionKind, col: number
 }
 
 export const SIZE_LABEL = { big: 'Big', medium: 'Med', small: 'Small' } as const
+/** Ways a village can specialise. Not a setting: just what the building ladders
+ *  lead to, and what the land suits (roleFits). */
 export const ROLE_INFO: Record<string, { name: string; blurb: string }> = {
-  farm: { name: 'Farmers', blurb: 'Plains and river valleys. Grain, bread, the food basket of the region.' },
-  port: { name: 'Trade', blurb: 'On the coast. Fish, salt and ships, and the best trade with neighbours and far-off markets.' },
-  mining: { name: 'Miners', blurb: 'Under the mountains. Stone, bricks, copper, then iron and bronze.' },
-  forestry: { name: 'Foresters', blurb: 'Timber, game, leather and the charcoal the miners need.' },
-  herding: { name: 'Herders', blurb: 'Hills and meadows. Wool, cheese, cloth and pack animals.' },
-  explorer: { name: 'Explorers', blurb: 'The frontier. Fed by friends, brings back rare loot and new land.' },
+  farm: { name: 'Farming', blurb: 'Plains and river valleys. Grain, bread, the food basket of the region.' },
+  port: { name: 'Fishing & trade', blurb: 'On the coast. Fish, salt and ships, and the best trade with neighbours and far-off markets.' },
+  mining: { name: 'Mining', blurb: 'Under the mountains. Stone, bricks, copper, then iron and bronze.' },
+  forestry: { name: 'Forestry', blurb: 'Timber, game, leather and the charcoal the miners need.' },
+  herding: { name: 'Herding', blurb: 'Hills and meadows. Wool, cheese, cloth and pack animals.' },
+  explorer: { name: 'Exploring', blurb: 'The frontier. Fed by friends, brings back rare loot and new land.' },
 }
 
 export interface Spot { col: number; row: number }

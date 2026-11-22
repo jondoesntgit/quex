@@ -4,7 +4,7 @@ import { dayScore, defence, foodStock, logText, popCap, storageCap } from '../ga
 import type { Habit, Player, TaskStatus } from '../game/types'
 import { addDays, isSabbath, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
-import { ROLE_INFO, shareSpot, SIZE_LABEL } from './helpers'
+import { shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
 import { FAMILY_WORLD, SANDBOX_WORLD, worldUrl } from '../app/worlds'
 import { winterPrep } from '../game/winter'
@@ -313,7 +313,6 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
   return (
     <div>
       <h3 style={{ marginTop: 0 }}>{v.name}</h3>
-      <p className="muted" style={{ marginTop: 0 }}>{ROLE_INFO[v.role]?.blurb}</p>
       <div className="row" style={{ gap: 14 }}>
         <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}</span>
         <span><Icon name="defence" title="Defence" /> {defence(v)}</span>
@@ -343,7 +342,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
       <h3>Start over</h3>
       {!confirm ? (
         <>
-          <p className="muted" style={{ marginTop: 0 }}>Wrong spot or wrong role? You can abandon this village and settle somewhere new. Your habits, buildings, goods and streaks are lost; the map stays explored.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Wrong spot? You can abandon this village and settle somewhere new. Your habits, buildings, goods and streaks are lost; the map stays explored.</p>
           <button className="btn" onClick={() => setConfirm(true)}>Abandon village…</button>
         </>
       ) : (
@@ -402,7 +401,7 @@ export function PartyPanel({ game, p, onAddFriend, onManage }: { game: Game; p: 
           <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px dashed var(--paper-2)' }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <b>{o.name}{o.id === p.id ? ' (you)' : ''}{game.isSupervised(o.id) && <span className="muted" title={`Looked after by ${game.guardianNames(o.id).join(' & ')}`}> 👪</span>}</b>
-              <span className="muted">{ROLE_INFO[v.role]?.name} · habits {o.habits.length}/{o.habitSlots}</span>
+              <span className="muted">{v?.name} · habits {o.habits.length}/{o.habitSlots}</span>
             </div>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span className="pips">
@@ -479,7 +478,7 @@ export function GuestPanel({ game }: { game: Game }) {
                 <div key={o.id} style={{ padding: '6px 0', borderBottom: '1px dashed var(--paper-2)' }}>
                   <div className="row" style={{ justifyContent: 'space-between' }}>
                     <b>{o.name}</b>
-                    <span className="muted">{ROLE_INFO[v.role]?.name} · {v.name}</span>
+                    <span className="muted">{v.name}</span>
                   </div>
                   <span className="muted">{Math.floor(v.population)} villagers · {v.buildings.length} {v.buildings.length === 1 ? 'building' : 'buildings'}</span>
                 </div>

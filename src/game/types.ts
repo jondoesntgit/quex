@@ -51,6 +51,8 @@ export interface Player {
   days: Record<ISODate, DayRecord>
   tokens: Token[]
   lastTick: ISODate | null
+  /** the player's first day (missing for players who joined before it was kept) */
+  joined?: ISODate
 }
 
 export interface Building {
@@ -66,7 +68,8 @@ export interface Village {
   id: string
   playerId: string
   name: string
-  role: Role
+  /** villages founded before ROLELESS_FROM had a role; it no longer does anything */
+  role?: Role
   col: number
   row: number
   population: number
@@ -156,7 +159,7 @@ export interface Stand {
 interface Base { id: string; at: string; playerId: string }
 
 export type GameEvent =
-  | (Base & { t: 'join'; name: string; role: Role; site: { col: number; row: number }; resetHour: number; tz: number })
+  | (Base & { t: 'join'; name: string; role?: Role; site: { col: number; row: number }; resetHour: number; tz: number })
   | (Base & { t: 'progress'; date: ISODate; slot: number; status: TaskStatus })
   | (Base & { t: 'habit'; date: ISODate; habitId: string; done: boolean })
   | (Base & { t: 'habitAdd'; habit: Habit })

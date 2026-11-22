@@ -242,9 +242,14 @@ export function foodStock(v: Village, keepsOnly = false) {
   return t
 }
 
-/** Cost after specialisation: other roles' buildings cost double. */
-export function buildCost(v: Village, def: BuildingDef): Goods {
-  const k = def.role === 'any' || def.role === v.role ? 1 : 2
+/** Villages had a role until ROLELESS_FROM: other roles' buildings cost double,
+ *  their own made 25% more. Now any village builds anything at the same price;
+ *  specialising is a choice players make together, not a rule. */
+export const ROLELESS_FROM = '2026-11-22T14:30:00.000Z'
+const onRole = (v: Village, def: BuildingDef, at: string) => at < ROLELESS_FROM && def.role === v.role
+
+export function buildCost(v: Village, def: BuildingDef, at: string): Goods {
+  const k = at >= ROLELESS_FROM || def.role === 'any' || def.role === v.role ? 1 : 2
   const out: Goods = {}
   for (const [g, n] of Object.entries(def.cost)) out[g as Good] = (n ?? 0) * k
   return out
@@ -432,7 +437,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
         if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
         return def.nearTerrain!.includes(effectiveTerrain(world, s, cellIndex(world, o.col, o.row)))
       })) return `${def.name} must be next to ${def.nearTerrain.join('/')}`
-      const cost = buildCost(v, def)
+      const cost = buildCost(v, def, ev.at)
       if (!hasGoods(v, cost, tok.strength)) return `Needs ${fmtGoods(cost, tok.strength)}`
       return null
     }
@@ -546,7 +551,8 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       const v = s.villages[p.villageId]
       const name = ev.name.trim()
       // a village still called after its founder follows the new name
-      if (v.name === `${p.name}'s ${ROLE_TOWN[v.role]}`) v.name = `${name}'s ${ROLE_TOWN[v.role]}`
+      const town = townName(v)
+      if (v.name === `${p.name}'s ${town}`) v.name = `${name}'s ${town}`
       log(s, ev.at, p.id, `${p.name} is now known as {p:${p.id}|${name}}.`, 'good')
       p.name = name
       return s
@@ -595,9 +601,10 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   const p: Player = {
     id: ev.playerId, name: ev.name, villageId: vid, resetHour: ev.resetHour, resetChangedAt: null, tz: ev.tz,
     habits: [], habitSlots: 1, perfectStreak: 0, freezes: 1, days: {}, tokens: [], lastTick: null,
+    joined: playerDate(ev.at, ev.resetHour, ev.tz),
   }
   const v: Village = {
-    id: vid, playerId: p.id, name: `${ev.name}'s ${ROLE_TOWN[ev.role]}`, role: ev.role,
+    id: vid, playerId: p.id, name: `${ev.name}'s ${ev.role ? ROLE_TOWN[ev.role] : 'Village'}`, ...(ev.role ? { role: ev.role } : {}),
     col: ev.site.col, row: ev.site.row, population: 5, morale: 60,
     goods: { grain: 12, timber: 8, stone: 3, berries: 4, ...(ev.at >= PURSE_FROM ? PURSE : {}) }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',
@@ -605,10 +612,11 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   s.players[p.id] = p
   s.villages[vid] = v
   reveal(world, s, ev.site, 4)
-  log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role} village.`, 'good')
+  log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role ? `${ev.role} ` : ''}village.`, 'good')
   return s
 }
 
+const townName = (v: Village) => (v.role ? ROLE_TOWN[v.role] : 'Village')
 const ROLE_TOWN: Record<string, string> = {
   farm: 'Farmstead', port: 'Trading Post', mining: 'Mine', forestry: 'Woodhall', herding: 'Steading', explorer: 'Camp',
 }
@@ -747,7 +755,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'build': {
       const def = BUILDINGS[ev.building!]
       const existing = buildingAt(s, ev.col, ev.row)
-      addGoods(v, buildCost(v, def), -k)
+      addGoods(v, buildCost(v, def, ev.at), -k)
       if (existing) existing.building.progress = Math.min(1, existing.building.progress + k)
       else v.buildings.push({ id: ev.id, type: def.id, col: ev.col, row: ev.row, progress: Math.min(1, k) })
       const b = buildingAt(s, ev.col, ev.row)!.building
@@ -884,7 +892,7 @@ function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord
   for (const b of done(v)) {
     const def = BUILDINGS[b.type]
     if (!def.produces) continue
-    let k = prod * moraleK * libraryK * (def.role === v.role ? 1.25 : 1)
+    let k = prod * moraleK * libraryK * (onRole(v, def, at) ? 1.25 : 1)
     if (def.crop) k *= CROP_SEASON[season] * (habitOn('rain') ? 1.2 : 1)
     // ground picked clean of stone grows more
     if (def.crop && at >= DEPLETION_FROM) k *= 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, cellIndex(world, b.col, b.row)))
