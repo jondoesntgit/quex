@@ -133,15 +133,14 @@ function Main({ game }: { game: Game }) {
   const [showHelp, setShowHelp] = useState(false)
   const [showCaravans, setShowCaravans] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
-  // one-off message from startup (e.g. accepting a parent link)
+  // one-off messages: from startup (e.g. accepting a parent link), or an action the server refused
   useEffect(() => {
     if (!game.flash) return
     const m = game.flash
     game.flash = null
     setToast(m)
-    const t = setTimeout(() => setToast((x) => (x === m ? null : x)), 6000)
-    return () => clearTimeout(t)
-  }, [game])
+    setTimeout(() => setToast((x) => (x === m ? null : x)), 6000)
+  })
 
   const pid = game.meta.activePlayer
   const p = pid ? game.state.players[pid] : null

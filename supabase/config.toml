@@ -4,3 +4,7 @@ project_id = "quex"
 # The MCP endpoint for AI assistants authenticates with its own link token, not a Supabase JWT.
 [functions.quex-mcp]
 verify_jwt = false
+
+# The game server checks the player's session itself (and the schedule's secret for ticks).
+[functions.quex-act]
+verify_jwt = false

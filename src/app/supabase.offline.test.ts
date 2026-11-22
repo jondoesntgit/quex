@@ -11,31 +11,35 @@ Object.defineProperty(globalThis.navigator, 'onLine', { get: () => online.on, co
 const listeners: Record<string, (() => void)[]> = {}
 g.window = { addEventListener: (t: string, f: () => void) => { (listeners[t] ??= []).push(f) } }
 
-/** A fake Supabase: a table of events that fails like fetch does while "offline". */
+/** A fake Supabase: the world's state in a table, and the game server, both
+ *  failing like fetch does while "offline". */
 function fakeServer() {
   const rows: GameEvent[] = []
+  const server = { n: 0, refuse: null as string | null }
   const fail = () => ({ data: null, error: { message: 'TypeError: Failed to fetch' } })
   const chain = (result: () => unknown) => {
     const c: Record<string, unknown> = {}
-    for (const m of ['select', 'eq', 'order', 'range', 'in', 'gte']) c[m] = () => c
+    for (const m of ['select', 'eq', 'order', 'range', 'in', 'gte', 'maybeSingle']) c[m] = () => c
     c.then = (res: (v: unknown) => void) => res(result())
     return c
   }
   const sb = {
     rpc: async (name: string) => (name === 'world_is_public' ? { data: publicWorld.on, error: null } : { data: null, error: null }),
-    from: () => ({
-      ...chain(() => (online.on ? { data: rows.map((body) => ({ body })), error: null } : fail())),
-      insert: (r: { body: GameEvent }) => chain(() => {
-        if (!online.on) return fail()
-        if (rows.some((x) => x.id === r.body.id)) return { error: { message: 'duplicate key value' } }
-        rows.push(r.body)
-        return { error: null }
-      }),
-    }),
+    auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) },
+    from: () => chain(() => (online.on ? { data: { state: { players: {}, ids: rows.map((e) => e.id) }, n: server.n }, error: null } : fail())),
   }
-  return { sb, rows }
+  // the game server: quex-act
+  g.fetch = async (_url: string, init: { body: string }) => {
+    if (!online.on) throw new TypeError('Failed to fetch')
+    const body = JSON.parse(init.body)
+    if (server.refuse) return { ok: false, status: 422, json: async () => ({ error: server.refuse }) }
+    if (!rows.some((x) => x.id === body.event.id)) { rows.push(body.event); server.n++ }
+    return { ok: true, status: 200, json: async () => ({ n: server.n, event: { ...body.event, at: 'server time' } }) }
+  }
+  return { sb, rows, server }
 }
 const ev = (id: string): GameEvent => ({ t: 'progress', id, at: '2026-11-18T10:00:00Z', playerId: 'p', date: '2026-11-18', slot: 0, status: 'full' })
+const ids = (snap: { state: unknown }) => (snap.state as { ids: string[] }).ids
 
 describe('playing offline', async () => {
   const { SupabaseStore } = await import('./supabase')
@@ -45,39 +49,46 @@ describe('playing offline', async () => {
     const { sb, rows } = fakeServer()
     rows.push(ev('a'), ev('b'))
     const s1 = new SupabaseStore(sb as never, 'w')
-    expect((await s1.load()).map((e) => e.id)).toEqual(['a', 'b'])
+    expect(ids(await s1.snapshot())).toEqual(['a', 'b'])
     expect(s1.offline).toBe(false)
     online.on = false
     const s2 = new SupabaseStore(sb as never, 'w')
-    expect((await s2.load()).map((e) => e.id)).toEqual(['a', 'b'])
+    expect(ids(await s2.snapshot())).toEqual(['a', 'b'])
     expect(s2.offline).toBe(true)
   })
 
   it('queues actions taken offline and sends them when back online', async () => {
     const { sb, rows } = fakeServer()
     const s = new SupabaseStore(sb as never, 'w')
-    await s.load()
+    await s.snapshot()
     online.on = false
-    await s.append(ev('x'))
-    await s.append(ev('y'))
+    expect(await s.send(ev('x'))).toEqual({ status: 'queued' })
+    await s.send(ev('y'))
     expect(rows).toHaveLength(0)
-    expect(s.pending().map((e) => e.id)).toEqual(['x', 'y'])
-    // reopening offline still shows them
-    expect((await new SupabaseStore(sb as never, 'w').load()).map((e) => e.id)).toEqual(['x', 'y'])
+    expect(s.outbox().map((e) => e.id)).toEqual(['x', 'y'])
+    expect(s.offline).toBe(true)
     online.on = true
-    await s.flush()
+    const r = await s.send(ev('x'))
+    expect(r).toMatchObject({ status: 'ok', n: 1, event: { id: 'x', at: 'server time' } })
+    expect(s.outbox().map((e) => e.id)).toEqual(['y'])
+    await s.send(ev('y'))
     expect(rows.map((e) => e.id)).toEqual(['x', 'y'])
-    expect(s.pending()).toHaveLength(0)
+    expect(s.outbox()).toHaveLength(0)
     expect(s.offline).toBe(false)
-    // sending twice is harmless
-    await s.append(ev('y'))
-    expect(rows).toHaveLength(2)
+  })
+
+  it('drops an action the server refuses, with its reason', async () => {
+    const { sb, server } = fakeServer()
+    const s = new SupabaseStore(sb as never, 'w')
+    server.refuse = 'Not enough goods'
+    expect(await s.send(ev('z'))).toEqual({ status: 'refused', error: 'Not enough goods' })
+    expect(s.outbox()).toHaveLength(0)
   })
 
   it('with no copy on the device, an unreachable server is still an error', async () => {
     const { sb } = fakeServer()
     online.on = false
-    await expect(new SupabaseStore(sb as never, 'w').load()).rejects.toThrow()
+    await expect(new SupabaseStore(sb as never, 'w').snapshot()).rejects.toThrow()
   })
 })
 
@@ -88,9 +99,9 @@ describe('guests', async () => {
     const { sb, rows } = fakeServer()
     rows.push(ev('a'))
     publicWorld.on = false
-    await expect(new SupabaseStore(sb as never, 'w', true).load()).rejects.toBeInstanceOf(PrivateWorldError)
+    await expect(new SupabaseStore(sb as never, 'w', true).snapshot()).rejects.toBeInstanceOf(PrivateWorldError)
     publicWorld.on = true
-    expect((await new SupabaseStore(sb as never, 'w', true).load()).map((e) => e.id)).toEqual(['a'])
+    expect(ids(await new SupabaseStore(sb as never, 'w', true).snapshot())).toEqual(['a'])
     expect((await new SupabaseStore(sb as never, 'w', true).access()).me).toBeNull()
   })
 })

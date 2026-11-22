@@ -1,8 +1,13 @@
-/** App store: holds the event log, replays it into GameState, persists it.
+/** App store: the game state, and where it comes from.
  *
- *  Storage backends implement EventStore. LocalStore (localStorage) is the
- *  default so the game runs with no account; SupabaseStore syncs the same
- *  events for a shared world when VITE_SUPABASE_URL is set.
+ *  Online (SupabaseStore), the game server holds each world's state: the app
+ *  loads it, sends actions to the server, and shows them straight away while
+ *  they're on their way (pending). The server's answer, and other players'
+ *  actions, arrive over realtime and are applied to the last state the server
+ *  confirmed (base). If one goes missing, the app reloads the state.
+ *
+ *  Offline builds (LocalStore, no backend) keep a log on the device and replay
+ *  it, as everything did before the server took over.
  *
  *  Task *labels* are private and never leave the device: they live in
  *  `labels`, not in events.
@@ -14,10 +19,20 @@ import { apply, newGame, pendingTicks } from '../game/reducer'
 import type { GameEvent, GameState, ISODate } from '../game/types'
 import type { Access } from './supabase'
 
+export interface Snapshot { state: GameState; n: number }
+export type Sent = { status: 'ok'; n: number; event: GameEvent } | { status: 'refused'; error: string } | { status: 'queued' }
+
 export interface EventStore {
   load(): Promise<GameEvent[]>
   append(ev: GameEvent): Promise<void>
-  subscribe(cb: (ev: GameEvent) => void): () => void
+  /** n: the action's number in the world (server-held worlds) */
+  subscribe(cb: (ev: GameEvent, n?: number) => void): () => void
+  /** server-held worlds: the state now, sending actions, and those not sent yet */
+  snapshot?(): Promise<Snapshot>
+  send?(ev: GameEvent): Promise<Sent>
+  outbox?(): GameEvent[]
+  keep?(snap: Snapshot): void
+  onOnline?: () => void
   /** private task names synced to the owner's account (online only) */
   loadLabels?(playerIds: string[]): Promise<{ player_id: string; date: string; slot: number; text: string }[]>
   saveLabel?(playerId: string, date: string, slot: number, text: string): Promise<void>
@@ -110,7 +125,70 @@ export class Game {
     for (const ev of this.events) apply(this.state, this.world, ev)
   }
 
+  // ---------------------------------------------------------- server-held worlds
+
+  /** the last state the server confirmed, and how many actions it has had */
+  private base: GameState | null = null
+  private n = 0
+  /** our actions on their way to the server, shown on top of base */
+  private pending: GameEvent[] = []
+  private get served() { return !!this.store.snapshot }
+
+  private show() {
+    if (!this.base) return
+    this.state = structuredClone(this.base)
+    for (const ev of this.pending) apply(this.state, this.world, ev)
+    this.emit()
+  }
+
+  /** Reload the world from the server (on start, and whenever we might have missed something). */
+  async resync() {
+    const snap = await this.store.snapshot!()
+    this.base = snap.state
+    this.n = snap.n
+    const sent = new Set(this.store.outbox?.().map((e) => e.id))
+    this.pending = this.pending.filter((e) => sent.has(e.id))
+    this.show()
+  }
+
+  /** An action the server has saved: ours coming back, or someone else's. */
+  private confirmed(ev: GameEvent, n?: number) {
+    this.pending = this.pending.filter((e) => e.id !== ev.id)
+    if (n == null || !this.base) { void this.resync(); return }
+    if (n <= this.n) { this.show(); return } // already have it
+    if (n !== this.n + 1) { void this.resync(); return } // missed one
+    apply(this.base, this.world, ev)
+    this.n = n
+    this.store.keep?.({ state: this.base, n })
+    this.show()
+  }
+
+  private async send(ev: GameEvent) {
+    const r = await this.store.send!(ev)
+    if (r.status === 'ok') this.confirmed(r.event, r.n)
+    else if (r.status === 'refused') {
+      this.pending = this.pending.filter((e) => e.id !== ev.id)
+      // a nightly tick someone else already did is no news
+      if (ev.t !== 'tick') this.flash = `That didn't go through: ${r.error}`
+      this.show()
+    }
+  }
+
+  /** Send what was done offline, oldest first. */
+  private sending = false
+  async sendOutbox() {
+    if (this.sending || !this.store.outbox) return
+    this.sending = true
+    try {
+      for (const ev of this.store.outbox()) {
+        await this.send(ev)
+        if (this.store.outbox().some((e) => e.id === ev.id)) break // still offline
+      }
+    } finally { this.sending = false }
+  }
+
   async init() {
+    if (this.served) return this.initServed()
     this.events = await this.store.load()
     this.replay()
     this.unsub = this.store.subscribe((ev) => {
@@ -121,6 +199,25 @@ export class Game {
       else apply(this.state, this.world, ev)
       this.emit()
     })
+    await this.catchUp()
+    this.emit()
+  }
+
+  private async initServed() {
+    this.pending = [...(this.store.outbox?.() ?? [])]
+    await this.resync()
+    this.unsub = this.store.subscribe((ev, n) => this.confirmed(ev, n))
+    this.store.onOnline = () => { void this.resync().then(() => this.sendOutbox()).catch((e) => console.warn('resync', e)) }
+    // coming back to the tab: catch up on anything realtime missed while asleep
+    const wake = () => {
+      if (document.visibilityState === 'visible') void this.resync().then(() => this.catchUp()).catch((e) => console.warn('resync', e))
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', wake)
+      const unsub = this.unsub
+      this.unsub = () => { unsub(); document.removeEventListener('visibilitychange', wake) }
+    }
+    await this.sendOutbox()
     await this.catchUp()
     this.emit()
   }
@@ -145,6 +242,14 @@ export class Game {
   }
 
   async dispatch(ev: GameEvent) {
+    if (this.served) {
+      // show it now; the server's answer replaces it
+      this.pending.push(ev)
+      apply(this.state, this.world, ev)
+      this.emit()
+      await this.send(ev)
+      return
+    }
     this.events.push(ev)
     apply(this.state, this.world, ev)
     await this.store.append(ev)

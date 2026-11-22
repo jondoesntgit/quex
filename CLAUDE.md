@@ -31,9 +31,18 @@ and by the Supabase GitHub integration (the "Supabase Preview" check). Whichever
 applies them and the other finds nothing to do. Don't hand-edit the live schema. Check with
 the Supabase MCP `list_migrations`.
 
-The `migrate` CI job also deploys the Edge Function `supabase/functions/quex-mcp` (the MCP
-endpoint for AI assistants, `verify_jwt = false`; it authenticates with its own link tokens
-through the `mcp_*` SQL functions).
+The `migrate` CI job also deploys the Edge Functions:
+- `quex-act`, **the game server**. It holds each world's state in `world_state` and is the
+  only writer of `events`: clients send actions to it, and it stamps the time, checks them with
+  the same reducer (`src/server/act.ts`, bundled to `supabase/functions/quex-act/game.js` by
+  `npm run build:functions`, which CI runs first), and saves the event and the new state in one
+  transaction (`commit_event`). pg_cron calls it hourly (`op: 'tick'`) for the nightly work.
+  Clients load the state, apply realtime events on top (`events.n` counts them per world) and
+  reload it if one is missed. Rule changes therefore take effect from deploy: no more
+  `…_FROM` cutoffs are needed for online worlds. The offline build (LocalStore) still
+  replays a local log.
+- `quex-mcp`, the MCP endpoint for AI assistants (`verify_jwt = false`; it authenticates with
+  its own link tokens through the `mcp_*` SQL functions).
 
 Worlds: `quex-season-1` is the friends-and-family playtest (public to view, `closed` to new
 players); `quex-sandbox` is open to anyone and is the default for people without a village in

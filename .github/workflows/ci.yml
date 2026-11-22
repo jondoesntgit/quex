@@ -22,9 +22,16 @@ jobs:
       SUPABASE_PROJECT_REF: snzgotquolwdbdnmbdov
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      # the game rules, bundled for the game server
+      - run: npm run build:functions
       - uses: supabase/setup-cli@v1
         with: { version: 3.2.0 }
       - run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
       - run: supabase db push --remote --include-all --yes
       # the AI-assistant (MCP) endpoint; it checks its own link tokens
       - run: supabase functions deploy quex-mcp --remote="$SUPABASE_PROJECT_REF" --no-verify-jwt --use-api --yes
+      # the game server: holds each world's state and checks every action
+      - run: supabase functions deploy quex-act --remote="$SUPABASE_PROJECT_REF" --no-verify-jwt --use-api --yes

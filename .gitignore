@@ -28,3 +28,6 @@ art/raw/
 world.json
 .env
 ios/App/App/public
+
+# the game rules bundled for the quex-act Edge Function (npm run build:functions)
+supabase/functions/quex-act/game.js

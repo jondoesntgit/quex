@@ -1,4 +1,6 @@
-/** Supabase event store: one shared, append-only event log per world.
+/** Supabase store: the game server (Edge Function quex-act) holds each world's
+ *  state; this loads it, sends actions to the server, and passes on the
+ *  actions it saves, as they happen.
  *
  *  Switched on by VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY. Without them
  *  the app falls back to LocalStore and nothing leaves the device.
@@ -7,8 +9,8 @@
  *  storage), so neighbours can only ever see done/half/missed pips.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GameEvent } from '../game/types'
-import type { EventStore } from './store'
+import type { GameEvent, GameState } from '../game/types'
+import type { EventStore, Sent, Snapshot } from './store'
 import { FAMILY_WORLD, SANDBOX_WORLD } from './worlds'
 import { savedSession, saveSession, setAway } from './accounts'
 
@@ -89,7 +91,8 @@ export class SupabaseStore implements EventStore {
   /** true while showing the device's copy of the world because the server can't be reached */
   offline = false
   onStatus: () => void = () => {}
-  private flushing = false
+  /** back online: the game sends what's waiting */
+  onOnline: () => void = () => {}
 
   /** read-only visitor: no account, or signed in to a world that isn't taking new players */
   readonly guest: boolean
@@ -101,7 +104,7 @@ export class SupabaseStore implements EventStore {
     this.world = world
     this.guest = guest
     this.closedToMe = closedToMe
-    window.addEventListener('online', () => { void this.flush() })
+    window.addEventListener('online', () => this.onOnline())
   }
 
   /** Can people without an account look at this world? */
@@ -139,85 +142,76 @@ export class SupabaseStore implements EventStore {
     if (error) throw new Error(error.message)
   }
 
-  private get cacheKey() { return `quex:world:v1:${this.world}` }
+  private get cacheKey() { return `quex:state:v2:${this.world}` }
   private get queueKey() { return `quex:outbox:v1:${this.world}` }
-  /** events made offline, waiting to be sent */
-  pending(): GameEvent[] { return readJSON<GameEvent[]>(this.queueKey, []) }
+  /** actions made offline, waiting to be sent */
+  outbox(): GameEvent[] { return readJSON<GameEvent[]>(this.queueKey, []) }
+  private setOutbox(q: GameEvent[]) { writeJSON(this.queueKey, q) }
 
   private setOffline(v: boolean) {
     if (this.offline !== v) { this.offline = v; this.onStatus() }
   }
 
-  async load(): Promise<GameEvent[]> {
+  /** The server holds the world: there's no log to replay (see snapshot). */
+  async load(): Promise<GameEvent[]> { return [] }
+  async append(ev: GameEvent) { await this.send(ev) }
+
+  /** The world as the server has it now (or this device's last copy, offline). */
+  async snapshot(): Promise<Snapshot> {
     if (this.guest && !(await this.isPublic())) throw new PrivateWorldError()
-    const out: GameEvent[] = []
-    let from = 0
     try {
-      for (;;) {
-        const { data, error } = await this.sb.from('events').select('body').eq('world', this.world)
-          .order('at', { ascending: true }).order('seq', { ascending: true }).range(from, from + 999)
-        if (error) throw new Error(error.message)
-        out.push(...data.map((r) => r.body as GameEvent))
-        if (data.length < 1000) break
-        from += 1000
-      }
+      const { data, error } = await this.sb.from('world_state').select('state, n').eq('world', this.world).maybeSingle()
+      if (error) throw new Error(error.message)
+      // a world nobody has played since the server took over: the server makes its first snapshot
+      const snap = data ? { state: data.state as GameState, n: Number(data.n) } : await this.call<Snapshot>({ op: 'state', world: this.world })
+      this.setOffline(false)
+      writeJSON(this.cacheKey, snap)
+      return snap
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      const cached = readJSON<GameEvent[] | null>(this.cacheKey, null)
-      if (cached && offlineError(msg)) {
-        // offline: play from this device's copy (plus anything still waiting to send)
-        this.setOffline(true)
-        const seen = new Set(cached.map((x) => x.id))
-        return [...cached, ...this.pending().filter((x) => !seen.has(x.id))]
-      }
+      const cached = readJSON<Snapshot | null>(this.cacheKey, null)
+      if (cached && offlineError(msg)) { this.setOffline(true); return cached }
       throw e
     }
-    this.setOffline(false)
-    writeJSON(this.cacheKey, out)
-    void this.flush()
-    const seen = new Set(out.map((x) => x.id))
-    return [...out, ...this.pending().filter((x) => !seen.has(x.id))]
   }
 
-  private remember(ev: GameEvent) {
-    const cached = readJSON<GameEvent[]>(this.cacheKey, [])
-    if (!cached.some((x) => x.id === ev.id)) { cached.push(ev); writeJSON(this.cacheKey, cached) }
-  }
+  /** Remember the server's latest state on this device, for playing offline. */
+  keep(snap: Snapshot) { writeJSON(this.cacheKey, snap) }
 
-  async append(ev: GameEvent) {
-    this.remember(ev)
-    if (!navigator.onLine) return this.queue(ev)
-    const { error } = await this.sb.from('events').insert({
-      id: ev.id, world: this.world, at: ev.at, player_id: ev.playerId, kind: ev.t, body: ev,
+  private async call<T>(body: object): Promise<T> {
+    const { data: s } = await this.sb.auth.getSession()
+    const r = await fetch(`${URL_}/functions/v1/quex-act`, {
+      method: 'POST',
+      headers: { apikey: KEY!, Authorization: `Bearer ${s.session?.access_token ?? KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
-    if (!error) return this.setOffline(false)
-    if (offlineError(error.message)) this.queue(ev)
-    else console.warn('event not synced', error.message)
+    const out = await r.json().catch(() => ({}))
+    if (!r.ok) throw new ServerError(r.status, (out as { error?: string }).error ?? `Server error ${r.status}`)
+    return out as T
   }
 
-  private queue(ev: GameEvent) {
-    const q = this.pending()
-    if (!q.some((x) => x.id === ev.id)) { q.push(ev); writeJSON(this.queueKey, q) }
-    this.setOffline(true)
-  }
-
-  /** Send events made while offline, oldest first. */
-  async flush() {
-    if (this.flushing || !navigator.onLine) return
-    this.flushing = true
+  /** Ask the server to do something. Anything that can't be sent now waits in the outbox. */
+  async send(ev: GameEvent): Promise<Sent> {
+    const drop = () => this.setOutbox(this.outbox().filter((x) => x.id !== ev.id))
+    const wait = (): Sent => {
+      const q = this.outbox()
+      if (!q.some((x) => x.id === ev.id)) { q.push(ev); this.setOutbox(q) }
+      this.setOffline(true)
+      return { status: 'queued' }
+    }
+    if (!navigator.onLine) return wait()
     try {
-      for (const ev of this.pending()) {
-        const { error } = await this.sb.from('events').insert({
-          id: ev.id, world: this.world, at: ev.at, player_id: ev.playerId, kind: ev.t, body: ev,
-        })
-        if (error && offlineError(error.message)) return // still offline: try again later
-        // sent, already there (duplicate id) or refused: either way it leaves the outbox
-        if (error && !/duplicate key/i.test(error.message)) console.warn('queued event not synced', error.message)
-        writeJSON(this.queueKey, this.pending().filter((x) => x.id !== ev.id))
-      }
+      const r = await this.call<{ n: number; event: GameEvent }>({ op: 'act', world: this.world, event: ev })
+      drop()
       this.setOffline(false)
-    } finally {
-      this.flushing = false
+      return { status: 'ok', n: r.n, event: r.event }
+    } catch (e) {
+      // refused by the rules, or not allowed: it won't go through later either
+      if (e instanceof ServerError && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 408 && e.status !== 429) {
+        drop()
+        return { status: 'refused', error: e.message }
+      }
+      return wait()
     }
   }
 
@@ -247,12 +241,13 @@ export class SupabaseStore implements EventStore {
     return data.map((r) => r.player_id as string)
   }
 
-  subscribe(cb: (ev: GameEvent) => void) {
+  /** Each action the server saves, as it happens (with its number, to spot a missed one). */
+  subscribe(cb: (ev: GameEvent, n?: number) => void) {
     // a topic of its own: supabase-js hands back an existing channel for a
     // repeated topic, and adding callbacks to one already subscribed throws
     const ch = this.sb.channel(`events:${this.world}:${topicId()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: `world=eq.${this.world}` },
-        (msg) => { const ev = (msg.new as { body: GameEvent }).body; this.remember(ev); cb(ev) })
+        (msg) => { const row = msg.new as { body: GameEvent; n: number | null }; cb(row.body, row.n ?? undefined) })
       .subscribe()
     return () => { this.sb.removeChannel(ch) }
   }
@@ -337,6 +332,12 @@ export interface Access {
   public: boolean
   /** only existing players can join */
   closed: boolean
+}
+
+/** The game server said no (status 4xx) or failed (5xx). */
+export class ServerError extends Error {
+  status: number
+  constructor(status: number, message: string) { super(message); this.status = status }
 }
 
 /** A guest tried to look at a world that isn't public. */

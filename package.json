@@ -12,7 +12,8 @@
     "art": "bash tools/build_art.sh",
     "ios": "npm run build && npx cap sync ios && npx cap open ios",
     "world": "tsx scripts/dump-world.ts",
-    "deploy": "bash scripts/deploy.sh"
+    "deploy": "bash scripts/deploy.sh",
+    "build:functions": "esbuild src/server/act.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=supabase/functions/quex-act/game.js"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.2",
