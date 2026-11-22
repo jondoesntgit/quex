@@ -21,7 +21,15 @@ import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
 import type { GameState } from '../game/types'
 import { landAt, territoryCells } from '../game/reducer'
-import { isDeposit } from '../world/land'
+import { weekSeason } from '../game/calendar'
+import { strongholdsOf } from '../game/strongholds'
+import { isDeposit, MOUNTAIN_TERRAIN } from '../world/land'
+import { leftAt } from '../game/deposits'
+import { drawRocks, poisson, spots, type RockKind } from './rocks'
+import { drawCottages } from './cottages'
+import { drawCobbles } from './cobbles'
+import type { HouseArt } from './houseart'
+import { houseSpots, villageSpots, type Spot } from './townlayout'
 import { People } from './people'
 import { Traders } from './traders'
 import type { Atlas } from './atlas'
@@ -32,7 +40,7 @@ export interface SceneInput {
   viewer: string | null
   selected: { col: number; row: number } | null
   highlight?: number[] // cells to tint (e.g. valid targets)
-  blocked?: number[] // cells to tint red (e.g. too close to a neighbour)
+  blocked?: number[] // cells that can't be settled (too close to a neighbour): dimmed, gently pulsing
   /** a hex someone sent a link to: marked in pink */
   focus?: number
   /** lift the fog (choosing where to found a village) */
@@ -50,7 +58,7 @@ const BUILDING_SPRITE: Partial<Record<BuildingId, string>> = {
   quarry: 'f_mine', copper_mine: 'f_mine', iron_mine: 'f_mine', kiln: 'f_hut', smelter: 'f_hut', bloomery: 'f_hut', bronze_foundry: 'f_hut',
   lumber_camp: 'f_hut', forager_camp: 'f_hut', hunting_lodge: 'f_hut', charcoal_kiln: 'f_hut', sawmill: 'f_hut',
   pen: 'f_hut', dairy: 'f_hut', weaver: 'f_hut', scout_camp: 'f_hut', outfitter: 'f_hut',
-  house: 'f_hut', granary: 'f_hut', palisade: 'f_hut', chapel: 'f_hut', library: 'f_hut', market: 'f_village',
+  house: 'f_cottages', granary: 'f_hut', palisade: 'f_hut', chapel: 'f_hut', library: 'f_hut', market: 'f_village',
 }
 const MONSTER_SPRITE = { goblins: 'f_goblins', orcs: 'f_orcs', trolls: 'f_troll', dragon: 'f_dragon' } as const
 
@@ -78,13 +86,43 @@ export class MapView {
   onSelect: (col: number, row: number) => void = () => {}
 
   atlas: Atlas
-  constructor(atlas: Atlas) {
+  /** the Blender houses (villages and House buildings); without them the older drawings are used */
+  houses: HouseArt | null
+  constructor(atlas: Atlas, houses: HouseArt | null = null) {
     this.atlas = atlas
+    this.houses = houses
     this.people = new People(atlas.meta.size, atlas.meta.tier)
     this.traders = new Traders(atlas)
   }
 
   get W() { return this.atlas.meta.size }
+
+  /** Buildings on a hex from the house sheet: soft shadows, then each sprite with its ground point at
+   *  its spot (back to front). One container, so the whole group sorts as one thing in the hex. */
+  private stand(spots: Spot[], cx: number, cy: number, alpha: number, dim: boolean, zIndex: number) {
+    const art = this.houses
+    if (!art) return
+    const group = new Container()
+    const shadows = new Graphics()
+    const sprites: Sprite[] = []
+    for (const sp of [...spots].sort((a, b) => a.y - b.y)) {
+      const t = art.tex(sp.key)
+      if (!t) continue
+      const s = new Sprite(t)
+      s.anchor.set(art.anchor.x / art.anchor.w, art.anchor.y / art.anchor.h)
+      s.x = Math.round(cx + sp.x)
+      s.y = Math.round(cy + sp.y)
+      const half = sp.key === 'well' ? 4 : sp.key[0] === 't' ? 10 : 12
+      shadows.ellipse(s.x + 2, s.y + 1, half, 2.5).fill({ color: 0x28281e, alpha: 0.25 })
+      sprites.push(s)
+    }
+    group.addChild(shadows, ...sprites)
+    group.alpha = alpha
+    group.cullable = true
+    if (dim) group.tint = DIM
+    group.zIndex = zIndex
+    this.cells.addChild(group)
+  }
 
   async mount(host: HTMLElement) {
     this.host = host
@@ -126,6 +164,11 @@ export class MapView {
     })
     c.addEventListener('webglcontextrestored', () => clearTimeout(this.lostTimer))
     this.app.ticker.add((t) => {
+      if (this.unsettlable.length) {
+        const k = (1 - Math.cos((performance.now() / 1000) * (2 * Math.PI / UNSETTLABLE.period))) / 2
+        const a = UNSETTLABLE.lo + (UNSETTLABLE.hi - UNSETTLABLE.lo) * k
+        for (const g of this.unsettlable) g.alpha = a
+      }
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
       if (this.ambient && this.host) {
@@ -167,6 +210,8 @@ export class MapView {
 
   private lostTimer?: ReturnType<typeof setTimeout>
   private rebuilding = false
+  /** shades over land too close to a neighbour, while choosing where to settle */
+  private unsettlable: Graphics[] = []
 
   private contextLost(): boolean {
     const gl = (this.app.renderer as unknown as { gl?: WebGLRenderingContext }).gl
@@ -259,6 +304,7 @@ export class MapView {
     // choosing a site shows the whole world at once: keep that screen still (and quick)
     const animate = !input.showAll
     this.overlay.removeChildren().forEach((c) => c.destroy())
+    this.unsettlable = []
 
     const revealed = visibleSet(input)
     // draw box: revealed bounds + margin of fog
@@ -278,8 +324,11 @@ export class MapView {
     for (const v of Object.values(state.villages)) {
       for (const b of v.buildings) things.set(idx(b.col, b.row), { name: BUILDING_SPRITE[b.type] ?? 'f_hut', alpha: b.progress < 1 ? 0.55 : 1 })
       for (const o of v.outposts) things.set(idx(o.col, o.row), { name: 'f_hut' })
-      things.set(idx(v.col, v.row), { name: 'f_village' })
+      things.set(idx(v.col, v.row), { name: this.houses ? 'f_townhouses' : 'f_village' })
     }
+
+    // cobbled hexes: every village's square (a village is never next to another, but the stones would join)
+    const cobbled = new Set<number>(Object.values(state.villages).map((v) => idx(v.col, v.row)))
 
     const order: number[] = []
     for (let r = r0; r <= r1; r++) {
@@ -295,9 +344,11 @@ export class MapView {
     const blocked = new Set(input.blocked ?? [])
     // roads join each other and the places they lead to
     const roadSet = new Set<number>()
+    const pavedSet = new Set<number>()
     const hubs = new Set<number>()
     for (const v of Object.values(state.villages)) {
       for (const r of v.roads) if (revealed.has(r)) roadSet.add(r)
+      for (const r of v.paved ?? []) pavedSet.add(r)
       hubs.add(idx(v.col, v.row))
       for (const o of v.outposts) hubs.add(idx(o.col, o.row))
       for (const b of v.buildings) hubs.add(idx(b.col, b.row))
@@ -316,6 +367,7 @@ export class MapView {
       }
     }
 
+    const forts = new Map(strongholdsOf(world).map((f) => [f.i, f]))
     for (const i of order) {
       const cell = world.cells[i]
       const known = revealed.has(i)
@@ -334,12 +386,22 @@ export class MapView {
         s.y = cy - t.frame.ay
         if (!known) s.tint = 0x3a3a58
         else if (hl.has(i)) s.tint = 0xfff0a0
-        else if (blocked.has(i) && cell.tier > 0) s.tint = 0xffb4a8
         else if (dim) s.tint = DIM
         s.zIndex = z(i, 0)
         this.cells.addChild(s)
       }
       if (!known) continue
+      // land too close to a neighbour to settle: a shade over the hex and what stands on it, breathing slowly
+      if (blocked.has(i) && cell.tier > 0) {
+        // the top of the hex and its cliff face below, down to the ground
+        const [r, br, bl, l, tl, tr] = hexCorners(cx, cy, W)
+        const d = cell.tier * TP + this.atlas.meta.face
+        const shade = new Graphics().poly([r, [r[0], r[1] + d], [br[0], br[1] + d], [bl[0], bl[1] + d], [l[0], l[1] + d], l, tl, tr].flat(), true).fill({ color: 0x141424 })
+        shade.alpha = UNSETTLABLE.lo
+        shade.zIndex = z(i, 3.9)
+        this.cells.addChild(shade)
+        this.unsettlable.push(shade)
+      }
       if (WATER.has(land!.terrain)) {
         // surf where the water meets land, glints out on open water
         const corners = hexCorners(cx, cy, W)
@@ -362,7 +424,7 @@ export class MapView {
       }
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
       {
-        const { g: rg, bridges } = this.road(world, i, cx, cy, roadSet, hubs)
+        const { g: rg, bridges } = this.road(world, i, cx, cy, roadSet, hubs, pavedSet.has(i))
         rg.zIndex = z(i, 1)
         this.cells.addChild(rg)
         // bridges go over the river (which is drawn after the road, covering it where they cross)
@@ -386,25 +448,111 @@ export class MapView {
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
       const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
       const layers: { name: string; alpha: number; dx?: number; dy: number }[] = []
-      // an outcrop on open ground says what's in it (on mountains, the ore stains the rock instead).
-      // It comes in two halves: a mine, house, town or lair here takes the far half, and the near half
-      // shrinks to loose debris.
+      // an outcrop on open ground says what's in it (on mountains, the ore stains the rock instead)
       const outcrop = deposit && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
-      const ore = (part: 'front' | 'back' | 'debris') => ({ name: `f_ore_${land!.resource}_${part}`, alpha: 1, dy: 0 })
       if (outcrop) {
-        const far = { dx: -Math.round(W * 0.15), dy: -Math.round(W * 0.07) }
-        if (thing && land!.resource === 'clay') layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
-        // something built here: it takes the far side, and loose debris from the deposit shows on the near side
-        else if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, ...far }, ore('debris'))
-        // clay shows as red banks along the river instead; salt is common and low: just the near half
-        else if (land!.resource === 'clay') { if (natural) layers.push({ name: natural, alpha: 1, dy: 0 }) }
-        else if (land!.resource === 'salt') layers.push(...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
-        else layers.push(ore('back'), ...(natural ? [{ name: natural, alpha: 1, dy: 0 }] : []), ore('front'))
+        // the deposit itself is drawn as rocks scattered on the ground (below)
+        if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, dy: 0 })
+        else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
       }
       else if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
       else if (dug) layers.push({ name: 'f_mine', alpha: thing!.alpha ?? 1, dy: 0 })
       else if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
       else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
+      // a warlord's stronghold out in the wastes (a ruin once it has fallen)
+      const fort = forts.get(i)
+      if (fort) {
+        const fg = new Graphics()
+        drawKeep(fg, cx, cy, W, !!state.sieges?.[i]?.fallen)
+        fg.cullable = true
+        if (dim) fg.tint = DIM
+        fg.zIndex = z(i, 3.1)
+        this.cells.addChild(fg)
+      }
+      // fresh water dug by the villagers: a pond in an old clay pit (dry in summer), or a well
+      if (state.wells?.[i] || state.ponds?.[i]) {
+        const wg = new Graphics()
+        if (state.wells?.[i]) drawWell(wg, cx + Math.round(W * 0.16), cy + Math.round(W * 0.06), W)
+        else drawPond(wg, cx - Math.round(W * 0.12), cy + Math.round(W * 0.05), W, !!input.today && weekSeason(input.today) === 'summer')
+        wg.cullable = true
+        if (dim) wg.tint = DIM
+        wg.zIndex = z(i, 3.05)
+        this.cells.addChild(wg)
+      }
+      // what lies on the ground: an outcrop of the deposit, or loose stone (until it's picked off)
+      if (cell.tier > 0 && !MOUNTAIN_FEATURE.has(land!.feature ?? '') && land!.resource !== 'clay') {
+        const left = leftAt(world, state, i)
+        // how many: a Poisson count whose mean follows how much the hex held at the start; as it's
+        // gathered they go one by one (an ore deposit keeps one while a mine could reach more below)
+        let kind: RockKind | null = null, n = 0, size = 0.085
+        if (outcrop && left) {
+          kind = land!.resource as RockKind
+          const all = 1 + poisson(i, left.ore === land!.resource ? Math.min(4, left.start / 5) - 1 : 1.5)
+          n = left.total <= 0 ? 0 : left.start > 0 ? Math.max(1, Math.round(all * left.surface / left.start)) : all
+        } else if (!input.showAll && left && left.ore === 'stone' && left.start > 0 && !MOUNTAIN_TERRAIN.includes(cell.terrain)) {
+          kind = 'pebble'
+          n = Math.ceil(poisson(i, left.start * 0.45) * left.surface / left.start)
+          size = 0.035
+        }
+        if (kind && n > 0) {
+          const roads: [number, number][] = []
+          const onRoad = roadSet.has(i)
+          neighbours(cell.col, cell.row).forEach(([nc, nr], k) => {
+            if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
+            const ni = idx(nc, nr)
+            const road = (onRoad && (roadSet.has(ni) || hubs.has(ni))) || (hubs.has(i) && roadSet.has(ni))
+            const river = cell.riverTo === ni || world.cells[ni].riverTo === i
+            if (!road && !river) return
+            const [a, b] = EDGE_CORNERS[k]
+            const cs = hexCorners(0, 0, W)
+            roads.push([(cs[a][0] + cs[b][0]) / 2, (cs[a][1] + cs[b][1]) / 2])
+          })
+          const wooded = !!land!.feature && land!.feature !== 'hills' && !thing
+          const busy = !!thing || hubs.has(i)
+          const at = spots(i, n, W, { busy, roads, wooded }, W * size * 1.7)
+          if (at.length) {
+            const rg = new Graphics()
+            drawRocks(rg, cx, cy, W, kind, at, size, i)
+            rg.cullable = true
+            if (dim) rg.tint = DIM
+            rg.zIndex = z(i, busy || wooded ? 3.1 : 1.8)
+            this.cells.addChild(rg)
+          }
+        }
+      }
+      // a village is a cobbled square with a well and town houses; a House is three cottages (Blender art)
+      const townIdx = layers.findIndex((l) => l.name === 'f_townhouses')
+      if (townIdx >= 0) {
+        const [row] = layers.splice(townIdx, 1)
+        // cobbles run on into any neighbouring cobbled hex on the same level
+        const joined = neighbours(cell.col, cell.row).map(([nc, nr]) => {
+          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return false
+          const ni = idx(nc, nr)
+          return cobbled.has(ni) && world.cells[ni].tier === cell.tier
+        })
+        const cb = new Graphics()
+        drawCobbles(cb, cx, cy, W, joined)
+        cb.cullable = true
+        if (dim) cb.tint = DIM
+        cb.zIndex = z(i, 1.5)
+        this.cells.addChild(cb)
+        this.stand(villageSpots(i), cx, cy, row.alpha, dim, z(i, 3))
+      }
+      const cottageIdx = layers.findIndex((l) => l.name === 'f_cottages')
+      if (cottageIdx >= 0) {
+        const [row] = layers.splice(cottageIdx, 1)
+        if (this.houses) this.stand(houseSpots(i), cx + (row.dx ?? 0), cy + row.dy, row.alpha, dim, z(i, 3))
+        else {
+          // (the sheet didn't load) a row of cottages drawn in code
+          const cg = new Graphics()
+          drawCottages(cg, cx + (row.dx ?? 0), cy + row.dy, W)
+          cg.alpha = row.alpha
+          cg.cullable = true
+          if (dim) cg.tint = DIM
+          cg.zIndex = z(i, 3)
+          this.cells.addChild(cg)
+        }
+      }
       for (const l of layers) {
         if (l.name.startsWith('f_mountain')) {
           // ranges come from the height map, not a sprite
@@ -448,7 +596,8 @@ export class MapView {
     // of different heights meet at a corner, a dashed stroke runs down the
     // cliff corner between them; it sorts with the hex further back, so it
     // shows on a visible cliff face and hides behind a taller hex in front.
-    for (const v of Object.values(state.villages)) {
+    // (not while choosing where to settle: the shaded land says where neighbours are)
+    for (const v of blocked.size ? [] : Object.values(state.villages)) {
       const color = v.playerId === viewer ? 0xfff070 : 0xff90c0
       const terr = new Set(territoryCells(world, v))
       const ends = new Map<string, { x: number; y: number; cell: number }[]>() // ground-plane corner -> drawn ends
@@ -537,12 +686,13 @@ export class MapView {
 
   /** Dirt track across the hex top toward neighbouring roads/buildings; where it
    *  drops to a lower hex in front, wooden steps run down the visible cliff face. */
-  private road(world: World, i: number, cx: number, cy: number, roads: Set<number>, hubs: Set<number>): { g: Graphics; bridges: Graphics | null } {
+  private road(world: World, i: number, cx: number, cy: number, roads: Set<number>, hubs: Set<number>, paved = false): { g: Graphics; bridges: Graphics | null } {
     const W = this.W
     const TP = this.atlas.meta.tier
     const g = new Graphics()
     const L = roadLayout(world, i, cx, cy, W, TP, roads, hubs)
-    const dirt = 0xc09858, edge = 0x7a5830
+    // a paved road is laid in grey stone; a dirt road is packed earth
+    const dirt = paved ? 0xb8b2a2 : 0xc09858, edge = paved ? 0x6c665a : 0x7a5830
     const w = L.width
     if (!L.legs.length) {
       g.ellipse(cx, cy, w + 1, Math.ceil(w / 2) + 1).fill(edge).ellipse(cx, cy, w, Math.ceil(w / 2)).fill(dirt)
@@ -569,6 +719,18 @@ export class MapView {
     }
     paint(w + 2, rim, edge)
     paint(w, core, dirt)
+    // cobbles: a scatter of darker setts along each leg
+    if (paved) for (const leg of legs) {
+      for (let k = 1; k < leg.length; k++) {
+        const [x0, y0] = leg[k - 1], [x1, y1] = leg[k]
+        const steps = Math.floor(Math.hypot(x1 - x0, y1 - y0) / 3)
+        for (let t = 0; t < steps; t++) {
+          const f = (t + 0.5) / steps
+          const off = ((t + k) % 2 ? 1 : -1) * Math.max(0, core - 1.5)
+          g.rect(Math.round(x0 + (x1 - x0) * f), Math.round(y0 + (y1 - y0) * f + off * 0.5), 1, 1).fill(edge)
+        }
+      }
+    }
     for (const st of L.steps) {
       g.rect(st.x - 2, st.y0, 5, st.y1 - st.y0).fill(edge)
       for (let y = st.y0 + 1; y < st.y1; y += 2) g.rect(st.x - 1, y, 3, 1).fill(dirt)
@@ -804,6 +966,52 @@ export const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6]
 const WATER = new Set(['deep', 'ocean', 'shallow'])
 const MOUNTAIN_FEATURE = new Set(['mountain', 'mountain_snow'])
 const DIM = 0x5c5c70
+
+/** A stronghold: a stone curtain wall with corner towers round a tall keep and a red banner (or broken stumps once fallen). */
+function drawKeep(g: Graphics, x: number, y: number, W: number, fallen: boolean) {
+  const u = Math.max(1, Math.round(W / 32))
+  const stone = 0x8a8478, dark = 0x5a554c, light = 0xb0aa9c
+  if (fallen) {
+    g.rect(x - 9 * u, y - 3 * u, 4 * u, 3 * u).fill(dark).rect(x + 2 * u, y - 5 * u, 3 * u, 5 * u).fill(stone).rect(x + 6 * u, y - 2 * u, 4 * u, 2 * u).fill(dark)
+    return
+  }
+  g.ellipse(x, y + u, 12 * u, 4 * u).fill({ color: 0x000000, alpha: 0.2 })
+  // curtain wall and towers
+  g.rect(x - 10 * u, y - 6 * u, 20 * u, 6 * u).fill(stone)
+  for (const tx of [-11, 8]) g.rect(x + tx * u, y - 9 * u, 4 * u, 9 * u).fill(dark).rect(x + tx * u, y - 10 * u, u, u).fill(dark).rect(x + (tx + 2) * u, y - 10 * u, u, u).fill(dark)
+  // the keep, its gate and banner
+  g.rect(x - 4 * u, y - 15 * u, 8 * u, 15 * u).fill(light).rect(x - 4 * u, y - 15 * u, 8 * u, u).fill(dark)
+  g.rect(x - u, y - 3 * u, 2 * u, 3 * u).fill(0x2a2018)
+  g.rect(x, y - 21 * u, u, 6 * u).fill(0x3a2a1a).rect(x + u, y - 21 * u, 4 * u, 3 * u).fill(0xc0302a)
+}
+
+/** A pond: dark water with a reedy rim (or cracked mud when it's dried up). */
+function drawPond(g: Graphics, x: number, y: number, W: number, dry: boolean) {
+  const rx = Math.round(W * 0.13), ry = Math.round(W * 0.055)
+  g.ellipse(x, y, rx + 1, ry + 1).fill(dry ? 0x8a6a48 : 0x5a7a3a)
+  g.ellipse(x, y, rx, ry).fill(dry ? 0xa88660 : 0x3f78b0)
+  if (dry) {
+    for (let k = -1; k <= 1; k++) g.rect(x + k * Math.round(rx / 2), y - 1, 1, 2).fill(0x6a4c30)
+    return
+  }
+  g.rect(x - Math.round(rx / 2), y - 1, Math.max(2, Math.round(rx / 3)), 1).fill(0x9cd0f0)
+  for (const dx of [-rx, -rx + 2, rx - 2, rx]) g.rect(x + dx, y - ry - 2, 1, 3).fill(0x4e8a2e)
+}
+
+/** A well: a ring of stones round a dark shaft, under a little roof on two posts. */
+function drawWell(g: Graphics, x: number, y: number, W: number) {
+  const r = Math.max(3, Math.round(W * 0.05))
+  g.ellipse(x + 1, y + 2, r + 2, Math.ceil(r / 2) + 1).fill({ color: 0x000000, alpha: 0.2 })
+  g.rect(x - r, y - r, r * 2, r).fill(0x8c887c)
+  g.ellipse(x, y, r, Math.ceil(r / 2)).fill(0x8c887c)
+  g.ellipse(x, y - r, r, Math.ceil(r / 2)).fill(0xb4b0a4)
+  g.ellipse(x, y - r, r - 1, Math.max(1, Math.ceil(r / 2) - 1)).fill(0x1e2430)
+  g.rect(x - r, y - r * 3, 1, r * 2).fill(0x6a4a2a)
+  g.rect(x + r - 1, y - r * 3, 1, r * 2).fill(0x6a4a2a)
+  g.poly([x - r - 2, y - r * 3, x, y - r * 4, x + r + 2, y - r * 3]).fill(0x9a4a30)
+}
+/** the shade over land that can't be settled: its alpha drifts between lo and hi every `period` seconds */
+const UNSETTLABLE = { lo: 0.3, hi: 0.5, period: 3.2 }
 
 
 

@@ -1,4 +1,6 @@
 import type { Role } from '../world/types'
+import type { DungeonKind } from './deposits'
+import type { Detachment } from './garrison'
 import type { ActionKind, BuildingId, Goods, HabitEffect, TaskSize } from './data'
 
 export type TaskStatus = 'none' | 'half' | 'full'
@@ -62,6 +64,10 @@ export interface Building {
   row: number
   /** 0..1 construction progress; half tokens build half */
   progress: number
+  /** mines: how many levels deep the shaft goes (1 if not set) */
+  depth?: number
+  /** workshops with several recipes: what it's been ordered to make */
+  order?: string
 }
 
 export interface Village {
@@ -79,6 +85,18 @@ export interface Village {
   /** extra territory centres (outposts) */
   outposts: { col: number; row: number }[]
   roads: number[]
+  /** people away on neighbours' walls: still the village's, but not at home to work or eat */
+  away?: number
+  /** false: the player assigns workers by hand (jobs); otherwise the village manages them */
+  autoJobs?: boolean
+  /** workers by building id, when assigned by hand */
+  jobs?: Record<string, number>
+  /** when its ox carts are back from a caravan sent without a task */
+  oxenBack?: string
+  /** the last winter saplings came up on their own around it */
+  sprouted?: ISODate
+  /** road hexes laid with stone (see caravanCarry) */
+  paved?: number[]
   planted: { cell: number; date: ISODate }[]
   /** hexes whose trees were felled */
   cleared: number[]
@@ -94,6 +112,9 @@ export interface Caravan {
   goods: Goods
   departAt: string
   arriveAt: string
+  /** people who went with it, and when they're home again (there and back) */
+  crew?: number
+  homeAt?: string
   /** on arrival: the two villages' names, kept in case one is later abandoned */
   fromName?: string
   toName?: string
@@ -134,6 +155,26 @@ export interface GameState {
   dug?: Record<number, number>
   /** game left on each hunted hex, as of a day (it comes back slowly) */
   hunted?: Record<number, { left: number; date: ISODate }>
+  /** clay dug by hand from river and marsh hexes (see clayAt) */
+  clayDug?: Record<number, number>
+  /** wells dug, by hex (see water.ts) */
+  wells?: Record<number, true>
+  /** dug-out clay pits that rain has filled: ponds, by hex, with the winter they filled */
+  ponds?: Record<number, ISODate>
+  /** villages short of workers for their buildings have been given the people (and a house) */
+  staffGiven?: boolean
+  /** the free wells for herds that had no water have been handed out */
+  wellsGiven?: boolean
+  /** the last winter riverbanks, marshes and springs filled with clay again */
+  clayRenewed?: ISODate
+  /** troops lent to each village's palisade, by host village (see garrison.ts) */
+  garrisons?: Record<string, Detachment[]>
+  /** strongholds besieged, by hex: what's left of them (see strongholds.ts) */
+  sieges?: Record<number, { strength: number; fallen?: string; by?: string }>
+  /** caravan crews walking home after delivering: back to work when they arrive */
+  homeward?: { village: string; crew: number; at: string }[]
+  /** dungeons broken into by a mine's shaft, by hex (see deposits.ts) */
+  dungeons?: Record<number, { kind: DungeonKind; villageId: string; raids: number; strength: number; found: string }>
   /** hexes whose trees have been felled or planted, tree by tree (see TREES_FROM) */
   woods?: Record<number, Stand>
 }
@@ -169,7 +210,7 @@ export type GameEvent =
   /** log progress toward a habit's daily goal (negative to correct a mistake) */
   | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
-  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods })
+  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */
@@ -178,3 +219,11 @@ export type GameEvent =
   | (Base & { t: 'barter'; merchant: 'ship' | 'barge' | 'caravan' | 'pedlar'; give: Goods; take: Goods })
   /** give up this village entirely; the player can found a new one */
   | (Base & { t: 'abandon' })
+  /** who works where: the village decides (auto), or the player assigns by building id */
+  | (Base & { t: 'jobs'; auto: boolean; jobs?: Record<string, number> })
+  /** tell a workshop with several recipes which to make */
+  | (Base & { t: 'order'; building: string; recipe: string })
+  /** split a whole action into smaller ones: big → medium + small, medium → two small (never the other way) */
+  | (Base & { t: 'split'; tokenId: string })
+  /** a palisade's host takes in troops waiting at the gate, or sends them home */
+  | (Base & { t: 'garrison'; detachment: string; accept: boolean })

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Village Builder Demo</title>
+<style>
+  :root { --bg: #14142a; --panel: #1f1f3a; --ink: #f0e6c8; --dim: #a8a0c0; --gold: #e8c040; --btn: #34345c; --btn2: #48487a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.35 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: grab; }
+  canvas.picking { cursor: crosshair; }
+  #panel { position: fixed; top: 12px; left: 12px; width: 270px; max-height: calc(100vh - 24px); overflow: auto; background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid #3c3c66; border-radius: 10px; padding: 12px 14px; box-shadow: 0 6px 24px #0008; }
+  h1 { font-size: 16px; margin: 0 0 6px; color: var(--gold); }
+  p { margin: 6px 0; color: var(--dim); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin: 8px 0; text-align: center; }
+  .stats div { background: #2a2a4a; border-radius: 6px; padding: 4px 2px; }
+  .stats b { display: block; font-size: 18px; color: var(--ink); }
+  .stats span { font-size: 11px; color: var(--dim); }
+  .stage { text-align: center; color: var(--gold); font-weight: 600; margin: 2px 0 8px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0 10px; }
+  button { background: var(--btn); color: var(--ink); border: 1px solid #50508a; border-radius: 7px; padding: 7px 6px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--btn2); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.wide { grid-column: span 2; }
+  button.go { border-color: var(--gold); }
+  label { display: flex; gap: 6px; align-items: center; color: var(--dim); margin: 3px 0; cursor: pointer; }
+  select { background: var(--btn); color: var(--ink); border: 1px solid #50508a; border-radius: 6px; padding: 4px; font: inherit; width: 100%; }
+  .h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-top: 8px; }
+  #msg { min-height: 1.3em; color: #ffb070; }
+  .hint { color: var(--ink); background: #2a2a4a; border-radius: 6px; padding: 6px 8px; }
+  #menu { position: fixed; width: 230px; background: color-mix(in srgb, var(--panel) 96%, transparent); border: 1px solid #50508a; border-radius: 10px; padding: 8px; box-shadow: 0 6px 24px #000a; display: flex; flex-direction: column; gap: 4px; }
+  #menu[hidden] { display: none; }
+  #menu .mh { display: flex; justify-content: space-between; align-items: center; color: var(--gold); font-weight: 600; padding: 0 2px 4px; text-transform: capitalize; }
+  #menu .x { padding: 1px 7px; }
+  #menu button { text-align: left; display: flex; justify-content: space-between; gap: 8px; }
+  #menu button span { color: var(--dim); font-size: 11px; text-align: right; }
+  #menu button:disabled { opacity: 0.55; }
+  #tip { position: fixed; pointer-events: none; background: #000c; color: var(--ink); padding: 3px 7px; border-radius: 5px; font-size: 12px; display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1>Village builder (demo)</h1>
+  <div id="pick">
+    <p>Pick where to found your town. Hover the map: the three hexes that meet at the corner nearest the pointer light up, green if you can settle them (open land on one level), red if not. The white dot is where the well and square go. Click to found it.</p>
+    <p>Drag to look around, scroll to zoom.</p>
+    <div class="h">World</div>
+    <select id="seed"><option>quex-sandbox</option><option>quex-season-1</option><option value="*">a random world</option></select>
+  </div>
+  <div id="build" hidden>
+    <div class="stage" id="stage"></div>
+    <div class="stats"><div><b id="pop">0</b><span>people</span></div><div><b id="nh">0</b><span>houses</span></div><div><b id="nx">0</b><span>hexes</span></div></div>
+    <div id="msg"></div>
+    <p class="hint">Tap a hex to build there: <b>Lay cobblestone</b> takes it into the town (it has to join it); then any building that fits can go on the cobbles, even across hexes on one level. <b>Road</b> goes a hex at a time, as in the game.</p>
+    <div class="h">Grow it</div>
+    <div class="grid">
+      <button data-grow="+10" >+10 houses</button>
+      <button data-grow="100" class="go">to 100 people</button>
+      <button data-grow="250" class="go">to 250 people</button>
+      <button data-grow="500" class="go">to 500 people</button>
+    </div>
+    <div class="grid">
+      <button id="undo">Undo</button>
+      <button id="reset">Start again</button>
+    </div>
+    <div class="h">Show</div>
+    <label><input type="checkbox" id="showDistrict"> cobbled hexes outlined</label>
+    <label><input type="checkbox" id="showFoot"> footprints and doors</label>
+    <label><input type="checkbox" id="showWalk" checked> villagers</label>
+    <p style="font-size:12px">Buildings never move once built. A building fits if it overlaps nothing, hides no more than a third of the one behind it (nor its door), and every door in town can still be walked to from the well. "Grow it" builds for you, laying cobblestone a hex at a time when the town is full; two-storey town houses go up once it has 100 people.</p>
+  </div>
+</div>
+<div id="tip"></div>
+<div id="menu" hidden></div>
+<script type="module" src="./village.ts"></script>
+</body>
+</html>

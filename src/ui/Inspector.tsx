@@ -1,19 +1,26 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, GOOD_LABEL, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { actionSize, buildCost, buildingAt, caravanMinutes, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { actionSize, buildCost, buildingAt, palisades, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
-import { GAME_REGROW, about, gameLeft, gameMax, leftAt } from '../game/deposits'
+import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
 import type { Player } from '../game/types'
-import type { Game } from '../app/store'
-import { shareSpot, tryAction } from './helpers'
+import { GEAR, RATION, foodValue, nightsOf, troopsAt } from '../game/garrison'
+import { WEIGHT, weightOf } from '../game/market'
+import { WALLS, strongholdAt, wallsAfter } from '../game/strongholds'
+import { refineTips } from '../game/advisor'
+import { CARRY_EACH, jobs, needOf, people, spare, staffing } from '../game/workers'
+import { THIRSTY, WATER_NAME, hasWater, waterAt } from '../game/water'
+import { eventId, type Game } from '../app/store'
+import { useStep } from './Advisor'
+import { mixText, oreHint, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
 import { clockTime, span } from './Caravans'
 
 
 /** What a deposit is good for (shown on the hex card). */
 const DEPOSIT_NOTE: Record<string, string> = {
-  iron: 'Iron deposit: a Deep iron mine could go here (big task). Iron makes better tools and weapons.',
-  copper: 'Copper deposit (green malachite and blue azurite on rust-stained rock): gather the surface ore by hand, or sink a Copper mine (big task) to reach the deep ore, which carries a little silver. Copper plus a little tin makes bronze.',
+  iron: 'Iron deposit: rusty limonite at the surface to gather by hand. A Deep iron mine (big task) reaches hematite, and black magnetite deeper down. A Bloomery works them all into iron.',
+  copper: 'Copper deposit: green malachite at the surface to gather by hand. A Copper mine (big task) reaches brassy chalcopyrite deeper down, which needs a Roasting heap before the Smelter, and carries a little silver. Copper plus a little tin makes bronze.',
   silver: 'Silver! Galena, heavy grey lead ore rich in silver. A Silver mine (big task) digs it, and a Silver refinery turns it into silver, the coin every merchant takes.',
   tin: 'Tin! Rare: gather it (small task) and trade it. A little tin turns copper into bronze.',
   stone: 'Building stone: a Quarry could go here (medium task), or gather stone by hand (small task).',
@@ -34,11 +41,13 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const i = cellIndex(world, col, row)
   const cell = world.cells[i]
   const known = state.revealed.includes(i)
-  const [mode, setMode] = useState<'main' | 'build' | 'caravan'>('main')
+  const [mode, setMode] = useState<'main' | 'build' | 'caravan' | 'troops'>('main')
   const v = state.villages[p.villageId]
   const here = buildingAt(state, col, row)
   const village = villageAt(state, col, row)
   const lair = state.lairs.find((l) => l.col === col && l.row === row && !l.cleared)
+  const fort = known ? strongholdAt(world, i) : null
+  const siege = fort ? state.sieges?.[i] : undefined
   const land = landAt(world, state, i, game.today(p.id))
   const terr = land.terrain
   const trees = hasTrees(land)
@@ -74,7 +83,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
     )
   }
 
-  const title = village ? village.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
+  const title = village ? village.name : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
   const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
   if (mode === 'build') {
@@ -93,13 +102,21 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
     )
   }
 
-  if (mode === 'caravan' && village) {
-    return <CaravanForm game={game} p={p} to={village.id} onBack={() => setMode('main')} onSend={(goods) => run('caravan', { to: village.id, goods })} />
+  if (mode === 'troops' && village) {
+    return <TroopsForm game={game} p={p} to={village.id} onBack={() => setMode('main')} onSend={(troops, goods) => run('troops', { to: village.id, troops, goods })} />
   }
 
+  if (mode === 'caravan' && village) {
+    return <CaravanForm game={game} p={p} to={village.id} onBack={() => setMode('main')} onSend={(goods, crew, food) => run('caravan', { to: village.id, goods, crew, food })} />
+  }
+
+  const tierOf = (to: NonNullable<typeof village>) => caravanTier(world, state, v, to)
   const acts: ActionKind[] = []
-  if (lair) acts.push('expedition', 'scout')
-  else if (village && village.id !== v.id) acts.push('caravan')
+  const ownMine = here && here.village.id === v.id && BUILDINGS[here.building.type].mine && here.building.progress >= 1 ? here.building : null
+  const dungeon = state.dungeons?.[i]
+  if (fort && !siege?.fallen) acts.push('siege', 'scout')
+  else if (lair) acts.push('expedition', 'scout')
+  else if (village && village.id !== v.id) acts.push('caravan', 'troops')
   else {
     acts.push('scout')
     if (trees && !here && !village) acts.push('clear')
@@ -107,7 +124,12 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
     if (mine && left?.ore === 'stone' && left.surface >= 1) acts.push('pick')
     if (mine && !here && !village && !trees) acts.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
-    if (cell.tier > 0) acts.push('road')
+    if (cell.tier > 0) acts.push(v.roads.includes(i) ? 'pave' : 'road')
+    if (mine && clayLeft(world, state, i) !== null) acts.push('dig_clay')
+    if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) acts.push('well')
+    if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
+    if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
+    if (dungeon && dungeon.villageId === v.id && dungeon.raids > 0) acts.unshift('expedition')
   }
 
   return (
@@ -117,9 +139,53 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
         <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>
       )}
       {!village && <Reserves left={left} wild={wild} game={wildNow(game, p, i)} building={here?.building.type} />}
-      {village && <p style={{ margin: '4px 0' }}>👥 {Math.floor(village.population)} · morale {village.morale}</p>}
+      {known && clayLeft(world, state, i) !== null && (
+        <p className="muted" style={{ margin: '4px 0' }}>
+          {mountainSpring(world, i) ? '💧 A small spring trickles down the rock here, with white kaolin clay along it' : clayRenews(world, i) ? '🏺 Clay along the water here' : '🏺 Clay under the soil here (a pit, once dug, is gone)'}: {Math.floor(clayLeft(world, state, i)!) || 'dug out'}{clayLeft(world, state, i)! >= 1 ? ' left' : ''}{clayRenews(world, i) ? ', and more every winter' : ''}.
+        </p>
+      )}
+      {known && (() => {
+        const today = game.today(p.id)
+        const w = waterAt(world, state, i, today)
+        const near = hasWater(world, state, i, today)
+        const herd = here && THIRSTY.has(here.building.type)
+        if (!w && !herd) return null
+        return (
+          <p className={herd && (!near || near.dry) ? 'deal-no' : 'muted'} style={{ margin: '4px 0' }}>
+            {w ? `💧 ${w.kind === 'pond' ? 'A pond (an old clay pit, filled with rain)' : w.kind === 'well' ? 'A well' : `Fresh water: ${WATER_NAME[w.kind]}`}${w.dry ? ', dried up in the summer heat' : w.kind === 'pond' ? ': it dries up on summer days' : ''}.` : ''}
+            {herd && (near && !near.dry ? ` The herd drinks from ${WATER_NAME[near.kind]}.` : near ? ` ${WATER_NAME[near.kind][0].toUpperCase() + WATER_NAME[near.kind].slice(1)} has dried up: the herd gives half until it fills.` : ' No fresh water within a hex: the herd gives half. Dig a well (medium task, 3 stone).')}
+          </p>
+        )
+      })()}
+      {v.paved?.includes(i) && <p className="muted" style={{ margin: '4px 0' }}>A paved road: caravans along it carry more and go faster.</p>}
+      {village && <p style={{ margin: '4px 0' }}>👥 {Math.floor(village.population)}{village.away ? ` (${village.away} away)` : ''} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}
+      {here && here.village.id === v.id && here.building.progress >= 1 && needOf(here.building) > 0 && (
+        <p className={staffing(v, here.building) < 1 ? 'deal-no' : 'muted'} style={{ margin: '4px 0' }}>
+          👥 {jobs(v)[here.building.id] ?? 0} of {needOf(here.building)} workers{staffing(v, here.building) < 1 ? `: it makes ${Math.round(staffing(v, here.building) * 100)}% (Village tab: Workers)` : ''}.
+        </p>
+      )}
+      {here && here.village.id === v.id && BUILDINGS[here.building.type].recipes && (
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '4px 0' }}>
+          <span className="muted">Making:</span>
+          {BUILDINGS[here.building.type].recipes!.map((r) => {
+            const on = (here.building.order ?? BUILDINGS[here.building.type].recipes![0].id) === r.id
+            return <button key={r.id} className={`btn ${on ? 'primary' : ''}`} title={`${fmtGoods(r.consumes)} → ${fmtGoods(r.produces)} a night`}
+              onClick={() => !on && void game.dispatch({ t: 'order', id: eventId(), at: game.now().toISOString(), playerId: p.id, building: here.building.id, recipe: r.id })}>{r.name}</button>
+          })}
+        </div>
+      )}
+      {here && BUILDINGS[here.building.type].mine && <Shaft game={game} i={i} depth={here.building.depth ?? 1} />}
+      {here && BUILDINGS[here.building.type].smelts && here.village.id === v.id && <Works game={game} p={p} station={here.building.type} />}
+      {dungeon && (
+        <p style={{ margin: '4px 0' }}>
+          🕳 Below: {DUNGEON[dungeon.kind].name}. {dungeon.raids > 0
+            ? <>Strength {Math.round(dungeon.strength)}, loot for about {dungeon.raids} more raid{dungeon.raids === 1 ? '' : 's'} ({fmtGoods(DUNGEON[dungeon.kind].loot)} each). An expedition (big task) goes down the shaft.</>
+            : <>Picked clean.</>}
+        </p>
+      )}
+      {fort && <Siege game={game} p={p} fort={fort} siege={siege} />}
       {lair && <p style={{ margin: '4px 0' }}>Strength {Math.round(lair.strength)}. Bring bronze, iron, leather and food to improve your odds.</p>}
       <div className="actions">
         {mine && !village && (!here || here.building.progress < 1) && (
@@ -128,8 +194,10 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
             : cell.tier > 0 && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>medium or big task</small></button>
         )}
         {acts.map((a) => a === 'caravan'
-          ? <button key={a} className="btn medium action" onClick={() => setMode('caravan')}>Send caravan…<small>medium task</small></button>
-          : <ActionButton key={a} game={game} p={p} action={a} col={col} row={row} onRun={() => run(a)} />)}
+          ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
+          : a === 'troops'
+            ? <button key={a} className="btn medium action" disabled={!palisades(village!)} onClick={() => setMode('troops')}>Send troops…<small>{palisades(village!) ? `medium task · ${troopsAt(state, village!)} on their walls` : 'They have no palisade to hold them'}</small></button>
+            : <ActionButton key={a} game={game} p={p} action={a} col={col} row={row} onRun={() => run(a)} />)}
       </div>
     </Shell>
   )
@@ -137,7 +205,69 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
 
 const wildNow = (game: Game, p: Player, i: number) => gameLeft(game.world, game.state, i, game.today(p.id))
 
-const ORE_NAME: Record<string, string> = { copper: 'copper ore', iron: 'iron ore', tin: 'tin', silver: 'silver ore', stone: 'stone' }
+/** A stronghold: its strength, its walls, and what the village could bring against them. */
+function Siege({ game, p, fort, siege }: { game: Game; p: Player; fort: NonNullable<ReturnType<typeof strongholdAt>>; siege?: { strength: number; fallen?: string; by?: string } }) {
+  if (siege?.fallen) return <p className="muted" style={{ margin: '4px 0' }}>🏳 Fallen: taken by {game.state.villages[siege.by ?? '']?.name ?? 'someone'}. Only ruins and ravens now.</p>
+  const v = game.state.villages[p.villageId]
+  const g = v.goods
+  const strength = siege?.strength ?? fort.strength
+  const cannon = Math.min(Math.floor(g.cannon ?? 0), Math.floor((g.cannonballs ?? 0) / 2), Math.floor((g.gunpowder ?? 0) / 2))
+  const walls = wallsAfter(g, cannon)
+  return (
+    <div className="shaft">
+      <p style={{ margin: '2px 0' }}>🏰 A warlord's stronghold. Strength {Math.round(strength)}, and its walls triple it (x{WALLS}).</p>
+      <p className="muted" style={{ margin: '2px 0' }}>
+        Against them you'd bring: {Math.floor(g.ram ?? 0)} rams, {Math.floor(g.siege_tower ?? 0)} siege towers, {cannon} cannon ready to fire (each needs 2 shot and 2 powder),
+        {' '}{Math.min(Math.floor(g.musket ?? 0), Math.floor(g.gunpowder ?? 0))} muskets with powder. The walls would stand at x{walls}.
+      </p>
+      <p className="muted" style={{ margin: '2px 0' }}>Its hoard: {fmtGoods(fort.loot)}. Powder, shot and engines are spent in the assault, win or lose.</p>
+    </div>
+  )
+}
+
+/** A mine's shaft, level by level: what's left, what it's made of, and how deep it reaches. */
+function Shaft({ game, i, depth }: { game: Game; i: number; depth: number }) {
+  const lv = levels(game.world, game.state, i)
+  const left = leftAt(game.world, game.state, i)
+  if (!lv || !left) return null
+  const working = lv.findIndex((n) => n > 0.5)
+  const next = depth < MAX_DEPTH ? DEEPEN_COST[depth + 1] : null
+  return (
+    <div className="shaft">
+      {lv.map((n, k) => (
+        <div key={k} className={`shaft-level ${k > depth ? 'unreached' : ''} ${k === working ? 'working' : ''}`}>
+          <b>{k === 0 ? 'Surface' : `Level ${k}`}</b>
+          <span className="muted">
+            {n < 0.5 ? 'worked out' : `about ${Math.round(n)} · ${mixText(mixAt(left.ore, k))}`}
+            {k > depth && n >= 0.5 ? ' · sink the shaft to reach' : k === working && k <= depth ? ' · digging now' : ''}
+          </span>
+        </div>
+      ))}
+      {next && <p className="muted" style={{ margin: '4px 0 0' }}>Sinking it to level {depth + 1} takes a big task and {fmtGoods(next)} to shore it up.{game.world.cells[i].feature?.startsWith('mountain') ? ' Deep under a mountain, who knows what the miners might break into.' : ''}</p>}
+    </div>
+  )
+}
+
+/** What a smelting station works, and whether the village has what each ore needs. */
+function Works({ game, p, station }: { game: Game; p: Player; station: Parameters<typeof stationOres>[0] }) {
+  const v = game.state.villages[p.villageId]
+  return (
+    <div className="shaft">
+      {stationOres(station).map((g) => {
+        const h = oreHint(v, g)!
+        const have = Math.floor(v.goods[g] ?? 0)
+        return (
+          <div key={g} className="shaft-level">
+            <b><Icon name={g} /> {GOOD_LABEL[g]}{have ? ` ×${have}` : ''}</b>
+            <span className="muted">{ORES[g]!.yield} {GOOD_LABEL[ORES[g]!.metal].toLowerCase()} each, {ORES[g]!.fuel} charcoal{h.missing.length ? ` · needs a ${h.missing.map((id) => BUILDINGS[id].name).join(' and a ')}` : ''}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const ORE_NAME: Record<string, string> = { copper: 'malachite', iron: 'limonite', tin: 'tin', silver: 'galena', stone: 'stone' }
 const DIGGER: Record<string, string> = { copper: 'a mine', iron: 'a mine', silver: 'a mine', stone: 'a quarry', tin: '' }
 
 /** How much the land here still holds, roughly. */
@@ -195,33 +325,134 @@ function BuildButton({ game, p, def, col, row, onRun }: { game: Game; p: Player;
   )
 }
 
-function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to: string; onBack: () => void; onSend: (g: Record<string, number>) => void }) {
+/** Lend people, weapons and armour to a neighbour's palisade, with food for them to live on. */
+function TroopsForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to: string; onBack: () => void; onSend: (troops: number, g: Record<string, number>) => void }) {
   const v = game.state.villages[p.villageId]
+  const host = game.state.villages[to]
+  const [troops, setTroops] = useState(1)
+  const [by, stepChips] = useStep(Math.floor(v.population))
   const [load, setLoad] = useState<Record<string, number>>({})
-  const total = Object.values(load).reduce((a, n) => a + n, 0)
-  const have = Object.entries(v.goods).filter(([, n]) => (n ?? 0) >= 1) as [Good, number][]
-  const now = game.now()
-  const mins = caravanMinutes(p, v, game.state.villages[to], now.toISOString())
-  const arrive = new Date(now.getTime() + mins * 60_000)
+  const most = Math.max(0, people(v) - 2)
+  const gear = GEAR.filter((g) => (v.goods[g] ?? 0) >= 1)
+  const food = (Object.keys(v.goods) as Good[]).filter((g) => FOOD[g] && (v.goods[g] ?? 0) >= 1)
+  const nights = nightsOf({ troops, food: Object.fromEntries(Object.entries(load).filter(([g]) => FOOD[g as Good])) })
+  const step = (g: Good, d: number) => setLoad({ ...load, [g]: Math.max(0, Math.min(Math.floor(v.goods[g] ?? 0), (load[g] ?? 0) + d)) })
+  const row = (g: Good) => (
+    <div key={g} className="row" style={{ justifyContent: 'space-between' }}>
+      <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)})</span></span>
+      <span className="row">
+        <button className="btn icon" onClick={() => step(g, -1)}>−</button>
+        <b style={{ width: 24, textAlign: 'center' }}>{load[g] ?? 0}</b>
+        <button className="btn icon" disabled={(load[g] ?? 0) >= Math.floor(v.goods[g] ?? 0)} onClick={() => step(g, 1)}>+</button>
+      </span>
+    </div>
+  )
   return (
-    <Shell onClose={onBack} title={`Caravan to ${game.state.villages[to].name}`}>
+    <Shell onClose={onBack} title={`Troops to ${host.name}`}>
       <button className="btn ghost" onClick={onBack}>← back</button>
-      <p className="muted">Up to 15 goods. Gifts of food or rare goods cheer them up.</p>
-      <p style={{ margin: '4px 0 8px' }}>
-        Sent now, it arrives <b>{clockTime(arrive, now)}</b> <span className="muted">({span(mins * 60_000)} on the road, your phone's time)</span>
+      <p className="muted">They stay your people (counted at home as away, with houses kept for them), but they can't work while they're gone. They wait at {host.name}'s gate until it takes them in (or turns them back). Once on the walls they're its to command, on guard and on expeditions, and they eat only the food you send. When it runs out they walk home, with their weapons and armour.</p>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <span><Icon name="people" /> Troops <span className="muted">(up to {most} of your people at home: two stay)</span></span>
+        <span className="row">
+          <button className="btn icon" disabled={troops <= 1} onClick={() => setTroops(Math.max(1, troops - by))}>−</button>
+          <b style={{ minWidth: 24, textAlign: 'center' }}>{troops}</b>
+          <button className="btn icon" disabled={troops >= most} onClick={() => setTroops(Math.min(most, troops + by))}>+</button>
+        </span>
+      </div>
+      <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>
+      <h4 style={{ margin: '8px 0 2px' }}>Weapons and armour</h4>
+      {gear.length ? gear.map(row) : <p className="muted" style={{ margin: 0 }}>None in store (bronze, iron, steel, leather).</p>}
+      <h4 style={{ margin: '8px 0 2px' }}>Food</h4>
+      {food.length ? food.map(row) : <p className="muted" style={{ margin: 0 }}>No food in store.</p>}
+      <p className={nights >= 1 ? 'deal-yes' : 'deal-no'} style={{ margin: '6px 0' }}>
+        {nights >= 1 ? `Food for ${nights} night${nights === 1 ? '' : 's'} on the walls (${RATION} a night each).` : `Send at least a night's food: ${troops * RATION} worth.`}
       </p>
-      {have.map(([g, n]) => (
+      <button className="btn primary" disabled={troops < 1 || troops > most || nights < 1}
+        onClick={() => onSend(troops, Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)))}>Send {troops} troops</button>
+    </Shell>
+  )
+}
+
+function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to: string; onBack: () => void; onSend: (g: Record<string, number>, crew: number, food: Record<string, number>) => void }) {
+  const v = game.state.villages[p.villageId]
+  const dest = game.state.villages[to]
+  const free = spare(v)
+  const [crew, setCrew] = useState(Math.min(1, free))
+  const [by, stepChips] = useStep(Math.floor(v.population))
+  const [load, setLoad] = useState<Record<string, number>>({})
+  const [food, setFood] = useState<Record<string, number>>({})
+  const carry = caravanCarry(game.world, game.state, v, dest, Math.max(1, crew))
+  const tier = caravanTier(game.world, game.state, v, dest)
+  const weight = weightOf(load) + weightOf(food)
+  const now = game.now()
+  const mins = caravanMinutes(p, v, dest, now.toISOString(), game.world, game.state)
+  const arrive = new Date(now.getTime() + mins * 60_000)
+  const need = provisionsFor(Math.max(1, crew), mins)
+  const packed = foodValue(food)
+  // what's left in store to load, once provisions are set aside
+  const left = (g: Good) => Math.floor((v.goods[g] ?? 0) - (food[g] ?? 0) - (load[g] ?? 0))
+  const have = (Object.keys(v.goods) as Good[]).filter((g) => (v.goods[g] ?? 0) >= 1)
+  const foods = have.filter((g) => FOOD[g])
+  const pct = (x: number) => `${Math.round(x * 100)}%`
+  const stepper = (state: Record<string, number>, set: (x: Record<string, number>) => void, g: Good) => (
+    <span className="row">
+      <button className="btn icon" onClick={() => set({ ...state, [g]: Math.max(0, (state[g] ?? 0) - 1) })}>−</button>
+      <b style={{ width: 24, textAlign: 'center' }}>{state[g] ?? 0}</b>
+      <button className="btn icon" disabled={left(g) < 1 || weight + WEIGHT[g] > carry.cap} onClick={() => set({ ...state, [g]: (state[g] ?? 0) + 1 })}>+</button>
+    </span>
+  )
+  return (
+    <Shell onClose={onBack} title={`Caravan to ${dest.name}`}>
+      <button className="btn ghost" onClick={onBack}>← back</button>
+      <p className="muted" style={{ margin: '4px 0' }}>
+        {tier === 'free'
+          ? (carry.animals === 'carts' ? (v.oxenBack && v.oxenBack > now.toISOString() ? `Paved road all the way, but your oxen are on the road home until ${clockTime(new Date(v.oxenBack), now)}: it takes a small task till then.` : 'Paved road all the way: your ox carts go without a task, then walk home before they go again.') : 'Paved road all the way: with ox carts (a Cart shed) it would cost no task at all. For now, a small task.')
+          : tier === 'small' ? 'A road connects you: a small task. Pave it all the way and ox carts go for free.' : 'No road connects you: a medium task, and a slow trek. A road makes it a small task and three times as fast.'}
+        {' '}{pct(carry.road)} of the way is on roads{carry.paved > 0 ? `, ${pct(carry.paved)} paved` : ''}.
+      </p>
+      <p style={{ margin: '4px 0 8px' }}>
+        Sent now, it arrives <b>{clockTime(arrive, now)}</b> <span className="muted">({span(mins * 60_000)} on the road; its people are home again {span(mins * 2 * 60_000)} from now)</span>
+      </p>
+
+      <h4 style={{ margin: '6px 0 2px' }}>People</h4>
+      <div className="row" style={{ gap: 6, margin: '2px 0' }}><span className="muted">Move by</span> {stepChips}</div>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <span><Icon name="people" /> Going <span className="muted">({free} free; the rest are working)</span></span>
+        <span className="row">
+          <button className="btn icon" disabled={crew <= 1} onClick={() => setCrew(Math.max(1, crew - by))}>−</button>
+          <b style={{ minWidth: 24, textAlign: 'center' }}>{crew}</b>
+          <button className="btn icon" disabled={crew >= free} onClick={() => setCrew(Math.min(free, crew + by))}>+</button>
+        </span>
+      </div>
+      <p className="muted" style={{ margin: '2px 0' }}>
+        {free < 1 ? <span className="deal-no">Nobody is free to go: take someone off a building in the Village tab (Workers). </span> : null}
+        Each carries {CARRY_EACH}{carry.animals === 'mules' ? ', and the pack mules carry 60 more' : carry.animals === 'carts' ? ', and the ox carts carry 60 to 100 more (more on roads)' : '; a Mule stable adds 60'}{carry.paved > 0 ? ', and paved road half again' : ''}: up to <b>{carry.cap}</b> weight in all.
+        {carry.thirsty ? ' (Your mules are thirsty: a well by the stable lets them carry more.)' : ''}
+      </p>
+
+      <h4 style={{ margin: '6px 0 2px' }}>Provisions for the road</h4>
+      <p className={packed + 1e-9 >= need ? 'deal-yes' : 'deal-no'} style={{ margin: '2px 0' }}>
+        {packed + 1e-9 >= need ? `Packed: food for the trip there and back (${Math.round(packed * 10) / 10} of ${need} needed).` : `Pack ${need} worth of food: ${crew} ${crew === 1 ? 'person' : 'people'}, half a unit each a day, there and back. Packed: ${Math.round(packed * 10) / 10}.`}
+      </p>
+      {foods.length ? foods.map((g) => (
+        <div key={`f-${g}`} className="row" style={{ justifyContent: 'space-between' }}>
+          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · worth {FOOD[g]!.value} food each)</span></span>
+          {stepper(food, setFood, g)}
+        </div>
+      )) : <p className="muted" style={{ margin: 0 }}>No food in store to pack.</p>}
+
+      <h4 style={{ margin: '6px 0 2px' }}>Goods for {dest.name}</h4>
+      {have.map((g) => (
         <div key={g} className="row" style={{ justifyContent: 'space-between' }}>
-          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(n)})</span></span>
-          <span className="row">
-            <button className="btn icon" onClick={() => setLoad({ ...load, [g]: Math.max(0, (load[g] ?? 0) - 1) })}>−</button>
-            <b style={{ width: 24, textAlign: 'center' }}>{load[g] ?? 0}</b>
-            <button className="btn icon" disabled={(load[g] ?? 0) + 1 > Math.floor(n) || total >= 15} onClick={() => setLoad({ ...load, [g]: (load[g] ?? 0) + 1 })}>+</button>
-          </span>
+          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · weight {WEIGHT[g]})</span></span>
+          {stepper(load, setLoad, g)}
         </div>
       ))}
-      <button className="btn primary" disabled={!total} style={{ marginTop: 8 }}
-        onClick={() => onSend(Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)))}>Send {total} goods</button>
+      <div className="deal-bar" style={{ marginTop: 8 }}><i style={{ width: `${Math.min(100, (weight / Math.max(1, carry.cap)) * 100)}%` }} /></div>
+      <p className="muted" style={{ margin: '2px 0' }}>Load: {Math.round(weight * 10) / 10} / {carry.cap} weight, provisions included. Gifts of food or rare goods cheer them up.</p>
+      {refineTips(load).map((t) => <p key={t} className="muted" style={{ margin: '2px 0' }}>💡 {t}</p>)}
+      <button className="btn primary" disabled={!weightOf(load) || crew < 1 || crew > free || packed + 1e-9 < need} style={{ marginTop: 4 }}
+        onClick={() => onSend(Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)), crew, Object.fromEntries(Object.entries(food).filter(([, n]) => n > 0)))}>Send caravan</button>
     </Shell>
   )
 }

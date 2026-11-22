@@ -12,6 +12,8 @@
  *  Everything here is a pure function of the world, the state and the day, so
  *  every client agrees on what's for sale. */
 import { spiral } from '../world/hex'
+import { treeCount } from '../world/land'
+import { clayAt } from './reducer'
 import { rngFor } from '../world/rng'
 import type { World } from '../world/types'
 import { addDays, isSabbath } from './calendar'
@@ -23,10 +25,11 @@ import type { GameState, ISODate, Village } from './types'
  *  sells them; prices are shown in copper, or silver at 10 copper. */
 export const VALUE: Record<Good, number> = {
   grain: 1, fish: 1, timber: 1, stone: 1, clay: 1, berries: 1.5, game: 1.5, wool: 1.5, herbs: 2, salt: 3,
-  copper_ore: 2, iron_ore: 2.5, silver_ore: 4, tin: 6,
+  copper_ore: 2, chalcopyrite: 1.5, limonite: 2, iron_ore: 2.5, magnetite: 3, silver_ore: 4, tin: 6,
   bread: 2, smoked_fish: 2.5, cheese: 3, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
   copper: 5, iron: 7, bronze: 10, steel: 15, silver: 50,
   relic: 25, dragon_scale: 40,
+  saltpetre: 4, sulfur: 4, gunpowder: 12, cannonballs: 6, musket: 25, cannon: 120, ram: 30, siege_tower: 60,
 }
 
 /** A worth (in grain) as copper. */
@@ -36,10 +39,11 @@ export const COPPER_PER_SILVER = 10
 /** How heavy a good is to carry, per unit. */
 export const WEIGHT: Record<Good, number> = {
   grain: 1, fish: 1, timber: 2, stone: 3, clay: 2, berries: 0.5, game: 1, wool: 0.5, herbs: 0.2, salt: 1,
-  copper_ore: 3, iron_ore: 3, silver_ore: 3, tin: 1,
+  copper_ore: 3, chalcopyrite: 3, limonite: 3, iron_ore: 3, magnetite: 3.5, silver_ore: 3, tin: 1,
   bread: 0.5, smoked_fish: 0.5, cheese: 1, bricks: 2, charcoal: 1, planks: 1.5, leather: 0.5, cloth: 0.5,
   copper: 1, iron: 1.5, bronze: 1.5, steel: 1.5, silver: 1,
   relic: 0.5, dragon_scale: 1,
+  saltpetre: 1, sulfur: 1, gunpowder: 1, cannonballs: 3, musket: 2, cannon: 30, ram: 20, siege_tower: 40,
 }
 
 export const weightOf = (g: Goods) => Object.entries(g).reduce((a, [x, n]) => a + (n ?? 0) * WEIGHT[x as Good], 0)
@@ -162,8 +166,23 @@ function outfit(kind: MerchantKind, r: Reach): { name: string; blurb: string; ca
     case 'caravan': return r.roads >= WAGON_ROADS
       ? { name: 'Wagon caravan', blurb: 'Ox wagons, rolling in on your long roads.', cap: 70, size: 1.3 }
       : { name: 'Mule train', blurb: `A string of pack mules. ${WAGON_ROADS} road hexes would bring the wagons.`, cap: 30, size: 0.9 }
-    case 'pedlar': return { name: k.name, blurb: k.blurb, cap: 12, size: 0.6 }
+    case 'pedlar': return { name: k.name, blurb: k.blurb, cap: 20, size: 0.6 }
   }
+}
+
+/** What the pedlar always brings a village that's short of it: building basics it can't get at home. */
+const STAPLES: Goods = { timber: 4, clay: 3 }
+
+/** Staples a village is out of, or has no source of in its own land (no trees, no riverbank, marsh or clay). */
+export function lacks(world: World, s: GameState, v: Village): Good[] {
+  const near = spiral(v, 2).filter((o) => o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height)
+    .map((o) => o.row * world.width + o.col)
+  const trees = near.some((i) => { const w = s.woods?.[i]; return w ? w.n + w.young > 0 : treeCount(world.cells[i]) > 0 })
+  const clay = near.some((i) => world.cells[i].resource === 'clay' || clayAt(world, i) > 0)
+  const out: Good[] = []
+  if (!trees || (v.goods.timber ?? 0) < 2) out.push('timber')
+  if (!clay || (v.goods.clay ?? 0) < 1) out.push('clay')
+  return out
 }
 
 /** The merchants calling at a village on a day (the player's own day), with
@@ -186,17 +205,22 @@ export function merchants(world: World, s: GameState, v: Village, date: ISODate)
     const pool = [...k.pool]
     const n = Math.min(pool.length, Math.max(2, Math.round((2 + r.score * 4) * o.size)))
     const full: Goods = {}
+    // the pedlar always brings what the village is short of (timber, clay), the rest of the pack around it
+    const staples: Goods = kind === 'pedlar' ? Object.fromEntries(lacks(world, s, v).map((g) => [g, STAPLES[g]])) : {}
     for (let j = 0; j < n; j++) {
       const g = pool.splice(Math.floor(rng() * pool.length), 1)[0]
+      if (staples[g]) continue
       full[g] = Math.max(1, Math.round((3 + rng() * 5) * (0.5 + r.score) * o.size / Math.sqrt(VALUE[g])))
     }
     // a full pack leaves room to buy: trim it to two thirds of what they can carry
+    const room = o.cap * 2 / 3 - weightOf(staples)
     const order = Object.keys(full) as Good[]
-    for (let j = 0; weightOf(full) > o.cap * 2 / 3 && j < 500; j++) {
+    for (let j = 0; order.length && weightOf(full) > room && j < 500; j++) {
       const g = order[j % order.length]
       if ((full[g] ?? 0) > 1) full[g]! -= 1
       else if (order.every((x) => (full[x] ?? 0) <= 1)) { delete full[order.pop()!] }
     }
+    Object.assign(full, staples)
     const wares: Goods = {}
     for (const [g, q] of Object.entries(full)) {
       const left = (q ?? 0) - (took[kind]?.[g as Good] ?? 0)

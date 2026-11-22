@@ -7,6 +7,7 @@ import { Help } from './ui/Help'
 import { Caravans } from './ui/Caravans'
 import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
+import { loadHouseArt } from './render/houseart'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
 import { dayScore, foundingBlockedCells } from './game/reducer'
@@ -132,6 +133,7 @@ function Main({ game }: { game: Game }) {
   const [showAccount, setShowAccount] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showCaravans, setShowCaravans] = useState(false)
+  const [splitting, setSplitting] = useState<string | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   // one-off messages: from startup (e.g. accepting a parent link), or an action the server refused
   useEffect(() => {
@@ -165,7 +167,10 @@ function Main({ game }: { game: Game }) {
         return
       }
       if (!alive || !host.current) return
-      view = new MapView(atlas)
+      // the Blender houses are a nicety: without them the map still draws, the older way
+      const houses = await loadHouseArt().catch((e) => { console.warn('house art unavailable', e); return null })
+      if (!alive || !host.current) return
+      view = new MapView(atlas, houses)
       await view.mount(host.current)
       // while choosing a village site, taps pick the site instead of opening the inspector
       view.onSelect = (col, row) => (placingRef.current ? setPreview({ col, row }) : setSel({ col, row }))
@@ -283,14 +288,26 @@ function Main({ game }: { game: Game }) {
 
       {p && p.tokens.length > 0 && !sel && (
         <div className="tray" style={{ bottom: collapsed ? 54 : 'calc(52% + 8px)' }}>
-          {spendables(p).map((t) => (
-            <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''}`}
-              title={t.strength < 1 ? `Half-done ${t.size} task: finish it, or half-do another task, to use this action`
-                : t.tok2 ? `${SIZE_LABEL[t.size]} action (two half-done tasks)` : `${SIZE_LABEL[t.size]} action`}>
-              {t.size === 'big' ? 'B' : t.size === 'medium' ? 'M' : 'S'}
-            </span>
-          ))}
-          <span className="tray-hint">{spendables(p).some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>
+          {spendables(p).map((t) => {
+            // a whole big or medium action can be split into smaller ones (never put back together)
+            const splittable = t.strength >= 1 && !t.tok2 && t.size !== 'small' && !game.guest
+            return (
+              <span key={t.id} className={`token ${t.size} ${t.strength < 1 ? 'half' : ''} ${splitting === t.id ? 'armed' : ''}`}
+                role={splittable ? 'button' : undefined} tabIndex={splittable ? 0 : undefined}
+                onClick={() => splittable && setSplitting(splitting === t.id ? null : t.id)}
+                title={t.strength < 1 ? `Half-done ${t.size} task: finish it, or half-do another task, to use this action`
+                  : t.tok2 ? `${SIZE_LABEL[t.size]} action (two half-done tasks)` : `${SIZE_LABEL[t.size]} action${splittable ? ' (tap to split)' : ''}`}>
+                {t.size === 'big' ? 'B' : t.size === 'medium' ? 'M' : 'S'}
+              </span>
+            )
+          })}
+          {splitting && p.tokens.some((t) => t.id === splitting) ? (
+            <button className="btn split-btn" onClick={() => {
+              const t = p.tokens.find((x) => x.id === splitting)!
+              void game.dispatch({ t: 'split', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: t.id })
+              setSplitting(null)
+            }}>Split {p.tokens.find((x) => x.id === splitting)!.size === 'big' ? 'B into M + S' : 'M into S + S'}?</button>
+          ) : <span className="tray-hint">{spendables(p).some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>}
         </div>
       )}
 

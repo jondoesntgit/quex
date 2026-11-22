@@ -51,6 +51,8 @@ export interface Meta {
   /** dev: shift "now" by whole days to test ticks and seasons */
   dayOffset: number
   joinedOn: Record<string, ISODate>
+  /** players who've hidden the getting-started guide on this device */
+  guideDone?: string[]
 }
 
 const META_KEY = 'quex:meta:v1'

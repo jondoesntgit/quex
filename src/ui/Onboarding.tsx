@@ -82,8 +82,8 @@ export function Onboarding({ game, site, linked, onStep, onDone, onCancel, first
 
   return (
     <div className="placebar card">
-      {!site && linked && <p style={{ margin: '0 0 6px' }}><b>The spot from your link is marked in pink.</b> Settle near it: tap a hex just outside the red.</p>}
-      {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Red land is too close to a neighbour.</span></p>}
+      {!site && linked && <p style={{ margin: '0 0 6px' }}><b>The spot from your link is marked in pink.</b> Settle near it: tap a hex just outside the shaded land.</p>}
+      {!site && <p style={{ margin: 0 }}><b>Tap any land to settle there.</b> <span className="muted">Pan and zoom to see the whole world. Shaded land is too close to a neighbour.</span></p>}
       {site && problem && <p style={{ margin: 0 }}><b>Can't settle here:</b> {problem}. <span className="muted">Try another hex.</span></p>}
       {site && !problem && fits && (
         <>

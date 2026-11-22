@@ -317,3 +317,29 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .deal-no { color: #b0443a; }
 
 .sabbath { background: var(--paper-2); border: 2px solid var(--ink); border-radius: var(--radius); padding: 8px 10px; margin: 6px 0; }
+
+/* a mine's shaft, level by level; a smelter's ores */
+.shaft { margin: 6px 0; border-left: 3px solid var(--ink); padding-left: 8px; }
+.shaft-level { display: flex; flex-direction: column; padding: 2px 0; }
+.shaft-level.unreached { opacity: 0.55; }
+.shaft-level.working b::after { content: ' ⛏'; }
+.garrison-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--paper-2); flex-wrap: wrap; }
+.guide { background: var(--paper-2); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.guide summary { cursor: pointer; font-weight: 700; }
+.guide ol { margin: 4px 0; padding-left: 20px; }
+.guide li { margin: 2px 0; }
+.guide li.done { text-decoration: line-through; opacity: 0.55; }
+.guide li.next { font-weight: 700; }
+.focus { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--gold); background: var(--paper); }
+.good small.up { color: #287828; } .good small.down { color: var(--danger); }
+.token[role=button], .split-btn { cursor: pointer; pointer-events: auto; }
+.token.armed { outline: 2px solid var(--gold); }
+.split-btn { padding: 2px 8px; font-size: 0.85em; }
+.worker-row { justify-content: space-between; padding: 2px 0; }
+.qty.short { color: var(--danger); }
+.growth { margin: 6px 0; }
+.worker-row { flex-wrap: nowrap; gap: 8px; }
+.worker-row > span:first-child { flex: 1; min-width: 0; }
+.steps { display: inline-flex; gap: 4px; }
+.steps .chip { cursor: pointer; padding: 2px 8px; border: 2px solid var(--ink); border-radius: var(--radius); background: var(--paper); font: inherit; }
+.steps .chip.on { background: var(--gold); }

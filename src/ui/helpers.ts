@@ -1,8 +1,8 @@
 import { useEffect, useReducer } from 'react'
-import { SIZE_RANK, type ActionKind, type BuildingId, type TaskSize } from '../game/data'
-import { actionSize, validate } from '../game/reducer'
+import { BUILDINGS, GOOD_LABEL, ORES, SIZE_RANK, type ActionKind, type BuildingId, type Good, type Goods, type TaskSize } from '../game/data'
+import { FREE, actionSize, caravanTier, validate } from '../game/reducer'
 import type { World } from '../world/types'
-import type { GameEvent, Player, Token } from '../game/types'
+import type { GameEvent, Player, Token, Village } from '../game/types'
 import { eventId, type Game } from '../app/store'
 
 export function useGame(game: Game | null) {
@@ -42,7 +42,7 @@ export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Spendabl
 }
 
 export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; to?: string; goods?: Record<string, number> } = {}): GameEvent {
+  extra: { building?: BuildingId; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number> } = {}): GameEvent {
   return {
     t: 'act', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: tok.tok.id,
     ...(tok.tok2 ? { tokenId2: tok.tok2.id } : {}), action, col, row, ...extra,
@@ -50,8 +50,19 @@ export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKi
 }
 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; to?: string; goods?: Record<string, number> } = {}, needOverride?: 'big' | 'medium' | 'small') {
-  const size = needOverride ?? actionSize(game.world, action, col, row, game.now().toISOString())
+  extra: { building?: BuildingId; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number> } = {}, needOverride?: 'big' | 'medium' | 'small') {
+  // a caravan costs by how the villages are connected: across country, by road, or free on paved road
+  const v = game.state.villages[p.villageId]
+  const dest = action === 'caravan' && extra.to ? game.state.villages[extra.to] : null
+  const tier = dest && v ? caravanTier(game.world, game.state, v, dest) : null
+  if (tier === 'free') {
+    const free: Spendable = { id: FREE, size: 'small', strength: 1, tok: { id: FREE, size: 'small', strength: 1, date: '', slot: -1 } }
+    const ev = actEvent(game, p, free, action, col, row, extra)
+    const error = validate(game.state, game.world, ev)
+    // no carts, or oxen still out: fall back to a small task
+    if (!error) return { ev, error, tok: free }
+  }
+  const size = needOverride ?? (tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(game.world, action, col, row, game.now().toISOString()))
   const tok = bestToken(p, size)
   if (!tok) {
     const need = size
@@ -107,4 +118,26 @@ export async function shareSpot(game: Game, at: Spot, text: string): Promise<str
     if (e instanceof DOMException && e.name === 'AbortError') return ''
   }
   try { await navigator.clipboard.writeText(`${text} ${url}`); return 'Link copied: paste it into a text.' } catch { return url }
+}
+
+// ------------------------------------------------------------------ ores
+
+/** "mostly chalcopyrite, some malachite" */
+export function mixText(g: Goods): string {
+  const parts = (Object.entries(g) as [Good, number][]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])
+  if (parts.length === 1) return GOOD_LABEL[parts[0][0]].toLowerCase()
+  return parts.map(([x, n], k) => `${k === 0 ? (n >= 0.7 ? 'mostly ' : '') : n < 0.35 ? 'some ' : ''}${GOOD_LABEL[x].toLowerCase()}`).join(', ')
+}
+
+/** What it takes to work an ore, for a village: "Smelter + Roasting heap, 1 charcoal each → 0.6 copper", and what's missing. */
+export function oreHint(v: Village, g: Good): { text: string; missing: BuildingId[] } | null {
+  const o = ORES[g]
+  if (!o) return null
+  const has = (id: BuildingId) => v.buildings.some((b) => b.type === id && b.progress >= 1)
+  const need = [o.station, ...(o.with ? [o.with] : [])]
+  const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString()
+  return {
+    text: `${need.map((id) => BUILDINGS[id].name).join(' + ')}, ${fmt(o.fuel)} charcoal each → ${fmt(o.yield)} ${GOOD_LABEL[o.metal].toLowerCase()}`,
+    missing: need.filter((id) => !has(id)),
+  }
 }

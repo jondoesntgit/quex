@@ -1,14 +1,17 @@
 import { useState } from 'react'
-import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
-import { dayScore, defence, foodStock, logText, popCap, storageCap } from '../game/reducer'
-import type { Habit, Player, TaskStatus } from '../game/types'
+import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
+import { GROW_MORALE, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
+import { jobs, needOf, people, spare, storesFull } from '../game/workers'
+import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
+import type { Habit, Player, TaskStatus, Village } from '../game/types'
 import { addDays, isSabbath, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
-import { shareSpot, SIZE_LABEL } from './helpers'
+import { oreHint, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
 import { FAMILY_WORLD, SANDBOX_WORLD, worldUrl } from '../app/worlds'
 import { winterPrep } from '../game/winter'
 import { Icon } from './Icon'
+import { Focus, GettingStarted, useStep } from './Advisor'
 
 /** Today plus the next six days: a strip to pick which day you're looking at. */
 function DayStrip({ game, p, today, ahead, setAhead }: { game: Game; p: Player; today: string; ahead: number; setAhead: (n: number) => void }) {
@@ -131,6 +134,7 @@ export function TodayPanel({ game, p }: { game: Game; p: Player }) {
         {!rest && <span className="muted">{mine ? 'Task names are private to you' : `Only ${p.name} and their family see these`}</span>}
       </div>
       {rest && <p className="sabbath">A day of rest: no tasks today, just your habits. The village rests too, and tonight counts like a frozen day.</p>}
+      {mine && <GettingStarted game={game} p={p} />}
       <WinterNudge game={game} p={p} />
       {mine && !editable && (
         <p className="supervised">👪 Your tasks are set and checked off by {guardians.join(' & ') || 'your parent'}. Spend the actions you earn on the map!</p>
@@ -314,8 +318,8 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
     <div>
       <h3 style={{ marginTop: 0 }}>{v.name}</h3>
       <div className="row" style={{ gap: 14 }}>
-        <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}</span>
-        <span><Icon name="defence" title="Defence" /> {defence(v)}</span>
+        <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}{v.away ? ` (${v.away} away)` : ''}</span>
+        <span><Icon name="defence" title="Defence" /> {defence(v)}{troopsAt(game.state, v) ? ` +${troopsAt(game.state, v)} troops` : ''}</span>
         <span><Icon name="bread" title="Food stored" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
         <span>Winter: <b>{winterPrep(v, game.today(p.id), dayScore(p.days[game.today(p.id)])).forecast}</b></span>
       </div>
@@ -324,21 +328,16 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
         <div className="bar"><i style={{ width: `${v.morale}%`, background: v.morale < 35 ? 'var(--danger)' : undefined }} /></div>
       </div>
       <WinterPrepCard game={game} p={p} />
+      <Focus game={game} p={p} />
       <button className="btn" style={{ marginBottom: 4 }} onClick={async () => {
         const msg = await shareSpot(game, v, `Come settle near ${v.name} in Quex!`)
         if (msg) notify(msg)
       }}>🔗 Invite someone to settle nearby</button>
-      <h3>Goods</h3>
-      {goods.length ? (
-        <div className="goods">{goods.map(([g, n]) => <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{Math.round(n * 10) / 10}</b></span></span>)}</div>
-      ) : <p className="muted">Nothing in store.</p>}
-      <h3>Buildings</h3>
-      {v.buildings.length ? v.buildings.map((b) => (
-        <div key={b.id} className="row" style={{ justifyContent: 'space-between' }}>
-          <span>{BUILDINGS[b.type].name}</span>
-          <span className="muted">{b.progress >= 1 ? 'working' : `${Math.round(b.progress * 100)}% built`}</span>
-        </div>
-      )) : <p className="muted">Tap a hex in your territory (yellow border) and finish a medium task to build.</p>}
+      <Stores game={game} p={p} goods={goods} />
+      <OreHints v={v} />
+      <Garrison game={game} p={p} />
+      <Growth game={game} p={p} />
+      <Workers game={game} p={p} />
       <h3>Start over</h3>
       {!confirm ? (
         <>
@@ -548,5 +547,163 @@ function WinterPrepCard({ game, p }: { game: Game; p: Player }) {
         ))}
       </ul>
     </details>
+  )
+}
+
+/** Ore in store, and what it takes to work it into metal. */
+function OreHints({ v }: { v: Village }) {
+  const ores = (Object.keys(ORES) as Good[]).filter((g) => (v.goods[g] ?? 0) >= 0.5)
+  if (!ores.length) return null
+  return (
+    <div className="ore-hints">
+      <h4 style={{ margin: '8px 0 2px' }}>Working your ore</h4>
+      {ores.map((g) => {
+        const h = oreHint(v, g)!
+        return (
+          <p key={g} className="muted" style={{ margin: '2px 0' }}>
+            <Icon name={g} /> <b>{GOOD_LABEL[g]}</b>: {h.text}.{' '}
+            {h.missing.length ? <span className="deal-no">Build a {h.missing.map((id) => BUILDINGS[id].name).join(' and a ')}.</span> : (v.goods.charcoal ?? 0) < (ORES[g]!.fuel) ? <span className="deal-no">Needs charcoal.</span> : <span className="deal-yes">Being worked each night.</span>}
+            <br /><small>{ORES[g]!.note}</small>
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Troops at this village's palisade (to take in, or send home), and its own troops away at others'. */
+function Garrison({ game, p }: { game: Game; p: Player }) {
+  const s = game.state
+  const v = s.villages[p.villageId]
+  const here = garrison(s, v)
+  const mine = away(s, v)
+  if (!here.length && !mine.length && !palisades(v)) return null
+  const name = (id: string) => s.villages[id]?.name ?? 'afar'
+  const decide = (detachment: string, accept: boolean) =>
+    game.dispatch({ t: 'garrison', id: eventId(), at: game.now().toISOString(), playerId: p.id, detachment, accept })
+  return (
+    <div className="garrison">
+      <h4 style={{ margin: '8px 0 2px' }}>The palisade</h4>
+      {palisades(v) > 0 && !here.length && <p className="muted" style={{ margin: '2px 0' }}>No neighbours' troops on your walls. Friends can send some (with food), to guard you and march on your expeditions.</p>}
+      {here.map((d) => (
+        <div key={d.id} className="garrison-row">
+          <span>
+            <b>{d.troops} from {name(d.from)}</b>{' '}
+            <span className="muted">
+              {Object.keys(d.gear).length ? `with ${fmtGoods(d.gear)} · ` : ''}food for {nightsOf(d)} night{nightsOf(d) === 1 ? '' : 's'}
+              {d.status === 'waiting' ? ' · waiting at the gate' : ' · on your walls'}
+            </span>
+          </span>
+          <span className="row" style={{ gap: 4 }}>
+            {d.status === 'waiting' && <button className="btn primary" onClick={() => decide(d.id, true)}>Take them in</button>}
+            <button className="btn" onClick={() => decide(d.id, false)}>{d.status === 'waiting' ? 'Turn back' : 'Send home'}</button>
+          </span>
+        </div>
+      ))}
+      {mine.map(({ host, d }) => (
+        <p key={d.id} className="muted" style={{ margin: '2px 0' }}>
+          {d.troops} of your people are {d.status === 'waiting' ? 'waiting at the gate of' : 'on the walls of'} {name(host)}, with food for {nightsOf(d)} night{nightsOf(d) === 1 ? '' : 's'}.
+        </p>
+      ))}
+    </div>
+  )
+}
+
+/** The village's goods, each with what tonight will add or take (made, used, eaten, spoiled). */
+function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, number][] }) {
+  const t = tonight(game.state, game.world, p, game.now())
+  const net = new Map(t.rows.map((r) => [r.good, r]))
+  // goods tonight will make that aren't in store yet
+  const coming = t.rows.filter((r) => r.have <= 0.05 && r.net[1] > 0).map((r) => [r.good, 0] as [Good, number])
+  const fmt = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(Math.round(x * 10) / 10)}`
+  const change = (g: Good) => {
+    const r = net.get(g)
+    if (!r) return null
+    const [lo, hi] = r.net
+    if (Math.abs(lo) < 0.05 && Math.abs(hi) < 0.05) return null
+    const text = lo === hi ? fmt(lo) : `${fmt(lo)} to ${fmt(hi)}`
+    return <small className={hi > 0 ? 'up' : 'down'}>{text}</small>
+  }
+  const all = [...goods, ...coming]
+  return (
+    <>
+      <h3 style={{ marginBottom: 2 }}>Goods</h3>
+      <p className="muted" style={{ margin: '0 0 6px' }}>
+        Tonight, at today's score ({t.score}/100): what your buildings make and use, what the village eats, and what spoils.
+        {t.hungry && <span className="deal-no"> Not enough food for tonight!</span>}
+      </p>
+      {all.length ? (
+        <div className="goods">{all.map(([g, n]) => (
+          <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{Math.round(n * 10) / 10}</b> {change(g)}</span></span>
+        ))}</div>
+      ) : <p className="muted">Nothing in store.</p>}
+    </>
+  )
+}
+
+/** Who works where: the village can decide, or the player assigns people by hand. */
+function Workers({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  const j = jobs(v)
+  const auto = v.autoJobs !== false
+  const home = people(v)
+  const busy = Object.values(j).reduce((a, n) => a + n, 0)
+  const [step, stepChips] = useStep(Math.floor(v.population))
+  const set = (id: string, d: number) => {
+    const next = { ...j, [id]: Math.max(0, (j[id] ?? 0) + d) }
+    void game.dispatch({ t: 'jobs', id: eventId(), at: game.now().toISOString(), playerId: p.id, auto: false, jobs: next })
+  }
+  const toggle = () => void game.dispatch({ t: 'jobs', id: eventId(), at: game.now().toISOString(), playerId: p.id, auto: !auto, ...(auto ? { jobs: j } : {}) })
+  const staffed = v.buildings.filter((b) => b.progress >= 1 && needOf(b) > 0)
+  const other = v.buildings.filter((b) => b.progress < 1 || needOf(b) === 0)
+  const row = (id: string, name: string, n: number, max: number, note?: string) => (
+    <div key={id} className="row worker-row">
+      <span>{name} {note && <span className="muted">· {note}</span>}</span>
+      <span className="row stepper">
+        <button className="btn icon" disabled={auto || n <= 0} onClick={() => set(id, -Math.min(step, n))}>−</button>
+        <b className={`qty ${n < max ? 'short' : ''}`}>{n}/{max}</b>
+        <button className="btn icon" disabled={auto || n >= max || busy >= home} onClick={() => set(id, Math.min(step, max - n, home - busy))}>+</button>
+      </span>
+    </div>
+  )
+  return (
+    <>
+      <h3 style={{ marginBottom: 2 }}>Workers</h3>
+      <p className="muted" style={{ margin: '0 0 4px' }}>
+        {home} people at home{v.away ? ` (and ${v.away} away, with a caravan or on a neighbour's walls)` : ''}: {busy} working, {spare(v)} free. A building with half its workers makes half as much.
+      </p>
+      <label className="row" style={{ gap: 6, margin: '4px 0' }}>
+        <input type="checkbox" checked={auto} onChange={toggle} /> Let the village manage its workers <span className="muted">(food buildings first, then the rest; with the stores full, only enough on food to feed everyone)</span>
+      </label>
+      {!auto && <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>}
+      {auto && storesFull(v) && <p className="muted" style={{ margin: '2px 0' }}>🌾 The stores are full, so the village has moved hands off food (more would only rot) onto other work.</p>}
+      {staffed.map((b) => row(b.id, BUILDINGS[b.type].name, j[b.id] ?? 0, needOf(b)))}
+      {other.length > 0 && (
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Also: {other.map((b) => `${BUILDINGS[b.type].name}${b.progress < 1 ? ` (${Math.round(b.progress * 100)}% built)` : ''}`).join(', ')}.
+        </p>
+      )}
+      {!v.buildings.length && <p className="muted">Tap a hex in your territory (yellow border) and finish a medium task to build.</p>}
+    </>
+  )
+}
+
+/** How a village gains people, and which of the three conditions it meets tonight. */
+function Growth({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  const t = tonight(game.state, game.world, p, game.now())
+  const room = popCap(v) - v.population
+  const checks = [
+    { ok: room > 0.05, text: room > 0.05 ? `Room in the houses: ${Math.floor(v.population)} of ${popCap(v)} places` : `The houses are full (${popCap(v)} places): build a House for 4 more` },
+    { ok: v.morale >= GROW_MORALE, text: `Morale at least ${GROW_MORALE}: it's ${v.morale}${v.morale < GROW_MORALE ? ' (a varied larder, a good day, a chapel or devotions lift it)' : ''}` },
+    { ok: t.food >= 0 && !t.hungry, text: t.food >= 0 && !t.hungry ? `Food: tonight the village makes at least what it eats (${t.food >= 0 ? '+' : ''}${t.food})` : `Food: tonight the village eats more than it makes (${t.food}): more fields, fishing, herds, or fewer spoiling stores` },
+  ]
+  const all = checks.every((c) => c.ok)
+  return (
+    <div className="growth">
+      <h4 style={{ margin: '8px 0 2px' }}>More people {all ? <span className="deal-yes">· newcomers settle tonight</span> : <span className="muted">· not tonight</span>}</h4>
+      {checks.map((c, k) => <p key={k} className={c.ok ? 'muted' : 'deal-no'} style={{ margin: '1px 0' }}>{c.ok ? '✓' : '✗'} {c.text}</p>)}
+      <p className="muted" style={{ margin: '2px 0 0' }}>When all three hold, people arrive each night (more on a good day), but not in winter. More people means more hands for buildings, caravans and troops.</p>
+    </div>
   )
 }

@@ -4,6 +4,7 @@
 import { BUILDINGS, FOOD, type BuildingId, type Good, type TaskSize } from './data'
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
 import { defence, foodStock, storageCap } from './reducer'
+import { people } from './workers'
 import type { ISODate, Village } from './types'
 
 export interface PrepItem {
@@ -65,7 +66,7 @@ function keepsMade(v: Village, date: ISODate, score: number): number {
 
 export function winterPrep(v: Village, today: ISODate, score: number): WinterPrep {
   const days = (6 - weekday(today) + 7) % 7
-  const need = Math.floor(v.population) * 0.5
+  const need = people(v) * 0.5
   const target = need * 1.5
   const keeps = foodStock(v, true)
   const tonight = { now: keepsMade(v, today, score), full: keepsMade(v, today, 100) }
@@ -88,7 +89,7 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
     id: 'food',
     ok: keeps >= target,
     title: 'Stock food that keeps',
-    status: `${r1(keeps)} of ${r1(target)} in store (grain, smoked fish, cheese). Your ${Math.floor(v.population)} villagers eat ${r1(need)} on Saturday.`,
+    status: `${r1(keeps)} of ${r1(target)} in store (grain, smoked fish, cheese). Your ${people(v)} villagers at home eat ${r1(need)} on Saturday.`,
     impact: keeps >= need
       ? 'Enough to get through, but with little to spare. Fresh food (fish, bread, berries, game) loses 30% every night, so it can\'t be counted on.'
       : 'If the stores run out on Saturday, morale drops by 12 and a family may leave.',

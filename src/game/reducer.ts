@@ -3,18 +3,23 @@
  *  client replaying the same log sees the same world. Invalid events are
  *  ignored with a log line rather than throwing, because logs are shared.
  */
-import { distance, spiral } from '../world/hex'
+import { distance, line, neighbours, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
 import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, FOOD, GATHER, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT,
+  ACTIONS, BUILDINGS, DEEPEN_COST, GOOD_LABEL, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
-import { barterProblem, noteTrade } from './market'
-import { CLEARED_FIELD_BONUS, DEPLETION_FROM, dig, gameLeft, gameMax, hunt, leftAt, stonyness } from './deposits'
-import type { DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
+import { barterProblem, noteTrade, weightOf } from './market'
+import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
+import { CARRY_EACH, people, spare, staffing, needOf } from './workers'
+import { strongholdAt, wallsAfter } from './strongholds'
+export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
+import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
+import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, dig, dungeonUnder, gameLeft, gameMax, hunt, leftAt, levels, mineDig, stonyness } from './deposits'
+import type { Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
@@ -84,6 +89,8 @@ export const KEEP_TOKENS_FROM = '2026-11-21T12:00:00.000Z'
 export const SABBATH_FROM = '2026-11-21T12:00:00.000Z'
 /** A Sabbath's score for the night's tick: the same floor a freeze gives. */
 const REST_SCORE = 60
+/** Morale a village needs before newcomers settle. */
+export const GROW_MORALE = 45
 /** From this moment, yesterday's tasks can still be ticked off (raised, never
  *  lowered) after its night has passed: the late ticks earn their action and
  *  score, and the village gets the extra share of that night's harvest. */
@@ -199,6 +206,38 @@ function growWoods(s: GameState, world: World, winterDate: ISODate) {
   }
 }
 
+/** Land where seedlings take: not deserts, beaches, bare mountain or snow. */
+const SPROUTS: Terrain[] = ['grass', 'meadow', 'forest', 'hills', 'savannah', 'swamp', 'tundra']
+
+/** Each winter a few saplings come up on their own on bare land in and around a
+ *  village (birds and wind carry the seeds), so no place stays treeless for
+ *  long. Not on anything built, a road, a field, or ground being worked. */
+function sprout(s: GameState, world: World, v: Village, winterDate: ISODate) {
+  if (v.sprouted === winterDate) return
+  v.sprouted = winterDate
+  const rng = rngFor(world.seed, 'sprout', v.id, winterDate)
+  const taken = new Set<number>()
+  for (const o of Object.values(s.villages)) {
+    taken.add(cellIndex(world, o.col, o.row))
+    for (const b of o.buildings) taken.add(cellIndex(world, b.col, b.row))
+    for (const x of o.outposts) taken.add(cellIndex(world, x.col, x.row))
+    for (const r of o.roads) taken.add(r)
+  }
+  const spots = territory(v).flatMap((t) => spiral(t, t.radius + 1))
+    .filter((o) => o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height)
+    .map((o) => cellIndex(world, o.col, o.row))
+    .filter((i, k, all) => all.indexOf(i) === k && !taken.has(i) && !s.woods?.[i]
+      && SPROUTS.includes(landAt(world, s, i).terrain) && !hasTrees(landAt(world, s, i)))
+  const woods = (s.woods ??= {})
+  for (let k = 0; k < 2 && spots.length; k++) {
+    const i = spots.splice(Math.floor(rng() * spots.length), 1)[0]
+    const c = world.cells[i]
+    const kind = c.terrain === 'tundra' || c.feature?.startsWith('pine') ? 'pine' : 'oak'
+    // they grow into trees next winter, like planted ones
+    woods[i] = { n: 0, young: 1 + Math.floor(rng() * 2), max: Math.max(2, treeCount(c)), kind, since: winterDate, grew: winterDate }
+  }
+}
+
 export function effectiveTerrain(world: World, s: GameState, i: number, today?: ISODate): Terrain {
   return landAt(world, s, i, today).terrain
 }
@@ -223,12 +262,28 @@ export function defence(v: Village) {
   return 2 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].defence ?? 0), 0)
 }
 
-export function power(v: Village) {
-  const g = v.goods
-  return v.population + defence(v) * 1.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 + Math.min(g.steel ?? 0, 5) * 4
+/** Finished palisades: each holds PER_PALISADE lent troops. */
+export const palisades = (v: Village) => done(v).filter((b) => b.type === 'palisade').length
+
+/** Troops walk home and disband: people and gear back to their village, with any food left. */
+function sendHome(s: GameState, host: Village, d: Detachment, at: string, why: string) {
+  s.garrisons![host.id] = garrison(s, host).filter((x) => x.id !== d.id)
+  const from = s.villages[d.from]
+  if (from) {
+    from.away = Math.max(0, (from.away ?? 0) - d.troops)
+    addGoods(from, d.gear)
+    addGoods(from, d.food)
+  }
+  const back = [fmtGoods(d.gear), fmtGoods(d.food)].filter(Boolean).join(', ')
+  log(s, at, from?.playerId ?? host.playerId, `${d.troops} troops from ${from ? V(from) : 'afar'} at ${V(host)}'s palisade ${why}.${from && back ? ` They brought home ${back}.` : ''}`, 'info')
 }
 
-function done(v: Village) {
+export function power(v: Village) {
+  const g = v.goods
+  return people(v) + defence(v) * 1.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 + Math.min(g.steel ?? 0, 5) * 4
+}
+
+export function done(v: Village) {
   return v.buildings.filter((b) => b.progress >= 1)
 }
 
@@ -325,6 +380,39 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       return null
     case 'abandon':
       return null
+    case 'jobs': {
+      if (ev.auto) return null
+      const j = ev.jobs ?? {}
+      const ids = new Set(v.buildings.map((b) => b.id))
+      for (const [id, n] of Object.entries(j)) {
+        if (!ids.has(id)) return 'No such building'
+        if (!Number.isInteger(n) || n < 0) return 'Whole people only'
+        const b = v.buildings.find((x) => x.id === id)
+        if (b && n > needOf(b)) return `${BUILDINGS[b.type].name} takes at most ${needOf(b)}`
+      }
+      if (Object.values(j).reduce((a, n) => a + n, 0) > people(v)) return `Only ${people(v)} people at home`
+      return null
+    }
+    case 'order': {
+      const b = v.buildings.find((x) => x.id === ev.building)
+      if (!b) return 'No such building'
+      if (!BUILDINGS[b.type].recipes?.some((r) => r.id === ev.recipe)) return "It can't make that"
+      return null
+    }
+    case 'split': {
+      const t = p.tokens.find((x) => x.id === ev.tokenId)
+      if (!t) return 'That action has been used'
+      if (t.strength < 1) return "A half-done action can't be split"
+      if (t.size === 'small') return 'A small action is as small as they come'
+      return null
+    }
+    case 'garrison': {
+      const d = garrison(s, v).find((x) => x.id === ev.detachment)
+      if (!d) return 'No such troops at your palisade'
+      if (ev.accept && d.status === 'stationed') return 'They are already on your walls'
+      if (ev.accept && troopsAt(s, v) + d.troops > palisades(v) * PER_PALISADE) return 'No room on the walls for them'
+      return null
+    }
     case 'rename': {
       const n = ev.name.trim()
       if (!n) return 'Pick a name'
@@ -348,7 +436,11 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
 
 /** The action an act spends: one token, or two half-done tokens of the same
  *  size merged into a whole action of that size. A string is why it can't. */
+/** The token id of an action that costs no task (a caravan on paved road the whole way). */
+export const FREE = 'free'
+
 export function spentToken(p: Player, ev: { tokenId: string; tokenId2?: string }): Token | string {
+  if (ev.tokenId === FREE && !ev.tokenId2) return { id: FREE, size: 'small', strength: 1, date: '', slot: -1 }
   const tok = p.tokens.find((t) => t.id === ev.tokenId)
   if (!tok) return 'That action token has been used'
   if (!ev.tokenId2) return tok
@@ -363,7 +455,14 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   const tok = spentToken(p, ev)
   if (typeof tok === 'string') return tok
   if (tok.strength < 1 && ev.at >= WEEKLY_TOKENS_FROM) return 'Finish the task to use this action'
-  const need = actionSize(world, ev.action, ev.col, ev.row, ev.at)
+  const dest = ev.action === 'caravan' && ev.to ? s.villages[ev.to] : null
+  const tier = dest && dest.id !== v.id ? caravanTier(world, s, v, dest) : null
+  if (tok.id === FREE) {
+    if (tier !== 'free') return 'Only a caravan on paved road the whole way goes without a task'
+    if (!done(v).some((b) => b.type === 'cart_shed') || !done(v).some((b) => b.type === 'stable')) return 'A caravan without a task needs ox carts (a Mule stable and a Cart shed)'
+    if (v.oxenBack && ev.at < v.oxenBack) return 'Your oxen are still on the road home'
+  }
+  const need = tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(world, ev.action, ev.col, ev.row, ev.at)
   if (ev.action === 'build') {
     const def = ev.building && BUILDINGS[ev.building]
     if (!def) return 'Unknown building'
@@ -417,6 +516,24 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Roads must start from your territory'
       if (v.roads.includes(i)) return 'Already a road'
       return null
+    case 'pave':
+      if (!v.roads.includes(i)) return 'Only one of your roads'
+      if (v.paved?.includes(i)) return 'Already paved'
+      if (!hasGoods(v, PAVE_COST)) return `Paving takes ${fmtGoods(PAVE_COST)}`
+      return null
+    case 'well':
+      if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
+      if (cell.tier === 0) return 'Not in the water'
+      if (waterAt(world, s, i)) return 'There is water here already'
+      if (!hasGoods(v, WELL_COST)) return `A well takes ${fmtGoods(WELL_COST)}`
+      return null
+    case 'dig_clay': {
+      if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
+      const left = clayLeft(world, s, i)
+      if (left === null) return 'No clay here: try a riverbank, a marsh, open plains or the hills'
+      if (left < 1) return 'Dug out: no more clay here'
+      return null
+    }
     case 'build': {
       const def = BUILDINGS[ev.building!]
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
@@ -433,6 +550,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (terr === 'swamp' && !def.terrain?.includes('swamp')) return 'Too boggy to build on'
       if (def.terrain && !def.terrain.includes(terr)) return `${def.name} needs ${def.terrain.join('/')}`
       if (def.resource && !(land.resource && def.resource.includes(land.resource))) return `${def.name} needs a ${def.resource.join('/')} deposit`
+      if (def.needs && !done(v).some((b) => b.type === def.needs)) return `Build a ${BUILDINGS[def.needs].name} first`
       if (def.nearTerrain && !spiral(ev, 1).some((o) => {
         if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
         return def.nearTerrain!.includes(effectiveTerrain(world, s, cellIndex(world, o.col, o.row)))
@@ -446,9 +564,33 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!to || to.id === v.id) return 'Pick a neighbour village'
       const total = Object.values(ev.goods ?? {}).reduce((a, n) => a + (n ?? 0), 0)
       if (total <= 0) return 'Load some goods'
-      const cap = tok.strength >= 1 ? 15 : 6
-      if (total > cap) return `This caravan carries at most ${cap}`
-      if (!hasGoods(v, ev.goods!)) return 'Not enough goods'
+      const crew = ev.crew ?? 0
+      if (!Number.isInteger(crew) || crew < 1) return 'Someone has to go with it: pick its people'
+      if (crew > spare(v)) return `Only ${spare(v)} people are free (the rest are working)`
+      const food = ev.food ?? {}
+      if (Object.keys(food).some((g) => !FOOD[g as Good])) return 'Provisions are food'
+      const need = provisionsFor(crew, caravanMinutes(p, v, to, ev.at, world, s))
+      if (foodValue(food) + 1e-9 < need) return `Pack food for the road: ${need} worth for ${crew} ${crew === 1 ? 'person' : 'people'}, there and back`
+      const cap = caravanCarry(world, s, v, to, crew).cap * (tok.strength >= 1 ? 1 : 0.4)
+      if (weightOf(ev.goods ?? {}) + weightOf(food) > cap + 1e-9) return `Too heavy: this caravan carries at most ${Math.floor(cap)} weight, provisions included`
+      const all = { ...ev.goods }
+      for (const [g, n] of Object.entries(food)) all[g as Good] = (all[g as Good] ?? 0) + (n ?? 0)
+      if (!hasGoods(v, all)) return 'Not enough goods'
+      return null
+    }
+    case 'troops': {
+      const to = ev.to && s.villages[ev.to]
+      if (!to || to.id === v.id) return 'Pick a neighbour village'
+      if (!palisades(to)) return 'They need a palisade to hold troops'
+      const n = ev.troops ?? 0
+      if (!Number.isInteger(n) || n < 1) return 'Send at least one person'
+      if (n > people(v) - 2) return 'Keep at least two people at home'
+      const goods = ev.goods ?? {}
+      if (Object.keys(goods).some((g) => !GEAR.includes(g as Good) && !FOOD[g as Good])) return 'Troops carry only weapons, armour and food'
+      if (!hasGoods(v, goods)) return 'Not enough goods'
+      const food = Object.fromEntries(Object.entries(goods).filter(([g]) => FOOD[g as Good]))
+      if (foodValue(food) < n * RATION) return `Send food for at least a night (${n * RATION} worth)`
+      if (garrison(s, to).reduce((a, d) => a + d.troops, 0) + n > palisades(to) * PER_PALISADE) return 'Their palisade is full'
       return null
     }
     case 'outpost': {
@@ -462,7 +604,49 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!hasGoods(v, { timber: 6, stone: 2 }, tok.strength)) return `Needs ${fmtGoods({ timber: 6, stone: 2 }, tok.strength)}`
       return null
     }
+    case 'work': {
+      const here = buildingAt(s, ev.col, ev.row)
+      if (!here || here.village.id !== v.id) return 'Only your own buildings'
+      if (here.building.progress < 1) return 'Finish building it first'
+      const def = BUILDINGS[here.building.type]
+      if (!workable(here.building)) return def.crop ? 'Crops grow in their own time' : 'Nothing to work here'
+      if (staffing(v, here.building) <= 0) return 'Nobody works there: give it workers (Village tab)'
+      // a dry run: does it have what it needs?
+      const test = structuredClone(s)
+      const tv = test.villages[v.id]
+      const got = shift(test, world, tv, tv.buildings.find((b) => b.id === here.building.id)!, 1, playerDate(ev.at, p.resetHour, p.tz), ev.at, { roll: ev.id })
+      if (!Object.values(got).some((n) => (n ?? 0) > 0.005)) {
+        if (def.mine) return 'Nothing left to dig at this level: sink the shaft deeper'
+        if (def.smelts) return `It needs ore and charcoal (${stationOres(here.building.type).map((g) => GOOD_LABEL[g].toLowerCase()).join(', ')})`
+        if (def.consumes) return `It needs ${fmtGoods(def.consumes)}`
+        return 'Nothing to work with right now'
+      }
+      return null
+    }
+    case 'deepen': {
+      const here = buildingAt(s, ev.col, ev.row)
+      if (!here || here.village.id !== v.id || !BUILDINGS[here.building.type].mine) return 'Only one of your mines'
+      if (here.building.progress < 1) return 'Finish building the mine first'
+      const depth = here.building.depth ?? 1
+      if (depth >= MAX_DEPTH) return `The shaft is as deep as it can go (level ${MAX_DEPTH})`
+      if (!hasGoods(v, DEEPEN_COST[depth + 1])) return `Shoring it up takes ${fmtGoods(DEEPEN_COST[depth + 1])}`
+      return null
+    }
+    case 'siege': {
+      const fort = strongholdAt(world, i)
+      if (!fort) return 'No stronghold here'
+      if (!revealed) return 'Scout it first'
+      if (s.sieges?.[i]?.fallen) return 'It has already fallen'
+      if (!territory(v).some((t) => distance(t, ev) <= t.radius + 12)) return 'Too far to march a siege'
+      return null
+    }
     case 'expedition': {
+      const dungeon = s.dungeons?.[i]
+      if (dungeon) {
+        if (dungeon.villageId !== v.id) return "That dungeon is under someone else's mine"
+        if (dungeon.raids <= 0) return 'Picked clean: nothing left down there'
+        return null
+      }
       const lair = s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)
       if (!lair) return 'No monsters here'
       if (!revealed) return 'Scout it first'
@@ -488,7 +672,10 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   const err = validate(s, world, ev)
   s.version++
   deliverCaravans(s, ev.at)
+  crewsHome(s, ev.at)
   givePurses(s, ev.at)
+  giveWells(s, world, ev.at)
+  giveStaff(s, world, ev.at)
   if (err) {
     log(s, ev.at, ev.playerId, `(ignored: ${err})`, 'info')
     return s
@@ -538,6 +725,37 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'act': return act(s, world, p, ev)
     case 'tick': return tick(s, world, p, ev)
     case 'abandon': return abandon(s, p, ev.at)
+    case 'jobs': {
+      const v = s.villages[p.villageId]
+      v.autoJobs = ev.auto
+      if (!ev.auto) v.jobs = Object.fromEntries(Object.entries(ev.jobs ?? {}).filter(([, n]) => n > 0))
+      return s
+    }
+    case 'order': {
+      const b = s.villages[p.villageId].buildings.find((x) => x.id === ev.building)!
+      b.order = ev.recipe
+      return s
+    }
+    case 'split': {
+      const k = p.tokens.findIndex((x) => x.id === ev.tokenId)
+      const t = p.tokens[k]
+      const into: TaskSize[] = t.size === 'big' ? ['medium', 'small'] : ['small', 'small']
+      p.tokens.splice(k, 1, ...into.map((size, j) => ({ ...t, id: `${t.id}.${j}`, size })))
+      return s
+    }
+    case 'garrison': {
+      const v = s.villages[p.villageId]
+      const d = garrison(s, v).find((x) => x.id === ev.detachment)!
+      const from = s.villages[d.from]
+      if (ev.accept) {
+        d.status = 'stationed'
+        d.since = ev.at
+        log(s, ev.at, p.id, `${V(v)} took ${d.troops} troops from ${from ? V(from) : 'afar'} onto its walls (food for ${nightsOf(d)} nights).`, 'good')
+      } else {
+        sendHome(s, v, d, ev.at, d.status === 'waiting' ? 'were turned back at the gate' : 'were thanked and sent home')
+      }
+      return s
+    }
     case 'barter': {
       const v = s.villages[p.villageId]
       addGoods(v, ev.give, -1)
@@ -566,6 +784,12 @@ const KIND_NAME = { ship: 'trading ship', barge: 'river barge', caravan: 'overla
 function abandon(s: GameState, p: Player, at: string) {
   const v = s.villages[p.villageId]
   s.caravans = s.caravans.filter((c) => c.from !== v.id && c.to !== v.id)
+  // troops on its walls go home; its own troops abroad have no home to go to
+  for (const d of [...garrison(s, v)]) sendHome(s, v, d, at, 'went home: the village they guarded is gone')
+  if (s.garrisons) {
+    delete s.garrisons[v.id]
+    for (const host of Object.keys(s.garrisons)) s.garrisons[host] = s.garrisons[host].filter((d) => d.from !== v.id)
+  }
   delete s.villages[v.id]
   delete s.players[p.id]
   log(s, at, null, `${P(p)} abandoned ${V(v)}. The land is free again.`, 'info')
@@ -748,6 +972,24 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       v.planted.push({ cell: i, date: ev.at.slice(0, 10) })
       log(s, ev.at, p.id, 'Saplings planted. A forest in three days.', 'good')
       break
+    case 'pave':
+      addGoods(v, PAVE_COST, -1)
+      ;(v.paved ??= []).push(i)
+      log(s, ev.at, p.id, 'A stretch of road was paved with stone.', 'good')
+      break
+    case 'well':
+      addGoods(v, WELL_COST, -1)
+      ;(s.wells ??= {})[i] = true
+      log(s, ev.at, p.id, 'A well was dug: fresh water for the herds nearby.', 'good')
+      break
+    case 'dig_clay': {
+      const n = round2(Math.min(3 * k, clayLeft(world, s, i)!))
+      const dug = (s.clayDug ??= {})
+      dug[i] = round2((dug[i] ?? 0) + n)
+      addGoods(v, { clay: n })
+      log(s, ev.at, p.id, `Dug ${n} clay.${(clayLeft(world, s, i) ?? 0) < 1 ? (clayRenews(world, i) ? ' Dug out until winter brings more.' : ' That pit is dug out for good.') : ''}`, 'good')
+      break
+    }
     case 'road':
       v.roads.push(i)
       log(s, ev.at, p.id, world.cells[i].riverTo !== -1 ? 'A bridge was built over the river.' : 'A dirt road was laid.', 'good')
@@ -765,12 +1007,31 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     case 'caravan': {
       const to = s.villages[ev.to!]
       addGoods(v, ev.goods!, -1)
-      const mins = caravanMinutes(p, v, to, ev.at)
+      // provisions are eaten on the road
+      addGoods(v, ev.food ?? {}, -1)
+      const mins = caravanMinutes(p, v, to, ev.at, world, s)
+      const homeAt = new Date(Date.parse(ev.at) + mins * 2 * 60_000).toISOString()
+      // ox carts sent without a task have to walk home before they go again
+      if (ev.tokenId === FREE) v.oxenBack = homeAt
+      // its people are away until they're home again
+      v.away = (v.away ?? 0) + ev.crew!
       s.caravans.push({
         id: ev.id, from: v.id, to: to.id, goods: ev.goods!, departAt: ev.at,
-        arriveAt: new Date(Date.parse(ev.at) + mins * 60_000).toISOString(),
+        arriveAt: new Date(Date.parse(ev.at) + mins * 60_000).toISOString(), crew: ev.crew, homeAt,
       })
-      log(s, ev.at, p.id, `A caravan set off for ${V(to)}.`, 'info')
+      log(s, ev.at, p.id, `A caravan of ${ev.crew} set off for ${V(to)}.`, 'info')
+      break
+    }
+    case 'troops': {
+      const to = s.villages[ev.to!]
+      const goods = ev.goods ?? {}
+      addGoods(v, goods, -1)
+      // they're still the village's people, just away (see workers.people)
+      v.away = (v.away ?? 0) + ev.troops!
+      const pick = (f: (g: Good) => boolean) => Object.fromEntries(Object.entries(goods).filter(([g, n]) => f(g as Good) && n)) as Goods
+      const d: Detachment = { id: ev.id, from: v.id, troops: ev.troops!, gear: pick((g) => GEAR.includes(g)), food: pick((g) => !!FOOD[g]), status: 'waiting', since: ev.at }
+      ;((s.garrisons ??= {})[to.id] ??= []).push(d)
+      log(s, ev.at, p.id, `${d.troops} troops from ${V(v)} marched to ${V(to)}'s palisade${Object.keys(d.gear).length ? ` with ${fmtGoods(d.gear)}` : ''} and food for ${nightsOf(d)} nights. They wait at the gate.`, 'info')
       break
     }
     case 'outpost':
@@ -779,28 +1040,101 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       reveal(world, s, ev, 2)
       log(s, ev.at, p.id, k >= 1 ? 'An outpost was founded.' : 'A small camp was pitched.', 'good')
       break
+    case 'work': {
+      const b = buildingAt(s, ev.col, ev.row)!.building
+      const got = shift(s, world, v, b, k * (0.75 + v.morale / 200), playerDate(ev.at, p.resetHour, p.tz), ev.at, { roll: ev.id })
+      log(s, ev.at, p.id, `An extra shift at the ${BUILDINGS[b.type].name.toLowerCase()}: ${fmtGoods(got) || 'nothing'}.`, 'good')
+      break
+    }
+    case 'deepen': {
+      const b = buildingAt(s, ev.col, ev.row)!.building
+      const depth = (b.depth ?? 1) + 1
+      addGoods(v, DEEPEN_COST[depth], -1)
+      b.depth = depth
+      const lv = levels(world, s, i)
+      log(s, ev.at, p.id, `${V(v)} sank its ${BUILDINGS[b.type].name.toLowerCase()} to level ${depth}${lv && lv[depth] > 0.5 ? '' : ': no ore down there'}.`, 'good')
+      // deep under a mountain, the miners may break into something
+      const d = dungeonUnder(world, i)
+      if (d && depth >= d.level && !s.dungeons?.[i]) {
+        ;(s.dungeons ??= {})[i] = { kind: d.kind, villageId: v.id, raids: d.raids, strength: d.strength, found: ev.at }
+        log(s, ev.at, p.id, `The miners broke through into ${DUNGEON[d.kind].name}! An expedition could raid it.`, 'monster')
+      }
+      break
+    }
+    case 'siege': {
+      const fort = strongholdAt(world, i)!
+      const state = ((s.sieges ??= {})[i] ??= { strength: fort.strength })
+      const g = gearWith(s, v)
+      // the guns: each cannon needs 2 shot and 2 powder, each musket a charge of powder
+      let powder = v.goods.gunpowder ?? 0
+      const cannon = Math.min(Math.floor(g.cannon ?? 0), Math.floor((v.goods.cannonballs ?? 0) / 2), Math.floor(powder / 2))
+      powder -= cannon * 2
+      const muskets = Math.min(Math.floor(g.musket ?? 0), Math.floor(powder))
+      const walls = wallsAfter(v.goods, cannon)
+      const food = Math.min(6, (v.goods.bread ?? 0) + (v.goods.cheese ?? 0) + (v.goods.smoked_fish ?? 0))
+      const pw = (4 + (people(v) + troopsAt(s, v)) * 0.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
+        Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + food * 0.5 + muskets * 4 + cannon * 6) * (k >= 1 ? 1 : 0.6)
+      const defend = state.strength * walls
+      const win = rng() < pw / (pw + defend)
+      // what the assault uses up, win or lose: powder, shot, and the engines thrown at the walls
+      const spent: Goods = {}
+      if (cannon) { spent.cannonballs = cannon * 2; spent.gunpowder = cannon * 2 }
+      if (muskets) spent.gunpowder = (spent.gunpowder ?? 0) + muskets
+      if (v.goods.ram) spent.ram = Math.min(Math.floor(v.goods.ram), 3)
+      if (v.goods.siege_tower) spent.siege_tower = Math.floor(v.goods.siege_tower)
+      for (const f of ['bread', 'cheese', 'smoked_fish'] as const) if ((v.goods[f] ?? 0) >= 1) spent[f] = (spent[f] ?? 0) + 1
+      addGoods(v, spent, -1)
+      const kit = [cannon && `${cannon} cannon`, muskets && `${muskets} muskets`, spent.ram && `${spent.ram} rams`, spent.siege_tower && `${spent.siege_tower} siege towers`].filter(Boolean).join(', ')
+      if (win) {
+        state.fallen = ev.at
+        state.by = v.id
+        addGoods(v, fort.loot)
+        v.morale = Math.min(100, v.morale + 10)
+        log(s, ev.at, p.id, `${V(v)} stormed ${fort.name}${kit ? ` with ${kit}` : ''}: the walls (x${walls}) gave way and the keep fell! Its hoard: ${fmtGoods(fort.loot)}.`, 'good')
+      } else {
+        v.morale = Math.max(0, v.morale - 10)
+        state.strength = round2(state.strength * 0.9) // the defenders are worn down a little all the same
+        log(s, ev.at, p.id, `The siege of ${fort.name} failed: its walls held (x${walls}). ${kit ? `Spent: ${kit}. ` : ''}Bring rams, siege towers or cannon to break them.`, 'monster')
+      }
+      break
+    }
     case 'expedition': {
-      const lair = s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)!
-      const g = v.goods
+      const g = gearWith(s, v)
+      const dungeon = s.dungeons?.[i]
+      const lair = dungeon ? null : s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)!
       const food = Math.min(6, (g.bread ?? 0) + (g.cheese ?? 0) + (g.smoked_fish ?? 0))
       const outfitter = done(v).some((b) => b.type === 'outfitter') ? 5 : 0
-      let pw = 4 + v.population * 0.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
+      let pw = 4 + (people(v) + troopsAt(s, v)) * 0.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
         Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + outfitter + food * 0.5
       pw *= k >= 1 ? 1 : 0.6
-      const win = rng() < pw / (pw + lair.strength)
+      const win = rng() < pw / (pw + (dungeon ?? lair!).strength)
       for (const f of ['bread', 'cheese', 'smoked_fish'] as const) {
-        const take = Math.min(g[f] ?? 0, 1)
+        const take = Math.min(v.goods[f] ?? 0, 1)
         if (take) addGoods(v, { [f]: -take })
       }
+      if (dungeon) {
+        const D = DUNGEON[dungeon.kind]
+        if (win) {
+          addGoods(v, D.loot)
+          dungeon.raids -= 1
+          log(s, ev.at, p.id, `${D.win} Loot: ${fmtGoods(D.loot)}.${dungeon.raids <= 0 ? ' ' + D.empty : ''}`, 'good')
+        } else {
+          v.morale = Math.max(0, v.morale - 4)
+          dungeon.strength += 1
+          log(s, ev.at, p.id, D.lose, 'monster')
+        }
+        break
+      }
       if (win) {
-        lair.cleared = true
-        const loot = LOOT[lair.kind]
+        const lair_ = lair!
+        lair_.cleared = true
+        const loot = LOOT[lair_.kind]
         addGoods(v, loot)
-        log(s, ev.at, p.id, `${CHEEK.win[lair.kind]} Loot: ${fmtGoods(loot)}.`, 'good')
+        log(s, ev.at, p.id, `${CHEEK.win[lair_.kind]} Loot: ${fmtGoods(loot)}.`, 'good')
       } else {
         v.morale = Math.max(0, v.morale - 6)
-        lair.strength += 1
-        log(s, ev.at, p.id, CHEEK.lose[lair.kind], 'monster')
+        lair!.strength += 1
+        log(s, ev.at, p.id, CHEEK.lose[lair!.kind], 'monster')
       }
       break
     }
@@ -838,9 +1172,108 @@ const CHEEK = {
 
 /** How long a caravan from `from` to `to` sent at `at` takes on the road:
  *  20 minutes a hex, less on a day its sender ticked a walking habit. */
-export function caravanMinutes(p: Player, from: Village, to: Village, at: string): number {
+/** Minutes to cross a hex: overland, on a dirt road (three times as fast), paved (three times faster again). */
+export const HEX_MINUTES = { wild: 240, road: 80, paved: 80 / 3 } as const
+
+export function caravanMinutes(p: Player, from: Village, to: Village, at: string, world?: World, s?: GameState): number {
   const walked = p.days[at.slice(0, 10)]?.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === 'movement')
-  return distance(from, to) * 20 * (walked ? 0.6 : 1)
+  const k = walked ? 0.6 : 1
+  if (!world || !s) return distance(from, to) * HEX_MINUTES.wild * k
+  const { roads, paved } = roadSets(world, s)
+  // each hex between the villages at the speed its road allows; the last step into town goes like the one before it
+  const way = wayBetween(world, s, from, to)
+  const pace = way.slice(1, -1).map((i) => (paved.has(i) ? HEX_MINUTES.paved : roads.has(i) ? HEX_MINUTES.road : HEX_MINUTES.wild))
+  const steps = [...pace, pace.length ? pace[pace.length - 1] : HEX_MINUTES.wild]
+  return Math.round(steps.reduce((a, m) => a + m, 0) * k)
+}
+
+/** The shortest way along road hexes from one village to another (through any village on the way), or null. */
+export function roadPath(world: World, s: GameState, from: Village, to: Village, pavedOnly = false): number[] | null {
+  const { roads, paved, towns } = roadSets(world, s)
+  const ok = (i: number) => towns.has(i) || (pavedOnly ? paved.has(i) : roads.has(i))
+  const start = cellIndex(world, from.col, from.row), goal = cellIndex(world, to.col, to.row)
+  const prev = new Map<number, number>([[start, -1]])
+  const queue = [start]
+  while (queue.length) {
+    const i = queue.shift()!
+    if (i === goal) break
+    const c = world.cells[i]
+    for (const [nc, nr] of neighbours(c.col, c.row)) {
+      if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
+      const j = nr * world.width + nc
+      if (prev.has(j) || !ok(j)) continue
+      prev.set(j, i)
+      queue.push(j)
+    }
+  }
+  if (!prev.has(goal)) return null
+  const out: number[] = []
+  for (let i = goal; i !== -1; i = prev.get(i)!) out.push(i)
+  return out.reverse()
+}
+
+/** The way a caravan goes: along the roads if they connect, otherwise straight across country. */
+function wayBetween(world: World, s: GameState, from: Village, to: Village): number[] {
+  return roadPath(world, s, from, to) ?? line(from, to).map((o) => cellIndex(world, o.col, o.row))
+}
+
+/** What sending a caravan costs: a medium task cross-country, a small one when a road connects
+ *  the villages, and nothing at all on paved road the whole way (ox carts, which must come home first). */
+export function caravanTier(world: World, s: GameState, from: Village, to: Village): 'medium' | 'small' | 'free' {
+  if (roadPath(world, s, from, to, true)) return 'free'
+  if (roadPath(world, s, from, to)) return 'small'
+  return 'medium'
+}
+
+function roadSets(world: World, s: GameState) {
+  const roads = new Set<number>(), paved = new Set<number>(), towns = new Set<number>()
+  for (const v of Object.values(s.villages)) {
+    for (const r of v.roads) roads.add(r)
+    for (const r of v.paved ?? []) paved.add(r)
+    // a village is its own crossroads
+    towns.add(cellIndex(world, v.col, v.row))
+  }
+  for (const t of towns) roads.add(t)
+  return { roads, paved, towns }
+}
+
+/** Food (value) a caravan's people need for the road, there and back: half a unit each a day, a day at least. */
+export function provisionsFor(crew: number, minutesOneWay: number): number {
+  return crew * 0.5 * Math.max(1, Math.ceil((minutesOneWay * 2) / 1440))
+}
+
+/** Stone to pave a hex of road. */
+export const PAVE_COST: Goods = { stone: 2 }
+
+/** How much of the way between two villages runs on roads, and on paved ones (0..1). */
+export function route(world: World, s: GameState, from: Village, to: Village) {
+  const { roads, paved, towns } = roadSets(world, s)
+  const pavedWay = roadPath(world, s, from, to, true)
+  if (pavedWay) return { road: 1, paved: 1 }
+  const roadWay = roadPath(world, s, from, to)
+  if (roadWay) {
+    const between = roadWay.filter((i) => !towns.has(i))
+    return { road: 1, paved: between.length ? between.filter((i) => paved.has(i)).length / between.length : 0 }
+  }
+  const way = line(from, to).map((o) => cellIndex(world, o.col, o.row))
+  return { road: way.filter((i) => roads.has(i)).length / way.length, paved: way.filter((i) => paved.has(i)).length / way.length }
+}
+
+/** What a caravan carries, by weight: what its people carry on their backs (CARRY_EACH each), plus
+ *  pack mules or ox carts (which need roads to roll on); paved roads let it carry up to half again. */
+export const CARRY = { mules: 60, carts: 100 } as const
+export function caravanCarry(world: World, s: GameState, from: Village, to: Village, crew = 1) {
+  // animals need a stable hand to keep them
+  const has = (t: string) => done(from).some((b) => b.type === t && staffing(from, b) > 0)
+  const animals: keyof typeof CARRY | 'foot' = has('cart_shed') && has('stable') ? 'carts' : has('stable') ? 'mules' : 'foot'
+  const r = route(world, s, from, to)
+  // off the road, carts bog down to what the mules could carry
+  let base = crew * CARRY_EACH + (animals === 'foot' ? 0 : animals === 'carts' ? CARRY.mules + (CARRY.carts - CARRY.mules) * r.road : CARRY[animals])
+  // thirsty animals carry less
+  const stable = done(from).find((b) => b.type === 'stable')
+  const thirsty = animals !== 'foot' && !!stable && !hasWater(world, s, cellIndex(world, stable.col, stable.row))
+  if (thirsty) base -= (base - crew * CARRY_EACH) * 0.25
+  return { cap: Math.floor(base * (1 + 0.5 * r.paved)), animals, thirsty, ...r }
 }
 
 /** From this moment every village has a purse to barter with: the ones
@@ -856,6 +1289,54 @@ function givePurses(s: GameState, at: string) {
   if (Object.keys(s.villages).length) log(s, PURSE_FROM, null, `The merchants have come: every village gets a purse of ${fmtGoods(PURSE)} to trade with.`, 'good')
 }
 
+/** When herds started needing water, every pen, dairy and stable without any got a well of its own. */
+function giveWells(s: GameState, world: World, at: string) {
+  if (s.wellsGiven) return
+  s.wellsGiven = true
+  let n = 0
+  for (const v of Object.values(s.villages)) for (const b of v.buildings) {
+    if (!THIRSTY.has(b.type)) continue
+    const i = cellIndex(world, b.col, b.row)
+    if (hasWater(world, s, i)) continue
+    ;(s.wells ??= {})[i] = true
+    n++
+  }
+  if (n) log(s, at, null, `Herds need fresh water now. ${n === 1 ? 'A pen with none nearby was' : `${n} pens, dairies and stables with none nearby were`} given a well of ${n === 1 ? 'its' : 'their'} own.`, 'good')
+}
+
+/** When buildings started needing workers, every village short of hands for the buildings it
+ *  already had was given the people it lacked, and a House (room for 4) to put them up. */
+function giveStaff(s: GameState, world: World, at: string) {
+  if (s.staffGiven) return
+  s.staffGiven = true
+  for (const v of Object.values(s.villages)) {
+    const need = done(v).reduce((a, b) => a + needOf(b), 0)
+    const short = need - people(v)
+    if (short <= 0) continue
+    v.population = round2(v.population + short)
+    // a house on open, flat ground in its land, if there's any
+    const taken = new Set<number>([cellIndex(world, v.col, v.row)])
+    for (const o of Object.values(s.villages)) for (const b of o.buildings) taken.add(cellIndex(world, b.col, b.row))
+    const spot = territoryCells(world, v).find((i) => {
+      const land = landAt(world, s, i)
+      return world.cells[i].tier > 0 && !taken.has(i) && !hasTrees(land) && !MOUNTAIN_TERRAIN.includes(land.terrain) && land.terrain !== 'swamp'
+    })
+    if (spot !== undefined) v.buildings.push({ id: `gift-house-${v.id}`, type: 'house', col: world.cells[spot].col, row: world.cells[spot].row, progress: 1 })
+    log(s, at, v.playerId, `Buildings need workers now. ${short} newcomer${short === 1 ? '' : 's'} settled in ${V(v)} to staff its buildings${spot !== undefined ? ', and a House was raised for them' : ''}.`, 'good')
+  }
+}
+
+/** Caravan crews back home: back to work. */
+function crewsHome(s: GameState, at: string) {
+  if (!s.homeward?.length) return
+  const now = Date.parse(at)
+  for (const h of s.homeward.filter((x) => Date.parse(x.at) <= now)) {
+    const v = s.villages[h.village]
+    if (v) v.away = Math.max(0, (v.away ?? 0) - h.crew)
+  }
+  s.homeward = s.homeward.filter((x) => Date.parse(x.at) > now)
+}
+
 /** How many arrived caravans the world remembers for its caravan page. */
 const ARRIVED_KEPT = 40
 
@@ -865,6 +1346,8 @@ function deliverCaravans(s: GameState, at: string) {
   if (!arrived.length) return
   s.caravans = s.caravans.filter((c) => Date.parse(c.arriveAt) > now)
   for (const c of arrived) {
+    // its people walk home
+    if (c.crew && c.homeAt) (s.homeward ??= []).push({ village: c.from, crew: c.crew, at: c.homeAt })
     const to = s.villages[c.to]
     if (!to) continue
     s.arrived = [...(s.arrived ?? []), { ...c, fromName: s.villages[c.from]?.name, toName: to.name }].slice(-ARRIVED_KEPT)
@@ -878,56 +1361,161 @@ function deliverCaravans(s: GameState, at: string) {
 // ------------------------------------------------------------------ nightly tick
 
 /** A night's work by the village's buildings at production level `prod` (0..1 of a perfect day). */
-/** Buildings that dig their goods out of their own hex, which runs out. */
-const DIGS: Partial<Record<string, Good>> = { quarry: 'stone', copper_mine: 'copper_ore', iron_mine: 'iron_ore', silver_mine: 'silver_ore' }
 /** Buildings whose game comes from the wild animals on their hex. */
 const HUNTS = new Set(['hunting_lodge', 'forager_camp'])
 
-function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord, date: ISODate, prod: number, at: string): Goods {
-  const season = weekSeason(date)
+/** The villagers eat half a unit of food each, fresh food first and a little of
+ *  everything (variety lifts morale). Returns the food still needed (if they ran short). */
+function eatFood(v: Village): { need: number; eaten: Set<Good> } {
+  // those away on a neighbour's walls eat their own provisions
+  let need = people(v) * 0.5
+  const eaten = new Set<Good>()
+  const order = (Object.entries(FOOD) as [Good, { value: number; keeps: boolean }][]).sort((a, b) => Number(a[1].keeps) - Number(b[1].keeps))
+  // spread across foods for variety: one pass taking a little of each, then fill
+  for (const pass of [0.34, 1]) {
+    for (const [g, f] of order) {
+      if (need <= 1e-9) break
+      const have = v.goods[g] ?? 0
+      if (have <= 0) continue
+      const want = Math.min(have, (need * pass) / f.value)
+      if (want <= 0) continue
+      addGoods(v, { [g]: -want })
+      need -= want * f.value
+      eaten.add(g)
+    }
+  }
+  return { need, eaten }
+}
+
+/** Fresh food loses 30% overnight, and food past what the stores hold rots. True if any rotted. */
+function spoil(v: Village): boolean {
+  for (const [g, f] of Object.entries(FOOD) as [Good, { keeps: boolean }][]) {
+    if (!f.keeps && v.goods[g]) addGoods(v, { [g]: -(v.goods[g]! * 0.3) })
+  }
+  const cap = storageCap(v)
+  const stock = foodStock(v)
+  if (stock <= cap) return false
+  const k = cap / stock
+  for (const g of Object.keys(FOOD) as Good[]) if (v.goods[g]) v.goods[g] = round2(v.goods[g]! * k)
+  return true
+}
+
+/** Tonight, if the day ended now: what each good gains or loses (made, used, eaten, spoiled).
+ *  Rare finds are shown as a range (0-1), never the roll itself. */
+export function tonight(s: GameState, world: World, p: Player, now: Date) {
+  const date = playerDate(now, p.resetHour, p.tz)
+  const at = now.toISOString()
+  const test = structuredClone(s)
+  const tp = test.players[p.id]
+  const tv = test.villages[p.villageId]
+  const d = ensureDay(tp, date)
+  const rest = isSabbath(date) && at >= SABBATH_FROM
+  const score = rest ? REST_SCORE : d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
+  const prod = weekSeason(date) === 'winter' ? 0 : 0.15 + 0.85 * (score / 100)
+  const before: Goods = { ...tv.goods }
+  const foodBefore = foodStock(tv)
+  const odds: Odds = { expected: {}, rolled: {} }
+  const made = produce(test, world, tv, tp, d, date, prod, at, odds)
+  const { need } = eatFood(tv)
+  spoil(tv)
+  const rows: { good: Good; have: number; made: number; net: [number, number] }[] = []
+  for (const g of new Set([...Object.keys(before), ...Object.keys(tv.goods)]) as Set<Good>) {
+    const net = round2((tv.goods[g] ?? 0) - (before[g] ?? 0))
+    const e = odds.expected[g]
+    // a rare find: the roll is hidden, so show what it could come to
+    const lo = e ? round2(net - (odds.rolled[g] ?? 0) + Math.floor(e)) : net
+    const hi = e ? round2(net - (odds.rolled[g] ?? 0) + Math.ceil(e)) : net
+    if (!(before[g] ?? 0) && !hi) continue
+    rows.push({ good: g, have: round2(before[g] ?? 0), made: round2(made[g] ?? 0), net: [lo, hi] })
+  }
+  return { score, rows, hungry: need > 1e-6, food: round2(foodStock(tv) - foodBefore) }
+}
+
+/** What a building can be worked by hand for (a Work action): anything that makes goods, but not crops. */
+export const workable = (b: { type: BuildingId }) => {
+  const def = BUILDINGS[b.type]
+  return !def.crop && !!(def.produces || def.mine || def.smelts || def.recipes)
+}
+
+/** One building's shift at strength k (1 = a full night at a full day's work, before morale).
+ *  Rare finds (a mine's byproducts) come whole or not at all: `odds` collects what was expected. */
+export function shift(s: GameState, world: World, v: Village, b: Building, k: number, date: ISODate, at: string, opts: { rain?: boolean; odds?: Odds; roll?: string } = {}): Goods {
+  const def0 = BUILDINGS[b.type]
+  // a workshop makes whatever it's been ordered to (the first thing, if nothing)
+  const recipe = def0.recipes ? def0.recipes.find((r) => r.id === b.order) ?? def0.recipes[0] : null
+  const def = recipe ? { ...def0, consumes: recipe.consumes, produces: recipe.produces } : def0
+  // it makes as much as it has hands for
+  k *= staffing(v, b)
+  if (k <= 0) return {}
+  const made: Goods = {}
+  const note = (g: Goods, m = 1) => { for (const [x, n] of Object.entries(g)) if (n) made[x as Good] = round2((made[x as Good] ?? 0) + n * m) }
+  const i = cellIndex(world, b.col, b.row)
+  // herds with no fresh water within a hex give half
+  if (THIRSTY.has(b.type)) {
+    const w = hasWater(world, s, i, date)
+    if (!w || w.dry) k *= THIRST
+  }
+  if (def.mine) {
+    // the shaft brings up whatever lies at the level it's working
+    const got = mineDig(world, s, i, b.depth ?? 1, (MINE_RATE[b.type] ?? 0) * k, opts.roll ?? date, opts.odds)
+    addGoods(v, got)
+    note(got)
+    return made
+  }
+  if (def.smelts) {
+    // the easiest ores first, as far as the shift, the charcoal and the ore on hand go
+    let room = STATION_RATE * k
+    for (const ore of stationOres(b.type)) {
+      const o = ORES[ore]!
+      if (room <= 0.005) break
+      if (o.with && !done(v).some((x) => x.type === o.with)) continue
+      const n = round2(Math.min(room, v.goods[ore] ?? 0, (v.goods.charcoal ?? 0) / o.fuel))
+      if (n <= 0.005) continue
+      addGoods(v, { [ore]: -n, charcoal: -n * o.fuel })
+      const metal: Goods = { [o.metal]: round2(n * o.yield) }
+      for (const [x, q] of Object.entries(o.byproduct ?? {})) metal[x as Good] = round2((metal[x as Good] ?? 0) + (q ?? 0) * n)
+      addGoods(v, metal)
+      note(metal)
+      room -= n
+    }
+    return made
+  }
+  if (!def.produces) return made
+  if (def.crop) k *= CROP_SEASON[weekSeason(date)] * (opts.rain ? 1.2 : 1)
+  // ground picked clean of stone grows more
+  if (def.crop && at >= DEPLETION_FROM) k *= 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, i))
+  if (k <= 0) return made
+  if (def.consumes) {
+    // limited by inputs on hand
+    let avail = 1
+    for (const [g, n] of Object.entries(def.consumes)) avail = Math.min(avail, (v.goods[g as Good] ?? 0) / ((n ?? 0) * k))
+    k *= Math.max(0, Math.min(1, avail))
+    if (k <= 0) return made
+    addGoods(v, def.consumes, -k)
+  }
+  let out: Goods = def.produces
+  if (at >= DEPLETION_FROM && HUNTS.has(b.type) && def.produces.game) {
+    // the animals on this hex limit the game (and the hides with it)
+    const want = def.produces.game * k
+    const got = gameMax(world, i) ? hunt(world, s, i, date, want) : 0
+    const r = want > 0 ? got / want : 0
+    out = { ...def.produces, game: def.produces.game * r, ...(def.produces.leather ? { leather: def.produces.leather * r } : {}) }
+  }
+  addGoods(v, out, k)
+  note(out, k)
+  return made
+}
+
+export function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord, date: ISODate, prod: number, at: string, odds?: Odds): Goods {
   const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
   const moraleK = 0.75 + v.morale / 200
   const libraryK = habitOn('library') && done(v).some((b) => b.type === 'library') ? 1.05 : 1
   const made: Goods = {}
   for (const b of done(v)) {
     const def = BUILDINGS[b.type]
-    if (!def.produces) continue
-    let k = prod * moraleK * libraryK * (onRole(v, def, at) ? 1.25 : 1)
-    if (def.crop) k *= CROP_SEASON[season] * (habitOn('rain') ? 1.2 : 1)
-    // ground picked clean of stone grows more
-    if (def.crop && at >= DEPLETION_FROM) k *= 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, cellIndex(world, b.col, b.row)))
-    if (k <= 0) continue
-    if (def.consumes) {
-      // limited by inputs on hand
-      let avail = 1
-      for (const [g, n] of Object.entries(def.consumes)) avail = Math.min(avail, (v.goods[g as Good] ?? 0) / ((n ?? 0) * k))
-      k *= Math.max(0, Math.min(1, avail))
-      if (k <= 0) continue
-      addGoods(v, def.consumes, -k)
-    }
-    let out: Goods = def.produces
-    if (at >= DEPLETION_FROM) {
-      const i = cellIndex(world, b.col, b.row)
-      const dug = DIGS[b.type]
-      if (dug) {
-        // the vein (or the rock face) limits what comes out, by-products and all
-        const want = (def.produces[dug] ?? 0) * k
-        const left = leftAt(world, s, i)?.total ?? 0
-        const r = want > 0 ? Math.min(1, left / want) : 0
-        if (r <= 0) continue
-        k *= r
-        dig(s, i, want * r)
-      }
-      if (HUNTS.has(b.type) && def.produces.game) {
-        // the animals on this hex limit the game (and the hides with it)
-        const want = def.produces.game * k
-        const got = gameMax(world, i) ? hunt(world, s, i, date, want) : 0
-        const r = want > 0 ? got / want : 0
-        out = { ...def.produces, game: def.produces.game * r, ...(def.produces.leather ? { leather: def.produces.leather * r } : {}) }
-      }
-    }
-    addGoods(v, out, k)
-    for (const [g, n] of Object.entries(out)) if (n) made[g as Good] = round2((made[g as Good] ?? 0) + n * k)
+    if (!def.produces && !def.mine && !def.smelts && !def.recipes) continue
+    const k = prod * moraleK * libraryK * (onRole(v, def, at) ? 1.25 : 1)
+    for (const [g, n] of Object.entries(shift(s, world, v, b, k, date, at, { rain: habitOn('rain'), odds }))) made[g as Good] = round2((made[g as Good] ?? 0) + (n ?? 0))
   }
   return made
 }
@@ -944,28 +1532,14 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   const notes: string[] = []
 
   // 1. production
+  const foodBefore = foodStock(v)
   const prod = winter ? 0 : 0.15 + 0.85 * (score / 100)
   const made = produce(s, world, v, p, d, ev.date, prod, ev.at)
   if (Object.keys(made).length) notes.push(`made ${fmtGoods(made)}`)
 
   // 2. eating (fresh food first, it spoils anyway)
-  const pop = Math.floor(v.population)
-  let need = pop * 0.5
-  const eaten = new Set<Good>()
-  const order = (Object.entries(FOOD) as [Good, { value: number; keeps: boolean }][]).sort((a, b) => Number(a[1].keeps) - Number(b[1].keeps))
-  // spread across foods for variety: one pass taking a little of each, then fill
-  for (const pass of [0.34, 1]) {
-    for (const [g, f] of order) {
-      if (need <= 1e-9) break
-      const have = v.goods[g] ?? 0
-      if (have <= 0) continue
-      const want = Math.min(have, (need * pass) / f.value)
-      if (want <= 0) continue
-      addGoods(v, { [g]: -want })
-      need -= want * f.value
-      eaten.add(g)
-    }
-  }
+  const pop = people(v)
+  const { need, eaten } = eatFood(v)
   const short = need > 1e-6
   const variety = eaten.size
   let moraleTarget = 50 + (score - 50) / 5 + Math.max(-4, (variety - 2) * 3)
@@ -984,20 +1558,19 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   v.morale = Math.round(Math.max(0, Math.min(100, v.morale + (moraleTarget - v.morale) * 0.25)))
 
   // 3. spoilage + storage cap
-  for (const [g, f] of Object.entries(FOOD) as [Good, { keeps: boolean }][]) {
-    if (!f.keeps && v.goods[g]) addGoods(v, { [g]: -(v.goods[g]! * 0.3) })
-  }
-  const cap = storageCap(v)
-  const stock = foodStock(v)
-  if (stock > cap) {
-    const k = cap / stock
-    for (const g of Object.keys(FOOD) as Good[]) if (v.goods[g]) v.goods[g] = round2(v.goods[g]! * k)
-    notes.push('food rotted for want of a granary')
+  if (spoil(v)) notes.push('food rotted for want of a granary')
+
+  // 4. growth: room in the houses, reasonable morale, and the village making at least as much food as it eats
+  const fed = foodStock(v) >= foodBefore - 1e-6
+  if (!short && fed && !winter && v.morale >= GROW_MORALE && v.population < popCap(v)) {
+    v.population = round2(Math.min(popCap(v), v.population + 0.15 + 0.35 * (score / 100)))
   }
 
-  // 4. growth
-  if (!short && !winter && v.morale >= 45 && v.population < popCap(v)) {
-    v.population = round2(Math.min(popCap(v), v.population + 0.15 + 0.35 * (score / 100)))
+  // 4b. troops at the palisade eat their own provisions; those left waiting too long give up
+  for (const d of [...garrison(s, v)]) {
+    if (d.status === 'waiting') {
+      if (daysBetween(d.since.slice(0, 10), ev.date) >= WAIT_DAYS) sendHome(s, v, d, ev.at, 'gave up waiting at the gate')
+    } else if (!eat(d) || nightsOf(d) < 1) sendHome(s, v, d, ev.at, 'ate the last of their provisions')
   }
 
   // 5. monsters adapt to nearby players and sometimes raid
@@ -1008,7 +1581,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
     const target = 0.8 * (near.reduce((a, o) => a + power(o), 0) / Math.max(1, near.length))
     lair.strength = round2(Math.max(lair.strength, lair.strength + (target - lair.strength) * 0.1))
     const bold = winter && v.winterForecast === 'hungry' ? 1.5 : 1
-    const chance = 0.12 * bold * (lair.strength / (lair.strength + defence(v) * 2))
+    const chance = 0.12 * bold * (lair.strength / (lair.strength + (defence(v) + troopsAt(s, v)) * 2))
     if (rng() < chance) {
       const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) >= 2)
       if (goods.length) {
@@ -1036,12 +1609,12 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   if (weekday(ev.date) === 6) p.freezes = Math.max(p.freezes, 1) // fresh freeze for the new week
   if (weekday(ev.date) === 4 || weekday(ev.date) === 5) {
     const keeps = foodStock(v, true)
-    const needWinter = Math.floor(v.population) * 0.5
+    const needWinter = people(v) * 0.5
     v.winterForecast = keeps >= needWinter * 1.5 ? 'stocked' : keeps >= needWinter ? 'tight' : 'hungry'
   }
 
   // trees spread back each winter (felled ones were stumps until now)
-  if (winter && ev.at >= TREES_FROM) growWoods(s, world, ev.date)
+  if (winter && ev.at >= TREES_FROM) { growWoods(s, world, ev.date); sprout(s, world, v, ev.date); winterWater(s, world, ev.date) }
 
   // 8. unspent tokens keep (before KEEP_TOKENS_FROM they expired at the end of
   // winter, and before the weekly rule a day after they were earned)

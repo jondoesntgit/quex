@@ -1,4 +1,4 @@
-import { ACTIONS, BUILDINGS, HABIT_PRESETS, MAX_HABIT_SLOTS, PERFECT_DAYS_PER_SLOT, SIZE_POINTS } from '../game/data'
+import { ACTIONS, BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, SIZE_POINTS, STATION_RATE, type Good } from '../game/data'
 import { SEASON_WEEKS } from '../game/calendar'
 import { ROLE_INFO } from './helpers'
 
@@ -47,7 +47,9 @@ export function Help({ onClose }: { onClose: () => void }) {
           <p>
             Every task you finish earns an action of the same size, shown at the bottom of the map as <b>B</b>,{' '}
             <b>M</b> or <b>S</b>. A half-done task shows a half-filled action: it still counts toward your score,
-            and two half-done actions of the same size join into a whole one you can spend. A bigger action can pay for a smaller one.
+            and two half-done actions of the same size join into a whole one you can spend. A bigger action can pay for a smaller one,
+            or tap a whole one in the tray to <b>split</b> it: a big into a medium and a small, a medium into two small. Splitting
+            only goes one way: small ones never join back into a bigger one.
             Tap a hex on the map to see what you can do there.
           </p>
           <ul>
@@ -70,8 +72,10 @@ export function Help({ onClose }: { onClose: () => void }) {
           </p>
           <ul>
             <li>Buildings produce every night. How much depends on how well your day went (a good day means a good harvest).</li>
-            <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more.</li>
+            <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more. Baking and smoking don't make more food: 3 grain bake 2 loaves (the same food, but bread lifts morale and weighs half as much), and smoking dries fish out (2 fish make 1.6) so it keeps through winter.</li>
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
+            <li><b>Workers:</b> your people at home do the work. Each building needs a few hands (a field 2, a mine 3, a kiln 1), and one with half its workers makes half as much. The village manages its workers for you (food buildings first; once the stores are full, only enough on food to feed everyone, the rest on other work), or switch that off in the Village tab and assign them yourself. People not working are free to go with a caravan or as troops; while they're away they're still yours (their houses kept), but they can't work until they're home.</li>
+            <li><b>More people</b> settle when three things hold: room in the houses (a House holds 4 more), morale of at least 45, and the village making at least as much food as it eats (spoiling and rotting count). The Village tab ticks them off for tonight.</li>
           </ul>
           <p>Wrong spot? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
         </details>
@@ -124,25 +128,48 @@ export function Help({ onClose }: { onClose: () => void }) {
           <summary>The map: exploring, roads and monsters</summary>
           <ul>
             <li>The mist is unexplored land. <b>Scout</b> from the edge of what anyone knows: everyone in the world shares one map.</li>
-            <li><b>Roads</b> speed caravans, and your villagers love them. A road across a river needs a <b>bridge</b>: a medium task instead of a small one. <b>Fell a tree</b> for timber: each one leaves a stump, and every winter the trees left standing double, back up to what the hex first had. Fell the last tree and the land is open for good, ready to build on. <b>Plant</b> two saplings to start a wood: they become trees in winter and spread from there.</li>
+            <li><b>Roads</b> speed caravans, and your villagers love them. A road across a river needs a <b>bridge</b>: a medium task instead of a small one. <b>Fell a tree</b> for timber: each one leaves a stump, and every winter the trees left standing double, back up to what the hex first had. Fell the last tree and the land is open for good, ready to build on (though each winter a few wild saplings come up on bare land around a village, anywhere but desert, beach and bare rock). <b>Plant</b> two saplings to start a wood: they become trees in winter and spread from there. <b>Pave</b> a road (small task, 2 stone) and caravans along it carry more and go faster.</li>
+            <li><b>Speed:</b> overland, a caravan takes about four hours a hex, so a far neighbour is days away. A dirt road is three times as fast, and a paved one three times faster again (nine times in all).</li>
+            <li><b>Work it</b> (small task): tap one of your buildings to put in an extra shift. It makes a night's worth right away, if it has what it needs. Crops grow in their own time. The Village tab shows what each good will gain or lose tonight; rare finds show as a range, like 0 to 1.</li>
+            <li><b>Clay</b> for bricks: gather a clay deposit, or <b>Dig clay</b> (small task) from a riverbank, a marsh, or a pit in the plains or a hill valley. Some mountains hide a small spring with white kaolin clay; tap a mountain hex to find one. Riverbanks, marshes and springs fill up again every winter; a pit, once dug out, is gone. The pedlar always brings some timber and clay to a village that's short.</li>
+            <li><b>Water:</b> sheep pens, dairies and mule stables need fresh water within a hex (a river, a marsh, a mountain spring, a pond or a well; the sea is salt). Without it the herd gives half. A dug-out clay pit fills with rain by the next winter and becomes a pond, but ponds dry up on summer days. <b>Dig a well</b> (medium task, 3 stone) for water that never runs dry. Game comes back faster near water too.</li>
             <li>Monster lairs (goblins, orcs, trolls, a dragon) grow bolder as villages grow and sometimes raid your stores. A palisade helps.</li>
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
+            <li><b>Lending troops:</b> neighbours can <b>Send troops</b> (medium task) to a village with a palisade, with weapons, armour and food. They wait at the gate until that village takes them in (Village tab) or turns them back. On its walls they help keep raiders off and march on its expeditions, eating only the food they brought; when it runs out, they walk home with their gear. Each palisade holds ten.</li>
+            <li><b>Gunpowder and sieges</b> (the end of the ladder): <b>Nitre beds</b> (beside a Sheep pen) grow saltpetre; roasting chalcopyrite gives off sulfur; a <b>Powder mill</b> grinds them with charcoal into gunpowder. A <b>Gun foundry</b> casts cannonballs, or bronze cannon; a <b>Gunsmith</b> makes muskets; a <b>Siege workshop</b> builds battering rams and siege towers (tap a workshop to choose what it makes). Out in the far wastelands stand warlords' <b>strongholds</b>: their walls triple their strength. Each ram brings them down by half a time, each siege tower by three-quarters, each cannon (with 2 shot and 2 powder) by a whole time, and every musket (with a charge of powder) strengthens the assault. <b>Lay siege</b> (big task): powder, shot and engines are spent, win or lose, and a fallen keep's hoard is yours.</li>
             <li>Merchants call at every village each day except the Sabbath (see <b>Caravans</b>). Barter goods from your stores for what's in their packs; copper and silver are coin every merchant takes. A coast, a river and long roads bring more merchants, bigger loads and better prices. Each merchant can only carry so much weight.</li>
           </ul>
           <p>
-            <b>What's in the ground:</b> outcrops show deposits: rusty boulders for iron, weathered rock crusted with green
-            malachite and blue azurite on a rust-stained patch for copper (in the hills and mountains, and now and then in
-            dry basins and lowland), pale slabs for building stone, dark crystals for rare tin, red clay banks along rivers and white salt
-            crusts. In the mountains, ore streaks the rock itself: green and blue with a rusty halo for copper, rust for iron. Tap a hex to see
+            <b>What's in the ground:</b> rocks scattered on a hex show its deposit: rusty boulders for iron, grey rock patched with
+            green malachite for copper (in the hills and mountains, and now and then in dry basins and lowland), pale slabs for
+            building stone, dark crystal-studded rock for rare tin, red clay banks along rivers and white salt crusts. Fewer
+            rocks means the surface is nearly worked out; one stays while there's more below. Small grey pebbles are loose stone. In the mountains, ore streaks the rock itself: green and blue with a rusty halo for copper, rust for iron. Tap a hex to see
             what you could build there, or press ⛏ by the zoom buttons to dim everything except deposits.
           </p>
           <p>
-            <b>It runs out:</b> every hex has some loose stone. <b>Clear stone</b> (small task) picks it up for building, and a field
+            <b>It runs out:</b> every hex has some loose stone (the grey pebbles). <b>Clear stone</b> (small task) picks it up for building, and a field
             cleared of stone grows a fifth more. Once it's picked clean, only a quarry reaches the rock below. Ore works the same way:
-            a little at the surface to gather by hand, and much more underground for a mine. Surface copper (malachite) has no silver;
-            a copper mine's deep ore brings up a trickle of silver ore. Rich silver ore (grey galena) lies in a few far mountains, streaking the rock
-            grey. Game hunted from a hex comes back slowly, about one animal a day. Tap a hex to see roughly how much is left.
+            a little at the surface to gather by hand, and much more underground for a mine. Game hunted from a hex comes back slowly,
+            about one animal a day. Tap a hex to see roughly how much is left.
           </p>
+          <p>
+            <b>Mines and quarries go down in levels.</b> They start one level down; <b>Sink the shaft</b> (big task, plus timber and planks to
+            shore it up) takes it to level {MAX_DEPTH} at most. Each level holds more ore, and different ore: near the surface it's
+            weathered (green malachite, rusty limonite); deeper down come brassy chalcopyrite, hematite and black magnetite. Tap a mine
+            to see its levels. Rich silver ore (grey galena) lies in a few far mountains, and deep copper ore carries a little.
+          </p>
+          <p>
+            <b>Dungeons:</b> sink a shaft two or more levels under a mountain and the miners may break into something: a troglodyte
+            warren, a spider nest, a forgotten dwarf hall... An expedition (big task) goes down the shaft for its loot, but each one
+            only holds so much.
+          </p>
+          <p><b>Working ore into metal</b> (each station takes up to {STATION_RATE} ore a night on a full day, easiest first):</p>
+          <ul>
+            {(Object.keys(ORES) as Good[]).map((g) => {
+              const o = ORES[g]!
+              return <li key={g}><b>{GOOD_LABEL[g]}</b> → {o.yield} {GOOD_LABEL[o.metal].toLowerCase()} each at a {BUILDINGS[o.station].name}{o.with ? ` (with a ${BUILDINGS[o.with].name})` : ''}, burning {o.fuel} charcoal. <span className="muted">{o.note}</span></li>
+            })}
+          </ul>
           <p>Drag to move around; pinch, scroll or use ＋/－ to zoom. Zoom right out to see the whole continent.</p>
         </details>
 
@@ -150,9 +177,9 @@ export function Help({ onClose }: { onClose: () => void }) {
           <summary>Playing together</summary>
           <ul>
             <li>The <b>Party</b> tab shows your neighbours: today's pips, and a bar for each of the last seven days (gold for a perfect day, blue for a frozen one) with their average. Whether they finished their tasks, never what they were.</li>
-            <li>Send a <b>caravan</b> (medium action) to share goods with a neighbour. It takes time on the road; walking habits speed it up.</li>
+            <li>Send a <b>caravan</b> to share goods with a neighbour: a medium task across country, a small one when a road connects you, and no task at all on paved road the whole way (with ox carts, which must walk home before they go again). Pick who goes (people not working): each carries 6 weight (a stone weighs 3, timber 2, grain 1); a <b>Mule stable</b> adds 60, and a <b>Cart shed</b> lets ox carts carry up to 100 where roads run the whole way. Paved roads add up to half again. Pack food for the road first: half a unit a person a day, there and back. Its people are away until they're home again. Roads and walking habits speed it up.</li>
             <li>Tap a hex and <b>🔗 Share</b>, or use <b>Invite someone to settle nearby</b> in the Village tab, to text someone a link to that spot.</li>
-            <li>Villages need a little space: you can't settle right next to someone else's land (shown in red while choosing).</li>
+            <li>Villages need a little space: you can't settle right next to someone else's land (shaded while choosing).</li>
             <li>
               Quex has two worlds: the <b>sandbox</b>, open to anyone who wants to try it, and a smaller world where friends and
               family are playtesting. Anyone can look around the family world, but only its players can play there. Visitors

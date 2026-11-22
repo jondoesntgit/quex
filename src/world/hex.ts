@@ -67,3 +67,22 @@ function cubeRound(q: number, r: number, s: number): Cube {
   else rs = -rq - rr
   return { q: rq, r: rr, s: rs }
 }
+
+/** The hexes on a straight line from a to b, both ends included. */
+export function line(a: Offset, b: Offset): Offset[] {
+  const ac = toCube(a.col, a.row), bc = toCube(b.col, b.row)
+  const n = distance(a, b)
+  const out: Offset[] = []
+  for (let k = 0; k <= n; k++) {
+    const t = n ? k / n : 0
+    // nudge off exact edges so ties fall the same way every time
+    const q = ac.q + (bc.q - ac.q) * t + 1e-6, r = ac.r + (bc.r - ac.r) * t + 2e-6, s = -q - r
+    let rq = Math.round(q), rr = Math.round(r)
+    const rs = Math.round(s)
+    const dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s)
+    if (dq > dr && dq > ds) rq = -rr - rs
+    else if (dr > ds) rr = -rq - rs
+    out.push(fromCube({ q: rq, r: rr, s: -rq - rr }))
+  }
+  return out
+}
