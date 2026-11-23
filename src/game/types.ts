@@ -172,6 +172,8 @@ export interface LogEntry {
 export interface GameState {
   /** people are counted one by one (a world made before CITY_FROM counted households of five, and is converted once) */
   headsScaled?: boolean
+  /** cheese is counted in rations (see convertCheese) */
+  cheeseRations?: boolean
   worldSeed: string
   seasonStart: ISODate
   players: Record<string, Player>

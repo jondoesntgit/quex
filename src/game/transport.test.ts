@@ -32,30 +32,30 @@ describe('caravans carry by weight', () => {
   it('porters, then mules, then carts (on roads), and paving carries more', () => {
     const s = setup()
     const ann = s.villages.v_ann, bob = s.villages.v_bob
-    expect(caravanCarry(world, s, ann, bob, 5 * HEADS)).toMatchObject({ animals: 'foot', cap: 30 }) // five households of people, six each
+    expect(caravanCarry(world, s, ann, bob, 5 * HEADS)).toMatchObject({ animals: 'foot', cap: 1000 }) // 25 people, 40 lb each
     ann.buildings.push({ id: 'st', type: 'stable', col: ann.col, row: ann.row, progress: 1 })
     s.wells = { [cellIndex(world, ann.col, ann.row)]: true }
-    expect(caravanCarry(world, s, ann, bob, 0)).toMatchObject({ animals: 'mules', cap: 60 })
+    expect(caravanCarry(world, s, ann, bob, 0)).toMatchObject({ animals: 'mules', cap: 2000 })
     ann.buildings.push({ id: 'cs', type: 'cart_shed', col: 0, row: 1, progress: 1 })
     const offRoad = caravanCarry(world, s, ann, bob, 0)
     expect(offRoad.animals).toBe('carts')
-    expect(offRoad.cap).toBeLessThan(100)
+    expect(offRoad.cap).toBeLessThan(4000)
     // a road the whole way, then paved
     const way = line(ann, bob).map((o) => cellIndex(world, o.col, o.row))
     ann.roads = way
     expect(route(world, s, ann, bob).road).toBe(1)
-    expect(caravanCarry(world, s, ann, bob, 0).cap).toBe(100)
+    expect(caravanCarry(world, s, ann, bob, 0).cap).toBe(4000) // four wagon loads
     ann.paved = way
-    expect(caravanCarry(world, s, ann, bob, 0).cap).toBe(150)
+    expect(caravanCarry(world, s, ann, bob, 0).cap).toBe(6000)
   })
 
   it('refuses a load that is too heavy', () => {
     const s = setup()
     const ann = s.villages.v_ann
-    ann.goods = { stone: 20, cheese: 30 }
-    // five people carry 30, provisions included: a long cross-country trip takes 9 cheese (weight 9), leaving 21 for stone
-    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 8 }, crew: 5 * HEADS, food: { cheese: 9 } }, 'medium')).toMatch(/Too heavy: .* 30 weight/)
-    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 7 }, crew: 5 * HEADS, food: { cheese: 9 } }, 'medium')).toBeNull()
+    ann.goods = { wool: 20, cheese: 450 }
+    // 25 people carry 1000 lb, provisions included: a long cross-country trip takes 135 rations of cheese (216 lb), leaving 784 lb for wool (400 lb a bale)
+    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { wool: 2 }, crew: 5 * HEADS, food: { cheese: 135 } }, 'medium')).toMatch(/Too heavy: .* 1000 lb/)
+    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { wool: 1 }, crew: 5 * HEADS, food: { cheese: 135 } }, 'medium')).toBeNull()
   })
 
   it('a cart shed needs a stable first', () => {
@@ -111,7 +111,7 @@ describe('clay', () => {
 })
 
 describe('clay comes back', () => {
-  it('to riverbanks, marshes and springs every winter, but not to pits in the plains', () => {
+  it('fully to riverbanks, marshes and springs every winter, and a load at a time to pits in the plains', () => {
     const s = setup()
     const river = world.cells.findIndex((c) => c.tier > 0 && c.riverTo !== -1 && c.resource !== 'clay' && c.terrain !== 'swamp')
     const plain = world.cells.findIndex((c) => c.tier > 0 && c.riverTo === -1 && c.terrain === 'grass' && c.resource !== 'clay')
@@ -122,7 +122,7 @@ describe('clay comes back', () => {
     for (const d of ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21'])
       apply(s, world, { t: 'tick', id: `c${++n}`, at: `${d}T23:00:00.000Z`, playerId: 'ann', date: d })
     expect(clayLeft(world, s, river)).toBe(9)
-    expect(clayLeft(world, s, plain)).toBe(0)
+    expect(clayLeft(world, s, plain)).toBe(1) // one load seeped back
   })
 })
 
@@ -154,16 +154,19 @@ describe('wild saplings', () => {
 })
 
 describe('water for the herds', () => {
-  it('comes from rivers, marshes, springs, wells and ponds; ponds dry in summer', () => {
+  it('comes from rivers, marshes, springs, wells and (in old saves) ponds; ponds dry in summer', () => {
     const s = setup()
     const river = world.cells.findIndex((c) => c.tier > 0 && c.riverTo !== -1)
     expect(waterAt(world, s, river)?.kind).toBe('river')
     const plain = world.cells.findIndex((c) => c.tier > 0 && c.riverTo === -1 && c.terrain === 'grass' && c.resource !== 'clay')
     expect(waterAt(world, s, plain)).toBeNull()
-    // dig the clay pit out; by winter it's a pond
+    // a dug-out pit no longer becomes a pond (it seeps back clay); ponds from before still hold water
     s.clayDug = { [plain]: 4 }
     for (const d of ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21'])
       apply(s, world, { t: 'tick', id: `w${++n}`, at: `${d}T23:00:00.000Z`, playerId: 'ann', date: d })
+    expect(s.ponds?.[plain]).toBeUndefined()
+    expect(waterAt(world, s, plain, '2026-11-23')).toBeNull()
+    s.ponds = { [plain]: '2026-11-21' }
     expect(waterAt(world, s, plain, '2026-11-23')).toEqual({ kind: 'pond', dry: false })
     expect(waterAt(world, s, plain, '2026-11-24')).toEqual({ kind: 'pond', dry: true }) // a summer day
   })

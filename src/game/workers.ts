@@ -8,7 +8,7 @@
  *
  *  More people come when there's room in the houses, morale is reasonable, and
  *  the village makes at least as much food as it eats (see tick, growth). */
-import { BUILDINGS, EAT, FOOD, HEADS, type BuildingId, type Good, type Goods } from './data'
+import { BUILDINGS, EAT, FOOD, FOOD_SCALE, HEADS, type BuildingId, type Good, type Goods } from './data'
 import type { Building, Village } from './types'
 
 /** Hands each building needs to run at full strength (none: houses, walls, halls...). */
@@ -21,7 +21,7 @@ export const WORKERS: Partial<Record<BuildingId, number>> = {
   nitre_beds: 1, powder_mill: 2, gun_foundry: 3, gunsmith: 2, siege_workshop: 2,
 }
 /** Weight each person carries on a caravan. */
-export const CARRY_EACH = 6 / HEADS
+export const CARRY_EACH = 40
 
 export const needOf = (b: { type: BuildingId }) => (WORKERS[b.type] ?? 0) * HEADS
 /** People at home to work: the village's people, less those away on a neighbour's walls
@@ -39,7 +39,7 @@ const feeds = (b: Building) => netFood(b) > 0.01
 
 /** Food in store, and what the stores hold (more rots). */
 const stock = (v: Village) => foodOf(v.goods)
-const room = (v: Village) => 30 + v.buildings.filter((b) => b.progress >= 1).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0)
+const room = (v: Village) => FOOD_SCALE * (30 + v.buildings.filter((b) => b.progress >= 1).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0))
 
 /** The stores are as good as full: more food would only rot. */
 export function storesFull(v: Village): boolean {

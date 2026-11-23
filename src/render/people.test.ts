@@ -153,7 +153,7 @@ describe('villagers stop to chat', async () => {
     const s = newGame(world, '2026-11-15')
     const site = world.regions[world.startRegion].sites[0]
     apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
-    s.villages.v_a.population = 12 // a busy village
+    s.villages.v_a.population = 200 // a busy village
     type W = { chat: { with: unknown; until: number } | null; t: number; chatAgain: number }
     const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[]; now: () => Date }
     people.now = () => new Date('2026-11-18T12:00:00Z') // a Wednesday: work and chatter
@@ -189,7 +189,7 @@ describe('the Sabbath', async () => {
     const s = newGame(world, '2026-11-15')
     const site = world.regions[world.startRegion].sites[0]
     apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
-    s.villages.v_a.population = 12
+    s.villages.v_a.population = 200
     type W = { rest: { kind: string; pal?: unknown } | null; working: boolean; pose: { cell: number } | null }
     const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; walkers: W[]; now: () => Date }
     people.now = () => new Date('2026-11-21T12:00:00Z') // a Saturday

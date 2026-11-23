@@ -323,6 +323,43 @@ export function homeFits(world: World, v: Village, h: Home): boolean {
   return roomFor(world, v, h) && visible(world, v, h) && walkable(world, v, [h])
 }
 
+/** The town as villagers walk it: every place worth walking to that can be reached (the doors, the
+ *  well, the gates), and the way from one to another
+ *  (ground px from the village hex's centre), around every building. Built once per layout. */
+export interface Town { stops: Pt[]; route(a: number, b: number): Pt[] | null }
+export function townOf(world: World, v: Village): Town {
+  const bs = boxesOf(world, v), G = walkGrid(world, v, bs), main = mainArea(G)
+  const doors: Pt[] = [], cells: number[] = []
+  const add = (d: Pt) => { const c = cellNear(G, d, 4); if (c >= 0 && main[c]) { doors.push(d); cells.push(c) } }
+  for (const b of bs) add(b.key === 'well' ? [b.gx, b.gy + b.hy + 4] : doorOf(b))
+  for (const g of gatesOf(world, v)) add(g)
+  const centre = (n: number): Pt => { const k = n % G.W, j = (n - k) / G.W; return [G.x0 + (k + 0.5) * CELL, G.y0 + (j + 0.5) * CELL] }
+  const route = (a: number, b: number): Pt[] | null => {
+    if (a === b) return [doors[a]]
+    const prev = new Int32Array(G.W * G.H).fill(-2)
+    prev[cells[a]] = -1
+    const q = new Int32Array(G.W * G.H); let qh = 0, qt = 0; q[qt++] = cells[a]
+    while (qh < qt) {
+      const n = q[qh++]; if (n === cells[b]) break
+      const k = n % G.W, j = (n - k) / G.W
+      for (const [dk, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const kk = k + dk, jj = j + dj
+        if (kk < 0 || jj < 0 || kk >= G.W || jj >= G.H) continue
+        const m = jj * G.W + kk
+        if (!G.ok[m] || prev[m] !== -2) continue
+        if (dk && dj && (!G.ok[j * G.W + kk] || !G.ok[jj * G.W + k])) continue
+        prev[m] = n; q[qt++] = m
+      }
+    }
+    if (prev[cells[b]] === -2) return null
+    const way: Pt[] = []
+    for (let n = cells[b]; n >= 0; n = prev[n]) way.push(centre(n))
+    way.reverse()
+    return [doors[a], ...way.filter((_, i) => i % 3 === 0 || i === way.length - 1), doors[b]]
+  }
+  return { stops: doors, route }
+}
+
 /** A ground point (px from the village hex's centre) under a point on the map's plane (screen px, unlifted). */
 export function groundOf(v: Village, x: number, y: number): Pt {
   const o = origin(v)

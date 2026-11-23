@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { addDays, weekSeason, weekday } from './calendar'
 import { EAT, FOOD, GOOD_LABEL, HEADS, type Good } from './data'
+import { CARRY_EACH } from './workers'
 import { ORIGINS, TRAVEL_DAYS, influx, originFor, travelFood } from './immigrants'
 import { weightOf } from './market'
 import { GROW_MORALE, apply, newGame, popCap } from './reducer'
@@ -26,14 +27,14 @@ describe('travel food', () => {
     for (const o of ORIGINS) {
       const g = travelFood(20, o)
       const food = Object.fromEntries(Object.entries(g).filter(([k]) => FOOD[k as Good]))
-      expect(worth(food)).toBeCloseTo(20 * EAT * TRAVEL_DAYS, 1)
+      expect(Math.abs(worth(food) - 20 * EAT * TRAVEL_DAYS)).toBeLessThan(0.5) // goods are kept to 2 places, a load is 10 rations
       for (const k of Object.keys(g)) expect(GOOD_LABEL[k as Good], k).toBeTruthy()
       expect(o.foods.reduce((a, [, share]) => a + share, 0)).toBeCloseTo(1, 5)
     }
   })
 
   it('is light enough to arrive with: a crowd never carries more than they can', () => {
-    for (const o of ORIGINS) expect(weightOf(travelFood(40, o))).toBeLessThan(40 * 6) // each person carries 6 of weight, plus pack animals
+    for (const o of ORIGINS) expect(weightOf(travelFood(40, o))).toBeLessThan(40 * CARRY_EACH) // each person carries 40 lb, plus pack animals
   })
 
   it('names where they came from, the same for the same village that day, and varies between villages', () => {
@@ -70,7 +71,7 @@ describe('after the winter', () => {
     expect(v.population).toBeGreaterThanOrEqual(pop + a.people - 0.01)
     expect(v.population).toBeLessThanOrEqual(popCap(v) + 0.01)
     const food = Object.fromEntries(Object.entries(a.goods).filter(([k]) => FOOD[k as Good]))
-    expect(worth(food)).toBeCloseTo(a.people * EAT * TRAVEL_DAYS, 1)
+    expect(Math.abs(worth(food) - a.people * EAT * TRAVEL_DAYS)).toBeLessThan(0.5) // goods are kept to 2 places, a load is 10 rations
     expect(s.log.some((l) => /newcomers from/.test(l.text))).toBe(true)
     // the food really went into the stores
     expect(Object.keys(a.goods).some((g) => g !== 'grain' && (v.goods[g as Good] ?? 0) > 0)).toBe(true)
@@ -121,6 +122,6 @@ describe('the one-time update', () => {
     const a = v.arrivals!.find((x) => x.kind === 'update')!
     expect(a.people).toBe(6 * HEADS - 6)
     const food = Object.fromEntries(Object.entries(a.goods).filter(([k]) => FOOD[k as Good]))
-    expect(worth(food)).toBeCloseTo(a.people * EAT * TRAVEL_DAYS, 1)
+    expect(Math.abs(worth(food) - a.people * EAT * TRAVEL_DAYS)).toBeLessThan(0.5) // goods are kept to 2 places, a load is 10 rations
   })
 })

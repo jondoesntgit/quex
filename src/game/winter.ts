@@ -1,7 +1,7 @@
 /** Winter prep: what a village needs before Saturday's winter, what's still
  *  missing, and what finishing real-life tasks would do about it. Pure, read
  *  only: it mirrors the nightly tick's rules (see tick() in reducer.ts). */
-import { BUILDINGS, EAT, FOOD, type BuildingId, type Good, type TaskSize } from './data'
+import { BUILDINGS, EAT, FOOD, FOOD_SCALE, type BuildingId, type Good, type TaskSize } from './data'
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
 import { defence, foodStock, storageCap } from './reducer'
 import { people } from './workers'
@@ -106,7 +106,7 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
     title: 'Room to store it',
     status: `${Math.round(stock)} of ${cap} storage used.`,
     impact: 'Food beyond what you can store rots overnight.',
-    todo: room ? [] : [{ size: BUILDINGS.granary.size, text: `Build a Granary: +${BUILDINGS.granary.storage} storage (${costText(BUILDINGS.granary.cost)}).` }],
+    todo: room ? [] : [{ size: BUILDINGS.granary.size, text: `Build a Granary: +${BUILDINGS.granary.storage! * FOOD_SCALE} storage (${costText(BUILDINGS.granary.cost)}).` }],
   })
 
   // 3. defence: hungry villages draw raids in winter

@@ -7,7 +7,7 @@
  *
  *  The numbers come from the same rule functions the reducer uses, so what's shown is what happens
  *  (preview.test.ts checks it against the reducer). Nothing here changes the game. */
-import { ACTIONS, BUILDINGS, GATHER, GOOD_LABEL, type ActionKind, type BuildingId, type TaskSize } from './data'
+import { ACTIONS, BUILDINGS, FOOD, GATHER, gatherAmount, GOOD_LABEL, type ActionKind, type BuildingId, type TaskSize } from './data'
 import { DEPLETION_FROM, gameLeft, leftAt } from './deposits'
 import { PAVE_COST, buildCost, fmtGoods, landAt, cellIndex } from './reducer'
 import { COBBLE_COST, HOMES } from './city'
@@ -38,7 +38,7 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
     case 'gather': {
       const g = GATHER[land.resource!]
       if (!g) break
-      let n = round2(3 * k)
+      let n = gatherAmount(g, k)
       const left = at >= DEPLETION_FROM ? leftAt(world, s, i) : null
       if (left && left.good === g) {
         n = round2(Math.min(n, left.surface))
@@ -50,7 +50,7 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
         n = round2(Math.min(n, have))
         out.notes.push(`${Math.floor(have - n)} animals would be left; they come back slowly.`)
       }
-      out.gets.push(`+${n} ${good(g)}`)
+      out.gets.push(FOOD[g] ? `+${Math.round(n * FOOD[g]!.value)} rations of ${good(g)}` : `+${n} ${good(g)}`)
       break
     }
     case 'pick': {
@@ -76,7 +76,7 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
       const rest = round2(left - n)
       if (rest >= 1) out.notes.push(`About ${Math.floor(rest)} clay left in this ground.`)
       else if (clayRenews(world, i)) out.notes.push(`This digs it out until winter, when ${mountainSpring(world, i) ? 'the spring' : 'the water'} brings more.`)
-      else out.notes.push('This digs the pit out for good. After the next winter, rain fills an empty pit and it becomes a pond (dry in summer), which a herd can drink from.')
+      else out.notes.push('This digs the pit down. Each winter the ground seeps back about one load of clay.')
       break
     }
     case 'plant':

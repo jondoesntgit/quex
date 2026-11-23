@@ -32,8 +32,8 @@ export interface Origin {
 
 export const ORIGINS: Origin[] = [
   { id: 'farmland', name: 'a farming valley', foods: [['biscuit', 0.4], ['dried_peas', 0.3], ['grain', 0.3]], blurb: 'Twice-baked biscuit, dried peas, and a sack of seed grain to sow.' },
-  { id: 'coast', name: 'the fishing coast', foods: [['smoked_fish', 0.5], ['biscuit', 0.3], ['dried_peas', 0.2]], extra: { salt: 0.04 }, blurb: 'Smoked fish and biscuit, with salt to keep it.' },
-  { id: 'pasture', name: 'the high pastures', foods: [['cheese', 0.5], ['biscuit', 0.3], ['grain', 0.2]], extra: { salt: 0.02 }, blurb: 'Wheels of hard cheese, biscuit and a little seed grain.' },
+  { id: 'coast', name: 'the fishing coast', foods: [['smoked_fish', 0.5], ['biscuit', 0.3], ['dried_peas', 0.2]], extra: { salt: 4.5 }, blurb: 'Smoked fish and biscuit, with salt to keep it.' },
+  { id: 'pasture', name: 'the high pastures', foods: [['cheese', 0.5], ['biscuit', 0.3], ['grain', 0.2]], extra: { salt: 2.25 }, blurb: 'Wheels of hard cheese, biscuit and a little seed grain.' },
   { id: 'meadow', name: "the beekeepers' meadows", foods: [['honey', 0.25], ['dried_peas', 0.35], ['cheese', 0.4]], blurb: 'Honey, dried peas and hard cheese.' },
 ]
 

@@ -24,9 +24,9 @@ import type { GameState, ISODate, Village } from './types'
  *  currency (no gold in Quex): every merchant takes them at face value and none
  *  sells them; prices are shown in copper, or silver at 10 copper. */
 export const VALUE: Record<Good, number> = {
-  grain: 1, fish: 1, timber: 1, stone: 1, clay: 1, berries: 1.5, game: 1.5, wool: 1.5, herbs: 2, salt: 3,
+  grain: 1, fish: 1, timber: 1, stone: 1, clay: 1, berries: 1.5, game: 1.5, wool: 1.5, herbs: 2, salt: 0.0267,
   copper_ore: 2, chalcopyrite: 1.5, limonite: 2, iron_ore: 2.5, magnetite: 3, silver_ore: 4, tin: 6,
-  bread: 2, smoked_fish: 2.5, cheese: 3, biscuit: 2, dried_peas: 1.5, honey: 4, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
+  bread: 2, smoked_fish: 2.5, cheese: 0.2, cured_meat: 0.22, biscuit: 2, dried_peas: 1.5, honey: 4, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
   copper: 5, iron: 7, bronze: 10, steel: 15, silver: 50,
   relic: 25, dragon_scale: 40,
   saltpetre: 4, sulfur: 4, gunpowder: 12, cannonballs: 6, musket: 25, cannon: 120, ram: 30, siege_tower: 60,
@@ -36,14 +36,18 @@ export const VALUE: Record<Good, number> = {
 export const inCopper = (x: number) => x / VALUE.copper
 export const COPPER_PER_SILVER = 10
 
-/** How heavy a good is to carry, per unit. */
+/** What one unit of each good weighs, in pounds. Bulk goods (timber, stone, clay, bricks, ore) come in
+ *  wagon loads of WAGON_LB. Food comes in units worth FOOD[g].value rations, at the weight a ration of it
+ *  really has (grain 2 lb, bread 1.5, fresh fish 4, cheese 1.6, berries 5...). Metals are counted in
+ *  ingots (copper, iron, bronze, steel 50 lb; tin 25; silver 12). Cheese and cured meat are counted in rations, and salt in pinches (one a ration). */
+export const WAGON_LB = 1000
 export const WEIGHT: Record<Good, number> = {
-  grain: 1, fish: 1, timber: 2, stone: 3, clay: 2, berries: 0.5, game: 1, wool: 0.5, herbs: 0.2, salt: 1,
-  copper_ore: 3, chalcopyrite: 3, limonite: 3, iron_ore: 3, magnetite: 3.5, silver_ore: 3, tin: 1,
-  bread: 0.5, smoked_fish: 0.5, cheese: 1, biscuit: 0.5, dried_peas: 0.8, honey: 1, bricks: 2, charcoal: 1, planks: 1.5, leather: 0.5, cloth: 0.5,
-  copper: 1, iron: 1.5, bronze: 1.5, steel: 1.5, silver: 1,
-  relic: 0.5, dragon_scale: 1,
-  saltpetre: 1, sulfur: 1, gunpowder: 1, cannonballs: 3, musket: 2, cannon: 30, ram: 20, siege_tower: 40,
+  grain: 20, fish: 40, timber: 1000, stone: 1000, clay: 1000, berries: 40, game: 30, wool: 400, herbs: 100, salt: 0.05,
+  copper_ore: 1000, chalcopyrite: 1000, limonite: 1000, iron_ore: 1000, magnetite: 1000, silver_ore: 1000, tin: 25,
+  bread: 22, smoked_fish: 18, cheese: 1.6, cured_meat: 1.2, biscuit: 12, dried_peas: 15, honey: 14, bricks: 1000, charcoal: 500, planks: 800, leather: 200, cloth: 200,
+  copper: 50, iron: 50, bronze: 50, steel: 50, silver: 12,
+  relic: 10, dragon_scale: 50,
+  saltpetre: 200, sulfur: 200, gunpowder: 200, cannonballs: 1000, musket: 20, cannon: 1500, ram: 800, siege_tower: 4000,
 }
 
 export const weightOf = (g: Goods) => Object.entries(g).reduce((a, [x, n]) => a + (n ?? 0) * WEIGHT[x as Good], 0)
@@ -160,18 +164,18 @@ function outfit(kind: MerchantKind, r: Reach): { name: string; blurb: string; ca
   const k = KINDS[kind]
   switch (kind) {
     case 'ship': return r.docks || r.shipyard
-      ? { name: 'Merchant ship', blurb: 'A deep-hulled trading ship, tied up at your docks.', cap: 120, size: 1.6 }
-      : { name: 'Coasting boat', blurb: 'A small boat working along the shore. Docks would bring the big ships.', cap: 50, size: 1.1 }
-    case 'barge': return { name: k.name, blurb: k.blurb, cap: 50, size: 1.1 }
+      ? { name: 'Merchant ship', blurb: 'A deep-hulled trading ship, tied up at your docks.', cap: 60000, size: 1.6 }
+      : { name: 'Coasting boat', blurb: 'A small boat working along the shore. Docks would bring the big ships.', cap: 12000, size: 1.1 }
+    case 'barge': return { name: k.name, blurb: k.blurb, cap: 30000, size: 1.1 }
     case 'caravan': return r.roads >= WAGON_ROADS
-      ? { name: 'Wagon caravan', blurb: 'Ox wagons, rolling in on your long roads.', cap: 70, size: 1.3 }
-      : { name: 'Mule train', blurb: `A string of pack mules. ${WAGON_ROADS} road hexes would bring the wagons.`, cap: 30, size: 0.9 }
-    case 'pedlar': return { name: k.name, blurb: k.blurb, cap: 20, size: 0.6 }
+      ? { name: 'Wagon caravan', blurb: 'Ox wagons, rolling in on your long roads.', cap: 9000, size: 1.3 }
+      : { name: 'Mule train', blurb: `A string of pack mules. ${WAGON_ROADS} road hexes would bring the wagons.`, cap: 3000, size: 0.9 }
+    case 'pedlar': return { name: k.name, blurb: k.blurb, cap: 1200, size: 0.6 }
   }
 }
 
 /** What the pedlar always brings a village that's short of it: building basics it can't get at home. */
-const STAPLES: Goods = { timber: 4, clay: 3 }
+const STAPLES: Goods = { timber: 1, clay: 1 }
 
 /** Staples a village is out of, or has no source of in its own land (no trees, no riverbank, marsh or clay). */
 export function lacks(world: World, s: GameState, v: Village): Good[] {

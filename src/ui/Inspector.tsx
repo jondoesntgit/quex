@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { actionSize, buildCost, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { fmtLb, stepOf } from '../game/units'
+import { CARRY, actionSize, buildCost, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
@@ -29,7 +30,7 @@ const DEPOSIT_NOTE: Record<string, string> = {
   tin: 'Tin! Rare: gather it (small task) and trade it. A little tin turns copper into bronze.',
   stone: 'Building stone: a Quarry could go here (medium task), or gather stone by hand (small task).',
   clay: 'River clay: gather it (small task) for a Brick kiln.',
-  salt: 'Salt: gather it (small task), or build Salt pans on the shore (medium task). Salt keeps cheese and fish.',
+  salt: 'Salt: gather it (small task), or build Salt pans on the shore (medium task). One pinch salts a ration: dairies use it for cheese, and a smokehouse can cure game with it.',
 }
 
 const TERRAIN_NAME: Record<string, string> = {
@@ -212,7 +213,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       {!village && <Reserves left={left} wild={wild} game={wildNow(game, p, i)} building={here?.building.type} />}
       {known && clayLeft(world, state, i) !== null && (
         <p className="muted" style={{ margin: '4px 0' }}>
-          {mountainSpring(world, i) ? '💧 A small spring trickles down the rock here, with white kaolin clay along it' : clayRenews(world, i) ? '🏺 Clay along the water here' : '🏺 Clay under the soil here (a pit, once dug, is gone)'}: {Math.floor(clayLeft(world, state, i)!) || 'dug out'}{clayLeft(world, state, i)! >= 1 ? ' left' : ''}{clayRenews(world, i) ? ', and more every winter' : ''}.
+          {mountainSpring(world, i) ? '💧 A small spring trickles down the rock here, with white kaolin clay along it' : clayRenews(world, i) ? '🏺 Clay along the water here' : '🏺 Clay under the soil here (a dug pit seeps back one load each winter)'}: {Math.floor(clayLeft(world, state, i)!) || 'dug out'}{clayLeft(world, state, i)! >= 1 ? ' left' : ''}{clayRenews(world, i) ? ', and more every winter' : ''}.
         </p>
       )}
       {known && (() => {
@@ -552,9 +553,9 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
   const pct = (x: number) => `${Math.round(x * 100)}%`
   const stepper = (state: Record<string, number>, set: (x: Record<string, number>) => void, g: Good) => (
     <span className="row">
-      <button className="btn icon" onClick={() => set({ ...state, [g]: Math.max(0, (state[g] ?? 0) - 1) })}>−</button>
+      <button className="btn icon" onClick={() => set({ ...state, [g]: Math.max(0, (state[g] ?? 0) - stepOf(g)) })}>−</button>
       <b style={{ width: 24, textAlign: 'center' }}>{state[g] ?? 0}</b>
-      <button className="btn icon" disabled={left(g) < 1 || weight + WEIGHT[g] > carry.cap} onClick={() => set({ ...state, [g]: (state[g] ?? 0) + 1 })}>+</button>
+      <button className="btn icon" disabled={left(g) < stepOf(g) || weight + WEIGHT[g] * stepOf(g) > carry.cap} onClick={() => set({ ...state, [g]: (state[g] ?? 0) + stepOf(g) })}>+</button>
     </span>
   )
   return (
@@ -582,17 +583,17 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
       </div>
       <p className="muted" style={{ margin: '2px 0' }}>
         {free < 1 ? <span className="deal-no">Nobody is free to go: take someone off a building in the Village tab (Workers). </span> : null}
-        Each carries {CARRY_EACH}{carry.animals === 'mules' ? ', and the pack mules carry 60 more' : carry.animals === 'carts' ? ', and the ox carts carry 60 to 100 more (more on roads)' : '; a Mule stable adds 60'}{carry.paved > 0 ? ', and paved road half again' : ''}: up to <b>{carry.cap}</b> weight in all.
+        Each carries {CARRY_EACH} lb{carry.animals === 'mules' ? `, and the pack mules carry ${CARRY.mules} lb more` : carry.animals === 'carts' ? `, and the ox carts carry ${CARRY.mules} to ${CARRY.carts} lb more (more on roads)` : `; a Mule stable adds ${CARRY.mules} lb`}{carry.paved > 0 ? ', and paved road half again' : ''}: up to <b>{fmtLb(carry.cap)}</b> in all. Loaded: {fmtLb(weight)}.
         {carry.thirsty ? ' (Your mules are thirsty: a well by the stable lets them carry more.)' : ''}
       </p>
 
       <h4 style={{ margin: '6px 0 2px' }}>Provisions for the road</h4>
       <p className={packed + 1e-9 >= need ? 'deal-yes' : 'deal-no'} style={{ margin: '2px 0' }}>
-        {packed + 1e-9 >= need ? `Packed: food for the trip there and back (${Math.round(packed * 10) / 10} of ${need} needed).` : `Pack ${need} worth of food: ${crew} ${crew === 1 ? 'person' : 'people'}, half a unit each a day, there and back. Packed: ${Math.round(packed * 10) / 10}.`}
+        {packed + 1e-9 >= need ? `Packed: food for the trip there and back (${Math.round(packed * 10) / 10} of ${need} needed).` : `Pack ${need} rations of food: ${crew} ${crew === 1 ? 'person' : 'people'}, one ration each a day, there and back. Packed: ${Math.round(packed * 10) / 10}.`}
       </p>
       {foods.length ? foods.map((g) => (
         <div key={`f-${g}`} className="row" style={{ justifyContent: 'space-between' }}>
-          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · worth {FOOD[g]!.value} food each)</span></span>
+          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · wagon loads, {FOOD[g]!.value} rations each)</span></span>
           {stepper(food, setFood, g)}
         </div>
       )) : <p className="muted" style={{ margin: 0 }}>No food in store to pack.</p>}
@@ -600,7 +601,7 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
       <h4 style={{ margin: '6px 0 2px' }}>Goods for {dest.name}</h4>
       {have.map((g) => (
         <div key={g} className="row" style={{ justifyContent: 'space-between' }}>
-          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · weight {WEIGHT[g]})</span></span>
+          <span><Icon name={g} /> {GOOD_LABEL[g]} <span className="muted">({Math.floor(v.goods[g] ?? 0)} · {WEIGHT[g]} lb each)</span></span>
           {stepper(load, setLoad, g)}
         </div>
       ))}

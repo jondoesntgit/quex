@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { neighbours } from '../world/hex'
 import { BASE_CAP, CITY_FROM, apply, cellIndex, cobbleError, newGame, popCap, validate } from './reducer'
-import { COBBLE_COST, HOMES, centreOf, dims, findHome, findUpgrade, gatesOf, hexAt, homeFits, roomFor, visible, walkable } from './city'
-import { EAT, HEADS } from './data'
+import { COBBLE_COST, HOMES, centreOf, dims, findHome, findUpgrade, gatesOf, hexAt, homeFits, roomFor, townOf, visible, walkable } from './city'
+import { BUILDINGS, EAT, FOOD, FOOD_SCALE, HEADS, SALT_PER_OLD } from './data'
 import { needOf, people, spare } from './workers'
 import type { GameEvent, GameState, Home } from './types'
 
@@ -37,7 +37,8 @@ const nextHex = (s: GameState) => {
 
 describe('people are counted one by one', () => {
   it('keeps the economy the same: the same food, the same hands, the same hauling', () => {
-    expect(EAT * HEADS).toBeCloseTo(0.5)
+    expect(EAT).toBe(1) // a ration a person a day
+    expect(EAT * HEADS / FOOD_SCALE).toBeCloseTo(0.5) // and a load is FOOD_SCALE rations: the old economy
     expect(needOf({ type: 'field' })).toBe(2 * HEADS)
     const s = setup()
     const v = s.villages.v_ann
@@ -317,5 +318,60 @@ describe('the one-time update never stops the game', () => {
     const A = JSON.parse(before).v_ann, B = JSON.parse(JSON.stringify(s.villages)).v_ann
     // (everything but the goods: the purse of coins is a different one-time rule, handed out first in the same event)
     for (const k of new Set([...Object.keys(A), ...Object.keys(B)])) if (k !== 'goods') expect(JSON.stringify(B[k]), `field ${k}`).toBe(JSON.stringify(A[k]))
+  })
+})
+
+describe('villagers walk door to door', () => {
+  it('finds a way between any two doors of the square, and between new homes', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    const h = findHome(world, v, 'cottage')!
+    v.homes = [h]
+    const town = townOf(world, v)
+    expect(town.stops.length).toBeGreaterThanOrEqual(3)
+    for (let a = 0; a < town.stops.length; a++) for (let b = 0; b < town.stops.length; b++) {
+      const way = town.route(a, b)
+      expect(way).not.toBeNull()
+      expect(way![0]).toEqual(town.stops[a])
+      expect(way![way!.length - 1]).toEqual(town.stops[b])
+    }
+  })
+})
+
+describe('cheese in rations', () => {
+  it('converts every store of cheese once, at 15 rations to the old unit', () => {
+    const s = setup()
+    s.villages.v_ann.goods.cheese = 4
+    delete s.cheeseRations
+    apply(s, world, { t: 'tick', id: 'ch1', at: '2026-11-23T04:00:00.000Z', playerId: 'ann', date: '2026-11-23' })
+    expect(s.cheeseRations).toBe(true)
+    expect(s.villages.v_ann.goods.cheese).toBeGreaterThan(45) // 4 x 15, less what was eaten
+    const after = s.villages.v_ann.goods.cheese!
+    apply(s, world, { t: 'tick', id: 'ch2', at: '2026-11-23T05:00:00.000Z', playerId: 'ann', date: '2026-11-23' })
+    expect(s.villages.v_ann.goods.cheese!).toBeLessThanOrEqual(after) // not multiplied again
+  })
+})
+
+describe('salt, one pinch to a ration', () => {
+  it('converts the salt in store with the cheese, once', () => {
+    const s = setup()
+    s.villages.v_ann.goods.salt = 2
+    delete s.cheeseRations
+    apply(s, world, { t: 'tick', id: 'sa1', at: '2026-11-23T04:00:00.000Z', playerId: 'ann', date: '2026-11-23' })
+    expect(s.villages.v_ann.goods.salt).toBeCloseTo(2 * SALT_PER_OLD, 0)
+  })
+
+  it('a dairy uses a pinch of salt for each ration of cheese, and no more cheese than the salt allows', () => {
+    const dairy = BUILDINGS.dairy
+    expect(dairy.consumes!.salt).toBe(dairy.produces!.cheese) // 1:1
+    expect(FOOD.cheese!.value).toBe(1)
+  })
+
+  it('the smokehouse cures game with salt, a pinch to the ration, into food that keeps', () => {
+    const cure = BUILDINGS.smokehouse.recipes!.find((r) => r.id === 'cure')!
+    expect(cure.consumes.salt).toBe(cure.produces.cured_meat)
+    expect(FOOD.cured_meat!.keeps).toBe(true)
+    // game 2 units is 20 rations fresh; 18 rations cured (like smoking: a little is lost)
+    expect(cure.consumes.game! * FOOD.game!.value).toBeGreaterThan(cure.produces.cured_meat!)
   })
 })

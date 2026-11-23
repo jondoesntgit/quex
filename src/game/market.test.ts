@@ -69,18 +69,18 @@ describe('barter', () => {
   it('accepts a good enough offer, moves the goods, and empties their pack', () => {
     const s = setup()
     const v = village(s)
-    v.goods = { cheese: 40, bread: 40 }
+    v.goods = { cheese: 600, bread: 40 }
     const m = merchants(world, s, v, MON).find((x) => x.kind === 'pedlar')!
     const [g, n] = Object.entries(m.wares)[0] as [Good, number]
     const at = `${MON}T12:00:00Z`
     expect(validate(s, world, barter(at, 'pedlar', { cheese: 1 }, { [g]: n }))).toMatch(/won't take|can't carry/)
     // enough cheese to pay, but not so much they can't carry it
     let k = 1
-    while (!weigh(m, { cheese: k }, { [g]: n }).accept && k < 40) k++
+    while (!weigh(m, { cheese: k }, { [g]: n }).accept && k < 600) k++
     expect(validate(s, world, barter(at, 'pedlar', { cheese: k }, { [g]: n }))).toBeNull()
     apply(s, world, barter(at, 'pedlar', { cheese: k }, { [g]: n }))
     expect(v.goods[g]).toBe(n)
-    expect(v.goods.cheese).toBe(40 - k)
+    expect(v.goods.cheese).toBe(600 - k)
     expect(merchants(world, s, v, MON).find((x) => x.kind === 'pedlar')!.wares[g]).toBeUndefined()
     // they're back with a fresh pack the next day
     expect(merchants(world, s, v, addDays(MON, 1)).find((x) => x.kind === 'pedlar')).toBeTruthy()

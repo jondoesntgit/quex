@@ -6,6 +6,7 @@ import { validate } from '../game/reducer'
 import type { Player } from '../game/types'
 import { eventId, type Game } from '../app/store'
 import { Icon } from './Icon'
+import { fmtLb, stepOf } from '../game/units'
 
 const n1 = (x: number) => (Math.round(x * 10) / 10).toString()
 /** A worth in coin: "0.25 copper", "4 copper", "1.2 silver". */
@@ -57,7 +58,7 @@ export function Market({ game, p }: { game: Game; p: Player }) {
                   <button className="btn" disabled={!wares.length} onClick={() => setOpen(x.kind)}>Trade</button>
                 </div>
                 <div className="muted">{wares.length ? wares.map(([g, n]) => `${n} ${GOOD_LABEL[g].toLowerCase()}`).join(', ') : 'Sold out for today.'}</div>
-                <div className="muted">Carries up to {x.cap} weight · wants {x.wants.map((g) => GOOD_LABEL[g].toLowerCase()).join(', ')}</div>
+                <div className="muted">Carries up to {fmtLb(x.cap)} · wants {x.wants.map((g) => GOOD_LABEL[g].toLowerCase()).join(', ')}</div>
               </li>
             )
           })}
@@ -81,9 +82,9 @@ function Barter({ game, p, m, onBack }: { game: Game; p: Player; m: Merchant; on
   const theirs = Object.entries(m.wares) as [Good, number][]
   const mine = (Object.entries(v.goods) as [Good, number][]).filter(([, n]) => n >= 1)
   const step = (set: (g: Goods) => void, g: Goods, x: Good, d: number, max: number) =>
-    set({ ...g, [x]: Math.max(0, Math.min(max, (g[x] ?? 0) + d)) })
+    set({ ...g, [x]: Math.max(0, Math.min(max, (g[x] ?? 0) + d * stepOf(x))) })
   const pct = deal.asked > 0 ? Math.min(1, deal.offered / deal.asked) : 0
-  const verdict = !deal.fits ? `Too heavy: they can carry ${m.cap}, and that leaves them with ${n1(deal.load)}.`
+  const verdict = !deal.fits ? `Too heavy: they can carry ${fmtLb(m.cap)}, and that leaves them with ${fmtLb(deal.load)}.`
     : !deal.asked ? 'Pick something from their pack.'
     : deal.accept ? (deal.offered > deal.asked * 1.5 ? "A generous offer! They'd gladly accept." : "They'd accept.")
     : deal.offered === 0 ? 'Offer something from your stores.'
@@ -106,7 +107,7 @@ function Barter({ game, p, m, onBack }: { game: Game; p: Player; m: Merchant; on
       {theirs.length === 0 && <p className="muted">Sold out for today.</p>}
       {theirs.map(([g, n]) => (
         <div key={g} className="row barter-row">
-          <span className="barter-label"><Icon name={g} /> <span>{GOOD_LABEL[g]} <span className="muted">×{n}</span><small className="muted">{cu(askFor(m, g))} each · weight {WEIGHT[g]}</small></span></span>
+          <span className="barter-label"><Icon name={g} /> <span>{GOOD_LABEL[g]} <span className="muted">×{n}</span><small className="muted">{cu(askFor(m, g) * stepOf(g))} {stepOf(g) > 1 ? `per ${stepOf(g)}` : 'each'} · {WEIGHT[g]} lb each</small></span></span>
           <span className="row stepper">
             <button className="btn icon" onClick={() => step(setTake, take, g, -1, n)}>−</button>
             <b className="qty">{take[g] ?? 0}</b>
@@ -121,7 +122,7 @@ function Barter({ game, p, m, onBack }: { game: Game; p: Player; m: Merchant; on
         const wanted = m.wants.includes(g)
         return (
           <div key={g} className="row barter-row">
-            <span className="barter-label"><Icon name={g} /> <span>{GOOD_LABEL[g]} <span className="muted">×{max}</span>{wanted && <span className="want"> wanted</span>}<small className="muted">{cu(bidFor(m, g))} each · weight {WEIGHT[g]}</small></span></span>
+            <span className="barter-label"><Icon name={g} /> <span>{GOOD_LABEL[g]} <span className="muted">×{max}</span>{wanted && <span className="want"> wanted</span>}<small className="muted">{cu(bidFor(m, g) * stepOf(g))} {stepOf(g) > 1 ? `per ${stepOf(g)}` : 'each'} · {WEIGHT[g]} lb each</small></span></span>
             <span className="row stepper">
               <button className="btn icon" onClick={() => step(setGive, give, g, -1, max)}>−</button>
               <b className="qty">{give[g] ?? 0}</b>
@@ -136,7 +137,7 @@ function Barter({ game, p, m, onBack }: { game: Game; p: Player; m: Merchant; on
           <span className="muted">You offer {cu(deal.offered)}</span>
           <span className="muted">They ask {cu(deal.asked)}</span>
         </div>
-        <div className="muted">Their load after the trade: {n1(deal.load)} / {m.cap}</div>
+        <div className="muted">Their load after the trade: {fmtLb(deal.load)} of {fmtLb(m.cap)}</div>
         <p className={deal.accept ? 'deal-yes' : 'deal-no'}>{verdict}</p>
       </div>
       <button className="btn primary" disabled={!deal.accept} onClick={trade}>Trade</button>

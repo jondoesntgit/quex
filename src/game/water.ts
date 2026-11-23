@@ -45,14 +45,15 @@ export function clayLeft(world: World, s: GameState, i: number): number | null {
   return n ? Math.max(0, n - (s.clayDug?.[i] ?? 0)) : null
 }
 
-/** Winter: riverbanks, marshes and springs fill up with clay again, and dug-out pits fill with rain. */
+/** Winter: riverbanks, marshes and springs fill up with clay again, and any other pit seeps back one load. */
 export function winterWater(s: GameState, world: World, winterDate: ISODate) {
   if (!s.clayDug || s.clayRenewed === winterDate) return
   s.clayRenewed = winterDate
   for (const k of Object.keys(s.clayDug)) {
     const i = Number(k)
     if (clayRenews(world, i)) delete s.clayDug[i]
-    else if ((clayLeft(world, s, i) ?? 1) < 1 && !s.ponds?.[i]) (s.ponds ??= {})[i] = winterDate
+    else if (s.clayDug[i] > 1) s.clayDug[i] -= 1 // a dug pit seeps back slowly: one load a winter
+    else delete s.clayDug[i]
   }
 }
 

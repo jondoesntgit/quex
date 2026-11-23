@@ -9,7 +9,7 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, DEEPEN_COST, EAT, GOOD_LABEL, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
@@ -26,6 +26,7 @@ import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEn
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
     headsScaled: true,
+    cheeseRations: true,
     worldSeed: world.seed,
     seasonStart,
     players: {},
@@ -303,7 +304,7 @@ export function done(v: Village) {
 }
 
 export function storageCap(v: Village) {
-  return 30 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0)
+  return FOOD_SCALE * (30 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0))
 }
 
 export function foodStock(v: Village, keepsOnly = false) {
@@ -614,7 +615,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       const need = provisionsFor(crew, caravanMinutes(p, v, to, ev.at, world, s))
       if (foodValue(food) + 1e-9 < need) return `Pack food for the road: ${need} worth for ${crew} ${crew === 1 ? 'person' : 'people'}, there and back`
       const cap = caravanCarry(world, s, v, to, crew).cap * (tok.strength >= 1 ? 1 : 0.4)
-      if (weightOf(ev.goods ?? {}) + weightOf(food) > cap + 1e-9) return `Too heavy: this caravan carries at most ${Math.floor(cap)} weight, provisions included`
+      if (weightOf(ev.goods ?? {}) + weightOf(food) > cap + 1e-9) return `Too heavy: this caravan carries at most ${Math.floor(cap)} lb (${Math.round(cap / 100) / 10} wagon loads), provisions included`
       const all = { ...ev.goods }
       for (const [g, n] of Object.entries(food)) all[g as Good] = (all[g as Good] ?? 0) + (n ?? 0)
       if (!hasGoods(v, all)) return 'Not enough goods'
@@ -699,7 +700,10 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
 }
 
 export function fmtGoods(g: Goods, k = 1) {
-  return Object.entries(g).map(([n, q]) => `${round2((q ?? 0) * k)} ${n.replace('_', ' ')}`).join(', ')
+  return Object.entries(g).map(([n, q]) => {
+    const f = FOOD[n as Good]
+    return f ? `${Math.round((q ?? 0) * k * f.value)} rations of ${n.replace('_', ' ')}` : `${round2((q ?? 0) * k)} ${n.replace('_', ' ')}`
+  }).join(', ')
 }
 
 // ------------------------------------------------------------------ apply
@@ -717,6 +721,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   crewsHome(s, ev.at)
   givePurses(s, ev.at)
   convertToCities(s, world, ev.at)
+  convertCheese(s, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
   if (err) {
@@ -947,6 +952,28 @@ function convertToCities(s: GameState, world: World, at: string) {
   }
 }
 
+/** From this moment cheese is counted in rations (one person's cheese for a day), 15 to the old unit, and salt
+ *  in pinches, one to a ration (SALT_PER_OLD to the old unit). Every store, caravan and band of troops is
+ *  converted once. */
+export const CHEESE_FROM = '2026-11-23T02:00:00.000Z'
+const CHEESE_RATIONS = 15
+function convertCheese(s: GameState, at: string) {
+  if (s.cheeseRations || at < CHEESE_FROM) return
+  const x = (g: Goods | undefined) => {
+    if (g?.cheese) g.cheese = round2(g.cheese * CHEESE_RATIONS)
+    if (g?.salt) g.salt = round2(g.salt * SALT_PER_OLD)
+  }
+  for (const v of Object.values(s.villages)) {
+    x(v.goods)
+    for (const a of v.arrivals ?? []) x(a.goods)
+    for (const t of Object.values(v.trade?.took ?? {})) x(t)
+    for (const t of Object.values(v.trade?.got ?? {})) x(t)
+  }
+  for (const c of s.caravans ?? []) x(c.goods)
+  for (const ds of Object.values(s.garrisons ?? {})) for (const d of ds) x(d.food)
+  s.cheeseRations = true
+}
+
 function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>) {
   const vid = 'v_' + ev.playerId
   const p: Player = {
@@ -1047,7 +1074,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     }
     case 'gather': {
       const g = GATHER[land0.resource!]!
-      let n = round2(3 * k)
+      let n = gatherAmount(g, k)
       if (ev.at >= DEPLETION_FROM) {
         const left = leftAt(world, s, i)
         if (left && left.good === g) { n = round2(Math.min(n, left.surface)); dig(s, i, n) }
@@ -1222,7 +1249,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       powder -= cannon * 2
       const muskets = Math.min(Math.floor(g.musket ?? 0), Math.floor(powder))
       const walls = wallsAfter(v.goods, cannon)
-      const food = Math.min(6, (v.goods.bread ?? 0) + (v.goods.cheese ?? 0) + (v.goods.smoked_fish ?? 0))
+      const food = Math.min(6, (v.goods.bread ?? 0) / foodUnit('bread') + (v.goods.cheese ?? 0) / foodUnit('cheese') + (v.goods.smoked_fish ?? 0))
       const pw = (4 + (people(v) + troopsAt(s, v)) * 0.5 / HEADS + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
         Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + food * 0.5 + muskets * 4 + cannon * 6) * (k >= 1 ? 1 : 0.6)
       const defend = state.strength * walls
@@ -1233,7 +1260,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       if (muskets) spent.gunpowder = (spent.gunpowder ?? 0) + muskets
       if (v.goods.ram) spent.ram = Math.min(Math.floor(v.goods.ram), 3)
       if (v.goods.siege_tower) spent.siege_tower = Math.floor(v.goods.siege_tower)
-      for (const f of ['bread', 'cheese', 'smoked_fish'] as const) if ((v.goods[f] ?? 0) >= 1) spent[f] = (spent[f] ?? 0) + 1
+      for (const f of ['bread', 'cheese', 'smoked_fish'] as const) if ((v.goods[f] ?? 0) >= foodUnit(f)) spent[f] = (spent[f] ?? 0) + foodUnit(f)
       addGoods(v, spent, -1)
       const kit = [cannon && `${cannon} cannon`, muskets && `${muskets} muskets`, spent.ram && `${spent.ram} rams`, spent.siege_tower && `${spent.siege_tower} siege towers`].filter(Boolean).join(', ')
       if (win) {
@@ -1253,14 +1280,14 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const g = gearWith(s, v)
       const dungeon = s.dungeons?.[i]
       const lair = dungeon ? null : s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)!
-      const food = Math.min(6, (g.bread ?? 0) + (g.cheese ?? 0) + (g.smoked_fish ?? 0))
+      const food = Math.min(6, (g.bread ?? 0) / foodUnit('bread') + (g.cheese ?? 0) / foodUnit('cheese') + (g.smoked_fish ?? 0))
       const outfitter = done(v).some((b) => b.type === 'outfitter') ? 5 : 0
       let pw = 4 + (people(v) + troopsAt(s, v)) * 0.5 / HEADS + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
         Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + outfitter + food * 0.5
       pw *= k >= 1 ? 1 : 0.6
       const win = rng() < pw / (pw + (dungeon ?? lair!).strength)
       for (const f of ['bread', 'cheese', 'smoked_fish'] as const) {
-        const take = Math.min(v.goods[f] ?? 0, 1)
+        const take = Math.min(v.goods[f] ?? 0, foodUnit(f))
         if (take) addGoods(v, { [f]: -take })
       }
       if (dungeon) {
@@ -1412,7 +1439,7 @@ export function route(world: World, s: GameState, from: Village, to: Village) {
 
 /** What a caravan carries, by weight: what its people carry on their backs (CARRY_EACH each), plus
  *  pack mules or ox carts (which need roads to roll on); paved roads let it carry up to half again. */
-export const CARRY = { mules: 60, carts: 100 } as const
+export const CARRY = { mules: 2000, carts: 4000 } as const
 export function caravanCarry(world: World, s: GameState, from: Village, to: Village, crew = 1) {
   // animals need a stable hand to keep them
   const has = (t: string) => done(from).some((b) => b.type === t && staffing(from, b) > 0)

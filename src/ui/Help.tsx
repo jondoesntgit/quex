@@ -67,10 +67,11 @@ export function Help({ onClose }: { onClose: () => void }) {
           <summary>Your village</summary>
           <p>
             You found your village by tapping a spot on the map. Your land is the hexes within two of the village
-            (yellow border); outposts add more. Villagers need food (a tenth of a unit each a day), homes to live in,
+            (yellow border); outposts add more. Villagers eat one ration of food each a day, homes to live in,
             and good morale to grow. The <b>Village</b> tab shows people, defence, food in store and goods.
           </p>
           <ul>
+            <li><b>Units:</b> a <b>wagon load</b> is 1,000 lb, and timber, stone, clay, bricks and ore are counted in them. Food is counted in <b>rations</b>, one person's food for a day (2 to 4 lb: a wagon holds about 500 of grain). Salt is counted in pinches, one to a ration of cheese or cured meat. Metals are counted in ingots (50 lb each, silver 12); caravans and merchants carry by real weight.</li>
             <li>Buildings produce every night. How much depends on how well your day went (a good day means a good harvest).</li>
             <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more. Baking and smoking don't make more food: 3 grain bake 2 loaves (the same food, but bread lifts morale and weighs half as much), and smoking dries fish out (2 fish make 1.6) so it keeps through winter.</li>
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
@@ -132,7 +133,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li><b>Speed:</b> overland, a caravan takes about four hours a hex, so a far neighbour is days away. A dirt road is three times as fast, and a paved one three times faster again (nine times in all).</li>
             <li><b>Work it</b> (small task): tap one of your buildings to put in an extra shift. It makes a night's worth right away, if it has what it needs. Crops grow in their own time. The Village tab shows what each good will gain or lose tonight; rare finds show as a range, like 0 to 1.</li>
             <li><b>Clay</b> for bricks: gather a clay deposit, or <b>Dig clay</b> (small task) from a riverbank, a marsh, or a pit in the plains or a hill valley. Some mountains hide a small spring with white kaolin clay; tap a mountain hex to find one. Riverbanks, marshes and springs fill up again every winter; a pit, once dug out, is gone. The pedlar always brings some timber and clay to a village that's short.</li>
-            <li><b>Water:</b> sheep pens, dairies and mule stables need fresh water within a hex (a river, a marsh, a mountain spring, a pond or a well; the sea is salt). Without it the herd gives half. A dug-out clay pit fills with rain by the next winter and becomes a pond, but ponds dry up on summer days. <b>Dig a well</b> (medium task, 3 stone) for water that never runs dry. Game comes back faster near water too.</li>
+            <li><b>Water:</b> sheep pens, dairies and mule stables need fresh water within a hex (a river, a marsh, a mountain spring, a pond or a well; the sea is salt). Without it the herd gives half. <b>Dig a well</b> (medium task, 3 stone) for water that never runs dry. Game comes back faster near water too.</li>
             <li>Monster lairs (goblins, orcs, trolls, a dragon) grow bolder as villages grow and sometimes raid your stores. A palisade helps.</li>
             <li>An <b>expedition</b> (big action) takes on a lair for loot. Food, metal weapons, leather and an outfitter make it likelier to win.</li>
             <li><b>Lending troops:</b> neighbours can <b>Send troops</b> (medium task) to a village with a palisade, with weapons, armour and food. They wait at the gate until that village takes them in (Village tab) or turns them back. On its walls they help keep raiders off and march on its expeditions, eating only the food they brought; when it runs out, they walk home with their gear. Each palisade holds ten.</li>

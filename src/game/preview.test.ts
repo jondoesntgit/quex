@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { apply, newGame, territoryCells, validate } from './reducer'
 import { outcome, taskText } from './preview'
-import { GOOD_LABEL, type ActionKind } from './data'
+import { FOOD, GOOD_LABEL, type ActionKind } from './data'
 import type { GameEvent, GameState } from './types'
 
 const world = generateWorld('test-seed')
@@ -41,14 +41,15 @@ describe('what the confirmation window promises', () => {
         const ev = act(probe, action, c.col, c.row) as Extract<GameEvent, { t: 'act' }>
         const tok = probe.players.ann.tokens.find((t) => t.id === ev.tokenId)!
         const o = outcome(world, probe, probe.players.ann, action, c.col, c.row, {}, { size: tok.size, strength: tok.strength }, AT)
-        const m = /^\+([\d.]+) (.+)$/.exec(o.gets[0])
+        const m = /^\+([\d.]+) (?:rations of )?(.+)$/.exec(o.gets[0])
         expect(m, o.gets[0]).toBeTruthy()
         const before = structuredClone(probe)
         apply(probe, world, ev)
         // the good the window names (by its label), and only that one
         const g = good ?? Object.keys(GOOD_LABEL).find((x) => GOOD_LABEL[x as keyof typeof GOOD_LABEL].toLowerCase() === m![2])!
         expect(g, `a good called ${m![2]}`).toBeTruthy()
-        expect(gain(before, probe, g)).toBeCloseTo(Number(m![1]), 2)
+        const rations = /rations of/.test(o.gets[0]) ? FOOD[g as keyof typeof FOOD]!.value : 1 // food is shown in rations
+        expect(gain(before, probe, g) * rations).toBeCloseTo(Number(m![1]), 0)
         expect(o.spends[0]).toBe('1 small action')
       }
     })
@@ -78,7 +79,7 @@ describe('what the confirmation window promises', () => {
     expect(half.gets[0]).toMatch(/half-built/)
   })
 
-  it('says a dug-out pit becomes a pond, and a riverbank only waits for winter', () => {
+  it('says a pit seeps back slowly, and a riverbank only waits for winter', () => {
     const s = setup()
     const v = s.villages.v_ann
     const clay = spots(s, 'dig_clay')
@@ -88,7 +89,7 @@ describe('what the confirmation window promises', () => {
       const left = (outcome(world, probe, probe.players.ann, 'dig_clay', c.col, c.row, {}, { size: 'small', strength: 1 }, AT))
       return left.notes.join(' ')
     })
-    expect(notes.every((t) => /left in this ground|until winter|pond/.test(t))).toBe(true)
+    expect(notes.every((t) => /left in this ground|until winter|seeps back/.test(t))).toBe(true)
     expect(v).toBeTruthy()
   })
 

@@ -8,7 +8,7 @@ export const GOODS = [
   // ores (copper_ore is malachite, iron_ore hematite, silver_ore galena: the ids predate the minerals)
   'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore',
   // processed
-  'bread', 'smoked_fish', 'cheese', 'bricks', 'charcoal', 'planks', 'leather', 'cloth',
+  'bread', 'smoked_fish', 'cheese', 'cured_meat', 'bricks', 'charcoal', 'planks', 'leather', 'cloth',
   // what immigrants carry on the road (see immigrants.ts)
   'biscuit', 'dried_peas', 'honey',
   'copper', 'iron', 'bronze', 'steel', 'silver',
@@ -24,7 +24,7 @@ export const GOOD_LABEL: Record<Good, string> = {
   grain: 'Grain', fish: 'Fish', timber: 'Timber', stone: 'Stone', clay: 'Clay', tin: 'Tin',
   wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game',
   copper_ore: 'Malachite', chalcopyrite: 'Chalcopyrite', limonite: 'Limonite', iron_ore: 'Hematite', magnetite: 'Magnetite', silver_ore: 'Galena', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
-  biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
+  cured_meat: 'Cured meat', biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
   cheese: 'Cheese', bricks: 'Bricks', charcoal: 'Charcoal', planks: 'Planks', leather: 'Leather',
   cloth: 'Cloth', copper: 'Copper', iron: 'Iron', bronze: 'Bronze', steel: 'Steel',
   relic: 'Relic', dragon_scale: 'Dragon scale',
@@ -32,19 +32,40 @@ export const GOOD_LABEL: Record<Good, string> = {
   cannon: 'Cannon', ram: 'Battering ram', siege_tower: 'Siege tower',
 }
 
-/** Food value per unit. Preserved foods keep through winter; fresh ones spoil. */
+/** Food is counted in rations: one ration feeds one person for a day (EAT = 1). Bulk goods are counted in
+ *  wagon loads, so a wagon load of grain is FOOD_SCALE rations, and so on for the rest by `value`. */
+export const FOOD_SCALE = 10
+/** Rations in a wagon load of each food. Preserved foods keep through winter; fresh ones spoil. */
 export const FOOD: Partial<Record<Good, { value: number; keeps: boolean }>> = {
-  grain: { value: 1, keeps: true },
-  bread: { value: 1.5, keeps: false },
-  fish: { value: 1, keeps: false },
-  smoked_fish: { value: 1.2, keeps: true },
-  cheese: { value: 1.5, keeps: true },
-  biscuit: { value: 1.2, keeps: true },
-  dried_peas: { value: 1, keeps: true },
-  honey: { value: 2, keeps: true },
-  berries: { value: 0.8, keeps: false },
-  game: { value: 1, keeps: false },
+  grain: { value: 1 * FOOD_SCALE, keeps: true },
+  bread: { value: 1.5 * FOOD_SCALE, keeps: false },
+  fish: { value: 1 * FOOD_SCALE, keeps: false },
+  smoked_fish: { value: 1.2 * FOOD_SCALE, keeps: true },
+  cheese: { value: 1, keeps: true }, // counted in rations: one unit is one person's cheese for a day
+  cured_meat: { value: 1, keeps: true }, // salted game, in rations too
+  biscuit: { value: 1.2 * FOOD_SCALE, keeps: true },
+  dried_peas: { value: 1 * FOOD_SCALE, keeps: true },
+  honey: { value: 2 * FOOD_SCALE, keeps: true },
+  berries: { value: 0.8 * FOOD_SCALE, keeps: false },
+  game: { value: 1 * FOOD_SCALE, keeps: false },
 }
+
+/** Salt is counted so that one unit salts one ration of food (a pinch, about a twentieth of a pound). Before the
+ *  change a unit of salt was this many of them. */
+export const SALT_PER_OLD = 112.5
+/** What a gather action brings in per point of effort (3 a small task), where a unit isn't the usual size. */
+export const GATHER_YIELD: Partial<Record<Good, number>> = { salt: SALT_PER_OLD }
+export const gatherAmount = (g: Good, k: number) => Math.round(3 * k * (GATHER_YIELD[g] ?? 1) * 100) / 100
+
+/** How many stored units make what the fighting rules count as one unit of food (cheese is counted in rations). */
+export const FOOD_UNIT: Partial<Record<Good, number>> = { cheese: 15 }
+export const foodUnit = (g: Good) => FOOD_UNIT[g] ?? 1
+
+/** Goods counted in wagon loads (what one wagon carries), so the numbers mean something. Metals, cloth and
+ *  the like are counted in pieces. */
+export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
+export const isBulk = (g: Good) => BULK.includes(g)
+export const BULK_UNIT = 'wagon loads'
 
 /** How each ore is worked into metal: where, with what, and how much comes out.
  *  A station takes up to STATION_RATE ore a night (at a full day's work), the
@@ -109,8 +130,8 @@ export type BuildingId =
 /** People are counted one by one. Until the conversion at CITY_FROM a "person" was a household of this
  *  many: every per-person number is derived from it, so the economy stays in balance. */
 export const HEADS = 5
-/** Food one person eats a day. */
-export const EAT = 0.5 / HEADS
+/** Food (rations) one person eats a day. */
+export const EAT = 1
 
 export interface BuildingDef {
   id: BuildingId
@@ -143,6 +164,7 @@ export interface BuildingDef {
   popCap?: number
   /** no longer built (replaced); existing ones carry on */
   legacy?: boolean
+  /** wagon loads of food it holds (FOOD_SCALE rations each) */
   storage?: number
   defence?: number
   morale?: number
@@ -169,8 +191,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   irrigation: B({ id: 'irrigation', name: 'Irrigation', role: 'farm', size: 'big', cost: { stone: 4, copper: 1 }, terrain: ['grass', 'meadow'], produces: { grain: 4 }, crop: true, blurb: 'Ditches from the river: a big yield jump.' }),
   // port
   shore_fishery: B({ id: 'shore_fishery', name: 'Shore fishery', role: 'port', size: 'medium', cost: { timber: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 2.5 }, blurb: 'Spears, lines and shellfish.' }),
-  smokehouse: B({ id: 'smokehouse', name: 'Smokehouse', role: 'port', size: 'medium', cost: { timber: 4, stone: 2 }, consumes: { fish: 2, timber: 0.5 }, produces: { smoked_fish: 1.6 }, blurb: 'Smoking dries fish out (2 fish make 1.6), but smoked fish keeps through winter.' }),
-  salt_pans: B({ id: 'salt_pans', name: 'Salt pans', role: 'port', size: 'medium', cost: { stone: 3 }, terrain: ['beach', 'desert'], produces: { salt: 1.5 }, blurb: 'Salt preserves food and trades well.' }),
+  smokehouse: B({ id: 'smokehouse', name: 'Smokehouse', role: 'port', size: 'medium', cost: { timber: 4, stone: 2 }, consumes: { fish: 2, timber: 0.5 }, produces: { smoked_fish: 1.6 }, blurb: 'Smoking dries fish out (2 fish make 1.6), but smoked fish keeps through winter. Put in an order to cure game with salt instead: cured meat keeps too, a pinch of salt to each ration.',
+    recipes: [
+      { id: 'smoke', name: 'Smoked fish', consumes: { fish: 2, timber: 0.5 }, produces: { smoked_fish: 1.6 } },
+      { id: 'cure', name: 'Cured meat', consumes: { game: 2, salt: 18, timber: 0.5 }, produces: { cured_meat: 18 } },
+    ] }),
+  salt_pans: B({ id: 'salt_pans', name: 'Salt pans', role: 'port', size: 'medium', cost: { stone: 3 }, terrain: ['beach', 'desert'], produces: { salt: 1.5 * SALT_PER_OLD }, blurb: 'Salt preserves food (one pinch to a ration) and trades well.' }),
   docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 4 }, blurb: 'Boats reach deeper water.' }),
   shipyard: B({ id: 'shipyard', name: 'Shipyard', role: 'port', size: 'big', cost: { planks: 10, iron: 3, cloth: 2 }, nearTerrain: ['shallow', 'ocean'], blurb: 'NPC trade at the best rates; ships for explorers.' }),
   // mining
@@ -192,7 +218,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   sawmill: B({ id: 'sawmill', name: 'Sawmill', role: 'forestry', size: 'big', cost: { timber: 6, copper: 2 }, consumes: { timber: 2 }, produces: { planks: 2 }, blurb: 'Any metal blade works; better metal, more planks.' }),
   // herding
   pen: B({ id: 'pen', name: 'Sheep pen', role: 'herding', size: 'medium', cost: { timber: 3 }, terrain: ['hills', 'meadow', 'savannah', 'grass'], produces: { wool: 2, game: 0.5 }, blurb: 'Goats and sheep: milk, meat, wool.' }),
-  dairy: B({ id: 'dairy', name: 'Dairy', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, produces: { cheese: 1.5 }, consumes: { salt: 0.2 }, blurb: 'Cheese keeps, so it trades well.' }),
+  dairy: B({ id: 'dairy', name: 'Dairy', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, produces: { cheese: 22.5 }, consumes: { salt: 22.5 }, blurb: 'Cheese keeps, so it trades well. Each ration takes a pinch of salt.' }),
   stable: B({ id: 'stable', name: 'Mule stable', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, blurb: 'Pack mules: caravans carry twice the weight.' }),
   cart_shed: B({ id: 'cart_shed', name: 'Cart shed', role: 'herding', size: 'medium', cost: { planks: 4, timber: 2 }, needs: 'stable', blurb: 'Ox carts: caravans carry far more, where there are roads to roll on.' }),
   // powder and siege: the end of the ladder

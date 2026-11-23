@@ -1,7 +1,7 @@
 /** The note shown when newcomers arrive: who they are, where from, and what they brought for the road.
  *  Shown once per arrival (the newest first, then any older ones not yet read); the log keeps a line. */
 import { useState } from 'react'
-import { GOOD_LABEL, HEADS, type Good } from '../game/data'
+import { FOOD, GOOD_LABEL, HEADS, type Good } from '../game/data'
 import { TRAVEL_DAYS } from '../game/immigrants'
 import { BASE_CAP } from '../game/reducer'
 import { HOMES } from '../game/city'
@@ -43,7 +43,7 @@ export function Arrivals({ game, p }: { game: Game; p: Player }) {
         )}
         <h3 style={{ margin: '8px 0 4px', fontWeight: 400 }}>They brought food for {TRAVEL_DAYS} days</h3>
         <ul className="arrival-goods">
-          {goods.map(([g, n]) => <li key={g}><Icon name={g} size={32} /> <b>{amount(n)}</b> {GOOD_LABEL[g].toLowerCase()}{g === 'grain' ? ' (seed grain: it will grow if sown)' : ''}</li>)}
+          {goods.map(([g, n]) => <li key={g}><Icon name={g} size={32} /> <b>{FOOD[g] ? `${Math.round(n * FOOD[g]!.value)} rations of` : amount(n)}</b> {GOOD_LABEL[g].toLowerCase()}{g === 'grain' ? ' (seed grain: it will grow if sown)' : ''}</li>)}
         </ul>
         <p className="muted" style={{ margin: '4px 0 0' }}>So the stores aren't emptied the day they arrive. After that they eat with everyone else.</p>
         <div className="confirm-buttons"><button className="btn primary" onClick={done} autoFocus>Welcome them</button></div>

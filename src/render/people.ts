@@ -29,6 +29,7 @@ import { isSabbath, playerDate } from '../game/calendar'
 import { hasTrees, MOUNTAIN_TERRAIN } from '../world/land'
 import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
 import { bridgeVia } from './waterways'
+import { hexAt, SQ, townOf, type Town } from '../game/city'
 
 /** Each village dresses in its own colour (once by role; now by village). */
 const SHIRTS = [0xe8c040, 0x4878d8, 0x9a9ab0, 0x3c8c3c, 0xe0e0d0, 0xc04878, 0xd87838, 0x70b0b8]
@@ -179,6 +180,15 @@ interface Walker {
   phase: number // offsets the music so a band doesn't play in lockstep
 }
 
+/** A villager walking door to door through a city (see city.ts townOf). */
+type Gp = [number, number]
+interface Folk {
+  g: Graphics; vid: string; shirt: number; skin: number; rng: () => number
+  town: Town; at: number; path: Gp[]; seg: number; t: number; wait: number
+}
+/** How many villagers a village shows: one for every ten people (at least one, at most 20). */
+export const folkFor = (population: number) => Math.min(20, Math.max(1, Math.ceil(population / 10)))
+
 interface Puff { g: Graphics; cell: number; x: number; y: number; t: number }
 
 interface Plan {
@@ -191,6 +201,8 @@ interface Plan {
 
 export class People {
   private walkers: Walker[] = []
+  private folk: Folk[] = []
+  private towns = new Map<string, { key: string; town: Town }>()
   private sig = ''
   private world!: World
   private W: number
@@ -215,13 +227,13 @@ export class People {
   }
 
   /** Graphics owned by the crowd (MapView keeps these when it redraws). */
-  nodes() { return [...this.walkers.map((w) => w.g), ...this.puffs.map((p) => p.g)] }
+  nodes() { return [...this.walkers.map((w) => w.g), ...this.folk.map((f) => f.g), ...this.puffs.map((p) => p.g)] }
 
   /** Put the crowd into the map container and take its painter's ranks. */
   attach(parent: Container, rank: Int32Array) {
     this.rank = rank
     this.parent = parent
-    for (const w of this.walkers) if (w.g.parent !== parent) parent.addChild(w.g)
+    for (const w of [...this.walkers, ...this.folk]) if (w.g.parent !== parent) parent.addChild(w.g)
     for (const p of this.puffs) if (p.g.parent !== parent) parent.addChild(p.g)
   }
 
@@ -239,11 +251,13 @@ export class People {
     const idx = (col: number, row: number) => row * world.width + col
     this.hubs = new Set(vs.flatMap((v) => [idx(v.col, v.row), ...v.outposts.map((o) => idx(o.col, o.row)), ...v.buildings.map((b) => idx(b.col, b.row))]))
     this.vias.clear()
-    const sig = vs.map((v) => `${v.id}:${Math.floor(v.population)}:${v.buildings.length}:${v.outposts.length}`).join('|')
+    const sig = vs.map((v) => `${v.id}:${folkFor(v.population)}:${v.buildings.length}:${v.outposts.length}:${(v.homes ?? []).length}:${(v.city ?? []).length}`).join('|')
     if (sig !== this.sig) {
       this.sig = sig
       for (const w of this.walkers) w.g.destroy()
       this.walkers = []
+      for (const f of this.folk) f.g.destroy()
+      this.folk = []
       for (const v of vs) this.spawn(world, v, revealed)
       this.sabbath.clear() // fresh crowd: hand out Sabbath plans again
     } else if (roadsChanged) {
@@ -299,7 +313,12 @@ export class People {
     const plan = this.planFor(world, v, revealed)
     this.plans.set(v.id, plan)
     const { home, blocked } = plan
-    const n = Math.min(10, Math.max(2, Math.floor(v.population / 2) + Math.floor(v.buildings.length / 2)))
+    // one villager for every ten people: a third of them out on the land, the rest in the city
+    const all = folkFor(v.population)
+    const town = this.townFor(world, v)
+    const inTown = town.stops.length >= 2 ? Math.round(all * 2 / 3) || (all === 1 ? 1 : 0) : 0
+    const n = all - inTown
+    for (let k = 0; k < inTown; k++) this.spawnFolk(v, town, k)
     for (let k = 0; k < n; k++) {
       const r = mulberry32(hashString(`${v.id}-${k}`))
       const w: Walker = {
@@ -313,6 +332,56 @@ export class People {
       // start somewhere along the route so they don't all leave home together
       w.t = r() * w.end
     }
+  }
+
+  private townFor(world: World, v: Village): Town {
+    const key = `${(v.homes ?? []).length}:${(v.city ?? []).length}`
+    const had = this.towns.get(v.id)
+    if (had && had.key === key) return had.town
+    const town = townOf(world, v)
+    this.towns.set(v.id, { key, town })
+    return town
+  }
+
+  private spawnFolk(v: Village, town: Town, k: number) {
+    const r = mulberry32(hashString(`${v.id}-town-${k}`))
+    const at = Math.floor(r() * town.stops.length)
+    this.folk.push({ g: new Graphics(), vid: v.id, shirt: shirtFor(v.id), skin: SKIN[Math.floor(r() * SKIN.length)], rng: r, town, at, path: [town.stops[at]], seg: 0, t: 0, wait: r() * 6 })
+    const f = this.folk[this.folk.length - 1]
+    if (this.parent) this.parent.addChild(f.g)
+  }
+
+  /** Walk the folk on: pause at a door, then off along the lanes to another. */
+  private stepFolk(f: Folk, dt: number) {
+    const v = this.state?.villages[f.vid]
+    if (!v) return
+    if (f.wait > 0) {
+      f.wait -= dt
+      if (f.wait <= 0) {
+        const to = Math.floor(f.rng() * f.town.stops.length)
+        const way = to === f.at ? null : f.town.route(f.at, to)
+        if (way) { f.path = way; f.seg = 0; f.t = 0; f.at = to } else f.wait = 1 + f.rng() * 3
+      }
+    } else {
+      let move = dt * 14
+      while (move > 0 && f.seg < f.path.length - 1) {
+        const [a, b] = [f.path[f.seg], f.path[f.seg + 1]], L = Math.hypot(b[0] - a[0], b[1] - a[1])
+        if (f.t + move < L) { f.t += move; move = 0 } else { move -= L - f.t; f.seg++; f.t = 0 }
+      }
+      if (f.seg >= f.path.length - 1) f.wait = 2 + f.rng() * 6
+    }
+    const a = f.path[f.seg], b = f.path[Math.min(f.seg + 1, f.path.length - 1)]
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const walking = f.wait <= 0
+    const g: [number, number] = walking ? [a[0] + (b[0] - a[0]) * f.t / L, a[1] + (b[1] - a[1]) * f.t / L] : f.path[f.path.length - 1]
+    const i = hexAt(this.world, v, g)
+    if (i < 0) return
+    const o = hexToPixel(v.col, v.row, this.W)
+    const x = Math.round(o.x + g[0]), y = Math.round(o.y + g[1] * SQ - this.world.cells[i].tier * this.TP)
+    const r = this.rank[i] ?? -1
+    const zi = r * 4 + 3.5
+    if (f.g.zIndex !== zi) f.g.zIndex = zi
+    this.draw(f, x, y, walking ? 'walk' : 'stand', walking ? Math.floor((f.t + f.seg * 7) / 3) & 1 : 0)
   }
 
   private hubs = new Set<number>()
@@ -632,6 +701,7 @@ export class People {
     for (const p of this.puffs) { p.t += dt; this.drawPuff(p) }
     for (const p of this.puffs.filter((x) => x.t >= PUFF_TIME)) p.g.destroy()
     this.puffs = this.puffs.filter((x) => x.t < PUFF_TIME)
+    for (const f of this.folk) this.stepFolk(f, dt)
     for (const w of this.walkers) {
       let pose: Pose
       // react only with both feet on the ground (not mid-climb or mid-hop)
@@ -824,7 +894,7 @@ export class People {
 
   /** 6×9 px villager, feet at (x, y). Rows top to bottom; o outline, H skin,
    *  S shirt, L legs, T tool. */
-  private draw(w: Walker, x: number, y: number, kind: Pose['kind'], step: number,
+  private draw(w: Pick<Walker, 'g' | 'shirt' | 'skin'>, x: number, y: number, kind: Pose['kind'], step: number,
     talk?: { mirror: boolean; speaking: boolean; topic: number; gesture: number }) {
     let fig = talk ? (talk.gesture ? TALK_B : TALK_A)
       : kind === 'work' ? (step ? WORK_UP : WORK_DOWN)

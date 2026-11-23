@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { apply, caravanCarry, newGame, produce, validate } from './reducer'
 import { HEADS } from './data'
-import { autoJobs, jobs, spare, staffing, stepsFor } from './workers'
+import { CARRY_EACH, autoJobs, jobs, spare, staffing, stepsFor } from './workers'
 import { strongholdsOf, wallsAfter, WALLS } from './strongholds'
 import type { GameEvent, GameState } from './types'
 
@@ -76,7 +76,7 @@ describe('workers', () => {
     expect(send(HEADS, { grain: 3 })).toBeNull()
     expect(v.away).toBe(HEADS)
     expect(spare(v)).toBe(0)
-    expect(caravanCarry(world, s, v, s.villages.v_bob, HEADS).cap).toBe(6)
+    expect(caravanCarry(world, s, v, s.villages.v_bob, HEADS).cap).toBe(HEADS * CARRY_EACH)
   })
 })
 
@@ -114,6 +114,21 @@ describe('workshops and powder', () => {
     expect(made.cannon).toBeGreaterThan(0)
     expect(made.cannonballs).toBeUndefined()
     expect(run(s, { t: 'order', id: 'o2', at: AT, playerId: 'ann', building: 'g', recipe: 'musket' })).toMatch(/can't make/)
+  })
+
+  it('a smokehouse smokes fish, or cures game with a pinch of salt a ration if ordered to', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.buildings.push({ id: 'sm', type: 'smokehouse', col: 0, row: 0, progress: 1 })
+    v.population = 10 * HEADS
+    v.goods = { fish: 20, game: 20, salt: 500, timber: 10 }
+    expect(night(s).smoked_fish).toBeGreaterThan(0)
+    expect(run(s, { t: 'order', id: 'oc', at: AT, playerId: 'ann', building: 'sm', recipe: 'cure' })).toBeNull()
+    const salt = v.goods.salt!
+    const made = night(s)
+    expect(made.cured_meat).toBeGreaterThan(0)
+    expect(made.smoked_fish).toBeUndefined()
+    expect(salt - v.goods.salt!).toBeCloseTo(made.cured_meat!, 1) // one salt for each ration made
   })
 
   it('roasting chalcopyrite gives off sulfur', () => {

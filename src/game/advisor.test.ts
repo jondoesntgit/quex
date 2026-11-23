@@ -57,7 +57,7 @@ describe('the advisor', () => {
   it('makes the case for refined goods', () => {
     expect(refinedGain('wool', 'cloth')).toBeGreaterThan(2)
     expect(refinedGain('copper_ore', 'copper')).toBeGreaterThan(5)
-    expect(refineTips({ grain: 10 })[0]).toMatch(/Bread carries 4× the worth of grain/)
+    expect(refineTips({ grain: 10 })[0]).toMatch(/Bread carries 1\.8× the worth of grain/)
     expect(refineTips({ bread: 10 })).toEqual([])
   })
 })

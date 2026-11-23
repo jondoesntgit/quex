@@ -504,7 +504,7 @@ export class MapView {
         this.cells.addChild(fg)
       }
       // fresh water dug by the villagers: a pond in an old clay pit (dry in summer), or a well
-      // clay dug from ground that doesn't renew: a pit that grows as it's dug, and once dug out, rain will fill it
+      // clay dug from ground that doesn't renew: a pit that grows as it's dug, and once dug out its floor is wet
       const clayTaken = state.clayDug?.[i] ?? 0
       const pit = !state.ponds?.[i] && clayTaken > 0 && !clayRenews(world, i) ? Math.min(1, clayTaken / Math.max(1, clayAt(world, i))) : 0
       if (state.wells?.[i] || state.ponds?.[i] || pit > 0) {
@@ -1025,7 +1025,7 @@ function drawPond(g: Graphics, x: number, y: number, W: number, dry: boolean) {
 }
 
 /** A clay pit: a scoop in the ground that grows as it's dug. Once dug out (`fill` 1) its floor is wet and
- *  has a faint sheen of water: winter rain will fill it into a pond. */
+ *  has a faint sheen of water. */
 function drawPit(g: Graphics, x: number, y: number, W: number, fill: number) {
   const rx = Math.max(3, Math.round(W * (0.06 + 0.07 * fill))), ry = Math.max(2, Math.round(rx * 0.42))
   g.ellipse(x, y, rx + 1, ry + 1).fill(0x5a3e26)

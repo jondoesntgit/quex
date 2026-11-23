@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { BUILDINGS, GOOD_LABEL, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
+import { rationsOf } from '../game/units'
+import { BUILDINGS, FOOD, GOOD_LABEL, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
 import { GROW_MORALE, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
 import { jobs, needOf, people, spare, storesFull } from '../game/workers'
 import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
@@ -320,7 +321,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
       <div className="row" style={{ gap: 14 }}>
         <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}{v.away ? ` (${v.away} away)` : ''}</span>
         <span><Icon name="defence" title="Defence" /> {defence(v)}{troopsAt(game.state, v) ? ` +${troopsAt(game.state, v)} troops` : ''}</span>
-        <span><Icon name="bread" title="Food stored" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
+        <span><Icon name="bread" title="Food stored, in rations (one a person a day)" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
         <span>Winter: <b>{winterPrep(v, game.today(p.id), dayScore(p.days[game.today(p.id)])).forecast}</b></span>
       </div>
       <div style={{ margin: '8px 0' }}>
@@ -621,20 +622,21 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
     if (!r) return null
     const [lo, hi] = r.net
     if (Math.abs(lo) < 0.05 && Math.abs(hi) < 0.05) return null
-    const text = lo === hi ? fmt(lo) : `${fmt(lo)} to ${fmt(hi)}`
+    const k = rationsOf(g, 1)
+    const text = lo === hi ? fmt(lo * k) : `${fmt(lo * k)} to ${fmt(hi * k)}`
     return <small className={hi > 0 ? 'up' : 'down'}>{text}</small>
   }
   const all = [...goods, ...coming]
   return (
     <>
-      <h3 style={{ marginBottom: 2 }}>Goods</h3>
+      <h3 style={{ marginBottom: 2 }}>Goods <small className="muted">(in wagon loads)</small></h3>
       <p className="muted" style={{ margin: '0 0 6px' }}>
-        Tonight, at today's score ({t.score}/100): what your buildings make and use, what the village eats, and what spoils.
+        Bulk goods are counted in wagon loads (1,000 lb). Food is counted in rations, one person's food for a day (about 3 lb). Tonight, at today's score ({t.score}/100): what your buildings make and use, what the village eats, and what spoils.
         {t.hungry && <span className="deal-no"> Not enough food for tonight!</span>}
       </p>
       {all.length ? (
         <div className="goods">{all.map(([g, n]) => (
-          <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{Math.round(n * 10) / 10}</b> {change(g)}</span></span>
+          <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{FOOD[g] ? Math.round(rationsOf(g, n)) : Math.round(n * 10) / 10}</b>{FOOD[g] ? <small className="muted"> rations</small> : isBulk(g) && <small className="muted"> loads</small>} {change(g)}</span></span>
         ))}</div>
       ) : <p className="muted">Nothing in store.</p>}
     </>

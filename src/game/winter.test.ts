@@ -18,13 +18,13 @@ describe('winter prep', () => {
 
   it('asks for 1.5x the winter meal in food that keeps, and fresh food does not count', () => {
     const w = winterPrep(village({ goods: { fish: 20, grain: 2 } }), '2026-11-19', 0)
-    expect(w.need).toBe(3) // 6 villagers x 0.5
-    expect(w.target).toBe(4.5)
-    expect(w.keeps).toBe(2)
+    expect(w.need).toBe(30) // 30 villagers x 1 ration
+    expect(w.target).toBe(45)
+    expect(w.keeps).toBe(20) // 2 loads of grain, 10 rations each
     expect(item(w, 'food').ok).toBe(false)
     expect(item(w, 'food').impact).toMatch(/morale drops by 12/)
-    const stocked = winterPrep(village({ goods: { grain: 3, cheese: 1 } }), '2026-11-19', 0)
-    expect(item(stocked, 'food').ok).toBe(true) // 3 + 1.5
+    const stocked = winterPrep(village({ goods: { grain: 3, cheese: 15 } }), '2026-11-19', 0)
+    expect(item(stocked, 'food').ok).toBe(true) // 30 + 15 rations
     expect(item(stocked, 'food').todo).toEqual([])
     expect(stocked.forecast).toBe('stocked')
     expect(w.forecast).toBe('hungry')
