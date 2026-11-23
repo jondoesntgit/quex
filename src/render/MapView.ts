@@ -762,8 +762,11 @@ export class MapView {
       }
     }
     for (const st of L.steps) {
-      g.rect(st.x - 2, st.y0, 5, st.y1 - st.y0).fill(edge)
-      for (let y = st.y0 + 1; y < st.y1; y += 2) g.rect(st.x - 1, y, 3, 1).fill(dirt)
+      // wide enough for two walkers shoulder to shoulder (room for a pack animal later)
+      const hw = Math.max(6, w + 2)
+      g.rect(st.x - hw - 1, st.y0, 2 * hw + 3, st.y1 - st.y0).fill(edge)
+      g.rect(st.x - hw, st.y0, 2 * hw + 1, st.y1 - st.y0).fill(dirt)
+      for (let y = st.y0 + 1; y < st.y1; y += 2) g.rect(st.x - hw, y, 2 * hw + 1, 1).fill({ color: edge, alpha: 0.45 })
     }
     // bridges where the road crosses the river (planned by roadLayout)
     let bridges: Graphics | null = null
