@@ -211,3 +211,32 @@ describe('the Sabbath', async () => {
     expect(people.walkers.every((w) => !w.rest)).toBe(true)
   })
 })
+
+describe('villagers in the city', async () => {
+  const { People, folkFor } = await import('./people')
+  const { generateWorld } = await import('../world/generate')
+  const { newGame, apply } = await import('../game/reducer')
+  it('one for every ten people, at most 20; they walk from door to door along the lanes', () => {
+    expect([1, 10, 11, 25, 200, 900].map(folkFor)).toEqual([1, 1, 2, 3, 20, 20])
+    const world = generateWorld('test-seed')
+    const s = newGame(world, '2026-11-15')
+    const site = world.regions[world.startRegion].sites[0]
+    apply(s, world, { t: 'join', id: 'j', at: '2026-11-15T08:00:00Z', playerId: 'a', name: 'A', role: site.role, site, resetHour: 0, tz: 0 })
+    s.villages.v_a.population = 150
+    type F = { at: number; path: [number, number][]; seg: number; t: number; wait: number; town: { stops: unknown[] } }
+    const people = new People(64, 8) as unknown as { sync: (...a: unknown[]) => void; update: (dt: number) => void; folk: F[]; walkers: unknown[]; now: () => Date }
+    people.now = () => new Date('2026-11-24T12:00:00Z') // a Tuesday
+    people.sync(world, s, new Set(s.revealed))
+    expect(people.folk.length + people.walkers.length).toBe(15)
+    expect(people.folk.length).toBe(10)
+    expect(people.folk[0].town.stops.length).toBeGreaterThanOrEqual(2)
+    const visited = people.folk.map(() => new Set<number>())
+    let walked = 0
+    for (let k = 0; k < 20 * 120; k++) { // two simulated minutes
+      people.update(0.05)
+      people.folk.forEach((f, i) => { visited[i].add(f.at); if (f.wait <= 0) walked++ })
+    }
+    expect(walked).toBeGreaterThan(0)
+    expect(visited.some((v) => v.size > 1)).toBe(true) // they go somewhere else, door to door
+  })
+})
