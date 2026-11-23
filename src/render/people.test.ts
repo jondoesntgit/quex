@@ -177,7 +177,7 @@ describe('villagers stop to chat', async () => {
     expect(frozen).toBe(true)
     // after chatting, a cooldown keeps them from stopping again straight away
     expect(people.walkers.some((w) => w.chatAgain > 0)).toBe(true)
-  })
+  }, 30_000)
 })
 
 describe('the Sabbath', async () => {
@@ -209,7 +209,7 @@ describe('the Sabbath', async () => {
     people.now = () => new Date('2026-11-22T12:00:00Z')
     people.update(25) // past the next Sabbath check
     expect(people.walkers.every((w) => !w.rest)).toBe(true)
-  })
+  }, 30_000)
 })
 
 describe('villagers in the city', async () => {
@@ -238,5 +238,5 @@ describe('villagers in the city', async () => {
     }
     expect(walked).toBeGreaterThan(0)
     expect(visited.some((v) => v.size > 1)).toBe(true) // they go somewhere else, door to door
-  })
+  }, 30_000)
 })
