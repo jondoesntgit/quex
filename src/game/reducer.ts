@@ -14,7 +14,7 @@ import {
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
 import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
-import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, homeFits, homesCap, hexAt, paveable, validKey } from './city'
+import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, hexAt, paveable, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
 import { CARRY_EACH, people, spare, staffing, needOf } from './workers'
 import { strongholdAt, wallsAfter } from './strongholds'
@@ -27,6 +27,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
     headsScaled: true,
     cheeseRations: true,
+    startersPlaced: true,
     worldSeed: world.seed,
     seasonStart,
     players: {},
@@ -722,6 +723,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   givePurses(s, ev.at)
   convertToCities(s, world, ev.at)
   convertCheese(s, ev.at)
+  placeStarters(s, world, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
   if (err) {
@@ -974,6 +976,28 @@ function convertCheese(s: GameState, at: string) {
   s.cheeseRations = true
 }
 
+/** From this moment a village's square is laid out in its city: a well and a few homes spread over the
+ *  cobbles, instead of three town houses on one hex. New villages start that way; every village already
+ *  standing with a city of three hexes or more is rearranged once. Nothing else about it changes: not its
+ *  food, goods or people, and the places its people live in stay the same. */
+export const STARTER_FROM = '2026-11-23T04:00:00.000Z'
+function placeStarters(s: GameState, world: World, at: string) {
+  if (s.startersPlaced || at < STARTER_FROM) return
+  try {
+    for (const v of Object.values(s.villages)) {
+      if (v.starter || (v.city?.length ?? 0) < 3) continue
+      const st = starterFor(world, v)
+      if (!st) continue
+      v.starter = st.starter
+      v.homes = [...(v.homes ?? []), ...st.homes]
+      log(s, at, v.playerId, `${v.name}'s square has been laid out across its cobbles: a well, and ${st.homes.length} homes with room between them. Nothing else changed.`, 'good')
+    }
+    s.startersPlaced = true
+  } catch (e) {
+    console.error('laying out the squares could not run yet:', e)
+  }
+}
+
 function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>) {
   const vid = 'v_' + ev.playerId
   const p: Player = {
@@ -991,6 +1015,10 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   s.villages[vid] = v
   v.city = claimCity(world, v, takenHexes(world, s, v))
   for (const i of v.city) clearForCity(world, s, i, ev.at)
+  if (ev.at >= STARTER_FROM) {
+    const st = starterFor(world, v)
+    if (st) { v.starter = st.starter; v.homes = st.homes }
+  }
   reveal(world, s, ev.site, 4)
   log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role ? `${ev.role} ` : ''}village.`, 'good')
   return s

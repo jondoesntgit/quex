@@ -101,6 +101,9 @@ export interface Village {
   city?: number[]
   /** homes built in the city, where each stands (ground px from the village hex's centre) */
   homes?: Home[]
+  /** the square is laid out in the city (a well here, ground px from the village hex's centre, and `start` homes)
+   *  instead of the fixed picture of three town houses on the village hex */
+  starter?: { x: number; y: number }
   /** the newest groups of immigrants (see immigrants.ts), shown to the player as a note */
   arrivals?: Arrival[]
   /** the winter whose newcomers have already come */
@@ -137,6 +140,8 @@ export interface Home {
   y: number
   /** which wall the door is on: the front faces the viewer */
   side: 'front' | 'back'
+  /** one of the square's starting buildings: part of the picture, housing no one beyond the square's own 30 */
+  start?: boolean
 }
 
 export interface Caravan {
@@ -174,6 +179,8 @@ export interface GameState {
   headsScaled?: boolean
   /** cheese is counted in rations (see convertCheese) */
   cheeseRations?: boolean
+  /** every village that could has had its square laid out in its city (see placeStarters) */
+  startersPlaced?: boolean
   worldSeed: string
   seasonStart: ISODate
   players: Record<string, Player>

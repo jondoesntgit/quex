@@ -333,11 +333,16 @@ export class MapView {
     // the homes built on them, by the hex each stands in
     const cobbled = new Set<number>()
     const homesByHex = new Map<number, Spot[]>()
+    /** villages whose square is laid out across the city: no fixed picture on the village hex */
+    const squareLaidOut = new Set<number>()
     for (const v of Object.values(state.villages)) {
       cobbled.add(idx(v.col, v.row))
+      if (v.starter) squareLaidOut.add(idx(v.col, v.row))
       for (const c of v.city ?? []) cobbled.add(c)
       const vp = hexToPixel(v.col, v.row, W)
-      for (const h of v.homes ?? []) {
+      // the square's well, when it's laid out in the city (and not the fixed picture)
+      const spots = [...(v.homes ?? []).map((h) => ({ key: h.key, x: h.x, y: h.y })), ...(v.starter ? [{ key: 'well', x: v.starter.x, y: v.starter.y }] : [])]
+      for (const h of spots) {
         const hi = hexAt(world, v, [h.x, h.y])
         if (hi < 0) continue
         const hp = hexToPixel(world.cells[hi].col, world.cells[hi].row, W)
@@ -408,15 +413,14 @@ export class MapView {
         this.cells.addChild(s)
       }
       if (!known) continue
-      // cobblestone: just short of the hex's edge, running on into cobbled neighbours on the same level
+      // cobblestone: just short of the hex's edge, running on into cobbled neighbours (down a ramp if they are lower)
       if (cobbled.has(i)) {
-        const joined = neighbours(cell.col, cell.row).map(([nc, nr]) => {
-          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return false
-          const ni = idx(nc, nr)
-          return cobbled.has(ni) && world.cells[ni].tier === cell.tier
-        })
+        const nbs = neighbours(cell.col, cell.row).map(([nc, nr]) => (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height ? -1 : idx(nc, nr)))
+        const joined = nbs.map((ni) => ni >= 0 && cobbled.has(ni))
+        // a cobbled neighbour that is lower: the cobbles run down the cliff between, as a ramp
+        const drops = nbs.map((ni) => (ni >= 0 && cobbled.has(ni) ? Math.max(0, cell.tier - world.cells[ni].tier) * this.atlas.meta.tier : 0))
         const cb = new Graphics()
-        drawCobbles(cb, cx, cy, W, joined)
+        drawCobbles(cb, cx, cy, W, joined, drops)
         cb.cullable = true
         if (dim) cb.tint = DIM
         cb.zIndex = z(i, 1.5)
@@ -562,7 +566,7 @@ export class MapView {
       const townIdx = layers.findIndex((l) => l.name === 'f_townhouses')
       if (townIdx >= 0) {
         const [row] = layers.splice(townIdx, 1)
-        this.stand(villageSpots(i), cx, cy, row.alpha, dim, z(i, 3))
+        if (!squareLaidOut.has(i)) this.stand(villageSpots(i), cx, cy, row.alpha, dim, z(i, 3))
       }
       const cottageIdx = layers.findIndex((l) => l.name === 'f_cottages')
       if (cottageIdx >= 0) {

@@ -37,7 +37,7 @@ export const COBBLE_COST: Goods = { stone: 4 }
 /** The city reaches this many hexes from the village square. */
 export const CITY_RADIUS = 2
 
-export const homesCap = (v: Village) => (v.homes ?? []).reduce((a, h) => a + HOMES[h.kind].cap, 0)
+export const homesCap = (v: Village) => (v.homes ?? []).reduce((a, h) => a + (h.start ? 0 : HOMES[h.kind].cap), 0)
 
 // ------------------------------------------------------------------ the ground
 const feet = sheet.footprints as Record<string, number[]>
@@ -189,8 +189,9 @@ export function visible(world: World, v: Village, h: Home): boolean {
 }
 
 // ------------------------------------------------------------------ what stands there
-const fixedBoxes = (world: World, v: Village): Box[] =>
-  villageSpots(idxOf(world, v)).map((s) => ({ gx: s.x, gy: s.y / SQ, ...boxDims(s.key), key: s.key, side: 'front' as const, fixed: true }))
+const fixedBoxes = (world: World, v: Village): Box[] => v.starter
+  ? [{ gx: v.starter.x, gy: v.starter.y, ...boxDims('well'), key: 'well', side: 'front' as const, fixed: true }]
+  : villageSpots(idxOf(world, v)).map((s) => ({ gx: s.x, gy: s.y / SQ, ...boxDims(s.key), key: s.key, side: 'front' as const, fixed: true }))
 const boxDims = (key: string) => { const [hx, hy] = dims(key); return { hx, hy } }
 const homeBox = (h: Home): Box => ({ gx: h.x, gy: h.y, ...boxDims(h.key), key: h.key, side: h.side })
 const boxesOf = (world: World, v: Village, extra: Home[] = []): Box[] => [...fixedBoxes(world, v), ...(v.homes ?? []).map(homeBox), ...extra.map(homeBox)]
@@ -386,7 +387,7 @@ export function upgradeFor(world: World, v: Village, index: number): Home | null
 /** The first cottage on this hex that can be rebuilt as a town house, with the town house that would replace it. */
 export function findUpgrade(world: World, v: Village, hex: number): { index: number; home: Home } | null {
   for (const [index, h] of (v.homes ?? []).entries()) {
-    if (h.kind !== 'cottage' || hexAt(world, v, [h.x, h.y]) !== hex) continue
+    if (h.kind !== 'cottage' || h.start || hexAt(world, v, [h.x, h.y]) !== hex) continue
     const home = upgradeFor(world, v, index)
     if (home) return { index, home }
   }
@@ -424,4 +425,30 @@ export function findHome(world: World, v: Village, kind: HomeKind, hex: number |
     if (roomFor(world, v, h) && visible(world, v, h) && walkable(world, v, [h], gates)) return h
   }
   return null
+}
+
+// ------------------------------------------------------------------ the square, laid out in the city
+/** The starting square of a village with a city of three hexes or more: a well on the village hex and a few
+ *  homes (a town house and two or three cottages) spread over the cobbles, instead of three town houses
+ *  crowded onto one hex. Null if they won't fit (then the fixed picture stays). Deterministic. */
+export function starterFor(world: World, v: Village): { starter: { x: number; y: number }; homes: Home[] } | null {
+  const city = v.city ?? []
+  if (city.length < 3) return null
+  const base: Village = { ...v, starter: { x: 0, y: 0 }, homes: [...(v.homes ?? [])] }
+  const placed: Home[] = []
+  // each in a different hex in turn, near the middle of it (the village hex: in front of the well)
+  const order = [city[1], city[2], city[0], city[1], city[2]]
+  const kinds: HomeKind[] = ['townhouse', 'cottage', 'cottage', 'cottage', 'cottage']
+  for (const [n, kind] of kinds.entries()) {
+    const hex = order[n]
+    const c = centreOf(world, base, hex)
+    const aim: Pt = hex === city[0] ? [c[0] + (n % 2 ? -14 : 14), c[1] + 12] : c
+    const h = findHome(world, base, kind, hex, aim)
+    if (!h) continue
+    const home: Home = { ...h, start: true }
+    base.homes!.push(home)
+    placed.push(home)
+    if (placed.length >= 4) break
+  }
+  return placed.length >= 2 ? { starter: { x: 0, y: 0 }, homes: placed } : null
 }
