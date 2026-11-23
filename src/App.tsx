@@ -8,6 +8,8 @@ import { Caravans } from './ui/Caravans'
 import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { loadHouseArt } from './render/houseart'
+import { Confirm } from './ui/Confirm'
+import { Arrivals } from './ui/Arrivals'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
 import { dayScore, foundingBlockedCells } from './game/reducer'
@@ -119,7 +121,7 @@ function Main({ game }: { game: Game }) {
   const [collapsed, setCollapsed] = useState(false)
   // a shared link (?at=col,row) centres on that hex, marks it, and opens it for existing players
   const [linked] = useState(() => linkedSpot(game.world))
-  const [sel, setSel] = useState<{ col: number; row: number } | null>(() => (game.meta.activePlayer ? linked : null))
+  const [sel, setSel] = useState<{ col: number; row: number; x?: number; y?: number } | null>(() => (game.meta.activePlayer ? linked : null))
   // prospecting: dim everything but deposits (ore, building stone, clay, salt)
   const [prospect, setProspect] = useState(false)
   const [preview, setPreview] = useState<Spot | null>(null)
@@ -173,7 +175,7 @@ function Main({ game }: { game: Game }) {
       view = new MapView(atlas, houses)
       await view.mount(host.current)
       // while choosing a village site, taps pick the site instead of opening the inspector
-      view.onSelect = (col, row) => (placingRef.current ? setPreview({ col, row }) : setSel({ col, row }))
+      view.onSelect = (col, row, x, y) => (placingRef.current ? setPreview({ col, row }) : setSel({ col, row, x, y }))
       viewRef.current = view
       setReady(true)
     })()
@@ -301,17 +303,32 @@ function Main({ game }: { game: Game }) {
               </span>
             )
           })}
-          {splitting && p.tokens.some((t) => t.id === splitting) ? (
-            <button className="btn split-btn" onClick={() => {
-              const t = p.tokens.find((x) => x.id === splitting)!
-              void game.dispatch({ t: 'split', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: t.id })
-              setSplitting(null)
-            }}>Split {p.tokens.find((x) => x.id === splitting)!.size === 'big' ? 'B into M + S' : 'M into S + S'}?</button>
-          ) : <span className="tray-hint">{spendables(p).some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>}
+          <span className="tray-hint">{spendables(p).some((t) => t.strength >= 1) ? 'tap a hex to spend' : 'finish a task to spend'}</span>
         </div>
       )}
 
-      {p && sel && !placing && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} onClose={() => setSel(null)} notify={notify} />}
+      {p && !placing && <Arrivals game={game} p={p} />}
+
+      {p && splitting && (() => {
+        const t = p.tokens.find((x) => x.id === splitting)
+        if (!t) return null
+        return (
+          <Confirm
+            title={`Split this ${t.size} action?`}
+            spends={[`1 ${t.size} action`]}
+            gets={t.size === 'big' ? ['1 medium action', '1 small action'] : ['2 small actions']}
+            warn="This can't be undone. Actions can be split, but never put back together: you can't turn the pieces into a bigger action again."
+            yes="Yes, split it" no="No, keep it whole"
+            onNo={() => setSplitting(null)}
+            onYes={() => {
+              void game.dispatch({ t: 'split', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: t.id })
+              setSplitting(null)
+            }}
+          />
+        )
+      })()}
+
+      {p && sel && !placing && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} tap={sel.x !== undefined && sel.y !== undefined ? { x: sel.x, y: sel.y } : undefined} onClose={() => setSel(null)} notify={notify} />}
 
       {p && !placing && (
         <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>

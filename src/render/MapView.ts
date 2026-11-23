@@ -20,7 +20,7 @@ import { hexToPixel, neighbours, pixelToHex } from '../world/hex'
 import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
 import type { GameState } from '../game/types'
-import { landAt, territoryCells } from '../game/reducer'
+import { clayAt, clayRenews, landAt, territoryCells } from '../game/reducer'
 import { weekSeason } from '../game/calendar'
 import { strongholdsOf } from '../game/strongholds'
 import { isDeposit, MOUNTAIN_TERRAIN } from '../world/land'
@@ -30,6 +30,7 @@ import { drawCottages } from './cottages'
 import { drawCobbles } from './cobbles'
 import type { HouseArt } from './houseart'
 import { houseSpots, villageSpots, type Spot } from './townlayout'
+import { hexAt } from '../game/city'
 import { People } from './people'
 import { Traders } from './traders'
 import type { Atlas } from './atlas'
@@ -83,7 +84,8 @@ export class MapView {
   private host!: HTMLElement
   private ro?: ResizeObserver
   private last: SceneInput | null = null
-  onSelect: (col: number, row: number) => void = () => {}
+  /** a tap: the hex, and where on the map's plane (px, unlifted) it landed */
+  onSelect: (col: number, row: number, x?: number, y?: number) => void = () => {}
 
   atlas: Atlas
   /** the Blender houses (villages and House buildings); without them the older drawings are used */
@@ -327,8 +329,23 @@ export class MapView {
       things.set(idx(v.col, v.row), { name: this.houses ? 'f_townhouses' : 'f_village' })
     }
 
-    // cobbled hexes: every village's square (a village is never next to another, but the stones would join)
-    const cobbled = new Set<number>(Object.values(state.villages).map((v) => idx(v.col, v.row)))
+    // cobbled hexes: every village's city (its square, and every hex laid with cobblestone since), and
+    // the homes built on them, by the hex each stands in
+    const cobbled = new Set<number>()
+    const homesByHex = new Map<number, Spot[]>()
+    for (const v of Object.values(state.villages)) {
+      cobbled.add(idx(v.col, v.row))
+      for (const c of v.city ?? []) cobbled.add(c)
+      const vp = hexToPixel(v.col, v.row, W)
+      for (const h of v.homes ?? []) {
+        const hi = hexAt(world, v, [h.x, h.y])
+        if (hi < 0) continue
+        const hp = hexToPixel(world.cells[hi].col, world.cells[hi].row, W)
+        // ground point -> screen: x as is, y squashed by the view; relative to the hex it stands in
+        const spot: Spot = { key: h.key, x: vp.x + h.x - hp.x, y: vp.y + h.y * 0.5774 - hp.y }
+        homesByHex.set(hi, [...(homesByHex.get(hi) ?? []), spot])
+      }
+    }
 
     const order: number[] = []
     for (let r = r0; r <= r1; r++) {
@@ -391,6 +408,23 @@ export class MapView {
         this.cells.addChild(s)
       }
       if (!known) continue
+      // cobblestone: just short of the hex's edge, running on into cobbled neighbours on the same level
+      if (cobbled.has(i)) {
+        const joined = neighbours(cell.col, cell.row).map(([nc, nr]) => {
+          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return false
+          const ni = idx(nc, nr)
+          return cobbled.has(ni) && world.cells[ni].tier === cell.tier
+        })
+        const cb = new Graphics()
+        drawCobbles(cb, cx, cy, W, joined)
+        cb.cullable = true
+        if (dim) cb.tint = DIM
+        cb.zIndex = z(i, 1.5)
+        this.cells.addChild(cb)
+        // homes standing on this hex (placed in the city, see game/city.ts)
+        const homes = this.houses ? homesByHex.get(i) : undefined
+        if (homes) this.stand(homes, cx, cy, 1, dim, z(i, 3.2))
+      }
       // land too close to a neighbour to settle: a shade over the hex and what stands on it, breathing slowly
       if (blocked.has(i) && cell.tier > 0) {
         // the top of the hex and its cliff face below, down to the ground
@@ -442,7 +476,7 @@ export class MapView {
       const bare = import.meta.env.DEV && typeof location !== 'undefined' && location.search.includes('bare') && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
       // a felled stand: the same trees, with stumps where some were cut
       const base = land!.stumps ? `${land!.feature}_c${land!.stumps}` : land!.feature
-      const natural = land!.feature && land!.feature !== 'hills' && !bare
+      const natural = land!.feature && land!.feature !== 'hills' && !bare && !cobbled.has(i)
         ? (variant && this.atlas.tex(`f_${base}_v${variant}`) ? `f_${base}_v${variant}` : this.atlas.tex(`f_${base}`) ? `f_${base}` : `f_${land!.feature}`)
         : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
@@ -470,9 +504,13 @@ export class MapView {
         this.cells.addChild(fg)
       }
       // fresh water dug by the villagers: a pond in an old clay pit (dry in summer), or a well
-      if (state.wells?.[i] || state.ponds?.[i]) {
+      // clay dug from ground that doesn't renew: a pit that grows as it's dug, and once dug out, rain will fill it
+      const clayTaken = state.clayDug?.[i] ?? 0
+      const pit = !state.ponds?.[i] && clayTaken > 0 && !clayRenews(world, i) ? Math.min(1, clayTaken / Math.max(1, clayAt(world, i))) : 0
+      if (state.wells?.[i] || state.ponds?.[i] || pit > 0) {
         const wg = new Graphics()
         if (state.wells?.[i]) drawWell(wg, cx + Math.round(W * 0.16), cy + Math.round(W * 0.06), W)
+        else if (pit > 0 && !state.ponds?.[i]) drawPit(wg, cx - Math.round(W * 0.12), cy + Math.round(W * 0.05), W, pit)
         else drawPond(wg, cx - Math.round(W * 0.12), cy + Math.round(W * 0.05), W, !!input.today && weekSeason(input.today) === 'summer')
         wg.cullable = true
         if (dim) wg.tint = DIM
@@ -520,22 +558,10 @@ export class MapView {
           }
         }
       }
-      // a village is a cobbled square with a well and town houses; a House is three cottages (Blender art)
+      // a village square is a well with town houses on its cobbles (drawn above); a House is three cottages (Blender art)
       const townIdx = layers.findIndex((l) => l.name === 'f_townhouses')
       if (townIdx >= 0) {
         const [row] = layers.splice(townIdx, 1)
-        // cobbles run on into any neighbouring cobbled hex on the same level
-        const joined = neighbours(cell.col, cell.row).map(([nc, nr]) => {
-          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return false
-          const ni = idx(nc, nr)
-          return cobbled.has(ni) && world.cells[ni].tier === cell.tier
-        })
-        const cb = new Graphics()
-        drawCobbles(cb, cx, cy, W, joined)
-        cb.cullable = true
-        if (dim) cb.tint = DIM
-        cb.zIndex = z(i, 1.5)
-        this.cells.addChild(cb)
         this.stand(villageSpots(i), cx, cy, row.alpha, dim, z(i, 3))
       }
       const cottageIdx = layers.findIndex((l) => l.name === 'f_cottages')
@@ -844,7 +870,7 @@ export class MapView {
     const y = this.camY + cssY / this.zoom
     const TP = this.atlas.meta.tier
     const revealed = visibleSet(s)
-    let best: { col: number; row: number; depth: number } | null = null
+    let best: { col: number; row: number; depth: number; x: number; y: number } | null = null
     for (let t = 0; t <= this.atlas.meta.maxTier; t++) {
       const h = pixelToHex(x, y + t * TP, this.W)
       if (h.col < 0 || h.row < 0 || h.col >= s.world.width || h.row >= s.world.height) continue
@@ -852,7 +878,7 @@ export class MapView {
       const tier = revealed.has(i) ? s.world.cells[i].tier : 0
       if (tier !== t) continue
       const depth = h.row * 2 + (h.col & 1)
-      if (!best || depth > best.depth) best = { ...h, depth }
+      if (!best || depth > best.depth) best = { ...h, depth, x, y: y + t * TP }
     }
     return best
   }
@@ -900,7 +926,7 @@ export class MapView {
       if (pts.size < 2) pinch0 = 0
       if (p && moved < 8 && pts.size === 0) {
         const h = this.pick(p.x, p.y)
-        if (h) this.onSelect(h.col, h.row)
+        if (h) this.onSelect(h.col, h.row, h.x, h.y)
       }
     }
     c.addEventListener('pointerup', up)
@@ -996,6 +1022,23 @@ function drawPond(g: Graphics, x: number, y: number, W: number, dry: boolean) {
   }
   g.rect(x - Math.round(rx / 2), y - 1, Math.max(2, Math.round(rx / 3)), 1).fill(0x9cd0f0)
   for (const dx of [-rx, -rx + 2, rx - 2, rx]) g.rect(x + dx, y - ry - 2, 1, 3).fill(0x4e8a2e)
+}
+
+/** A clay pit: a scoop in the ground that grows as it's dug. Once dug out (`fill` 1) its floor is wet and
+ *  has a faint sheen of water: winter rain will fill it into a pond. */
+function drawPit(g: Graphics, x: number, y: number, W: number, fill: number) {
+  const rx = Math.max(3, Math.round(W * (0.06 + 0.07 * fill))), ry = Math.max(2, Math.round(rx * 0.42))
+  g.ellipse(x, y, rx + 1, ry + 1).fill(0x5a3e26)
+  g.ellipse(x, y, rx, ry).fill(fill >= 1 ? 0x7a5a3c : 0xb08a58)
+  // heaps of dug clay on the rim
+  g.rect(x + rx - 1, y - ry - 1, 3, 2).fill(0xc29a64)
+  g.rect(x - rx - 1, y + ry - 1, 2, 2).fill(0xc29a64)
+  if (fill >= 1) {
+    g.rect(x - Math.round(rx / 2), y - 1, Math.max(2, Math.round(rx / 2)), 1).fill({ color: 0x8cb4d0, alpha: 0.85 })
+    g.rect(x + 1, y + 1, Math.max(1, Math.round(rx / 4)), 1).fill({ color: 0x8cb4d0, alpha: 0.6 })
+  } else {
+    for (let k = -1; k <= 1; k++) g.rect(x + k * Math.max(1, Math.round(rx / 2)), y, 1, 1).fill(0x7a5a3c)
+  }
 }
 
 /** A well: a ring of stones round a dark shaft, under a little roof on two posts. */

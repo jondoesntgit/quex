@@ -6,7 +6,7 @@ import { actionSize, apply, BRIDGES_FROM, ROLELESS_FROM, buildCost, SABBATH_FROM
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
-import { BUILDINGS } from './data'
+import { BUILDINGS, HEADS } from './data'
 
 const world: World = generateWorld('test-seed')
 const sites = world.regions[world.startRegion].sites
@@ -278,7 +278,7 @@ describe('actions', () => {
     const at = `${SUN}T10:00:00Z`
     apply(s, world, ev('progress', 'ann', at, { date: SUN, slot: 1, status: 'full' }))
     const tok = s.players.ann.tokens[0]
-    apply(s, world, ev('act', 'ann', at, { tokenId: tok.id, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { berries: 3 }, crew: 1, food: { grain: 4 } }))
+    apply(s, world, ev('act', 'ann', at, { tokenId: tok.id, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { berries: 3 }, crew: HEADS, food: { grain: 4 } }))
     expect(s.log.at(-1)?.text).not.toMatch(/ignored/)
     expect(s.caravans).toHaveLength(1)
     const bobBefore = s.villages.v_bob.goods.berries ?? 0
@@ -288,7 +288,7 @@ describe('actions', () => {
     expect(s.villages.v_bob.goods.berries).toBe(bobBefore + 3)
     // its one person is away until they've walked home again
     const ann = s.villages[s.players.ann.villageId]
-    expect(ann.away).toBe(1)
+    expect(ann.away).toBe(HEADS)
     apply(s, world, ev('habit', 'bob', s.homeward![0].at, { date: SUN, habitId: 'nope', done: true }))
     expect(ann.away).toBe(0)
     expect(s.arrived).toHaveLength(1) // kept for the caravan page, with both names
@@ -479,7 +479,7 @@ describe('abandoning a village', () => {
     apply(s, world, ev('progress', 'bob', at, { date: SUN, slot: 1, status: 'full' }))
     const tok = s.players.bob.tokens[0]
     const bob = s.villages.v_bob
-    apply(s, world, ev('act', 'bob', at, { tokenId: tok.id, action: 'caravan', col: bob.col, row: bob.row, to: 'v_ann', goods: { grain: 2 }, crew: 1, food: { grain: 4 } }))
+    apply(s, world, ev('act', 'bob', at, { tokenId: tok.id, action: 'caravan', col: bob.col, row: bob.row, to: 'v_ann', goods: { grain: 2 }, crew: HEADS, food: { grain: 4 } }))
     expect(s.caravans).toHaveLength(1)
     apply(s, world, ev('abandon', 'ann', `${SUN}T10:01:00Z`, {}))
     expect(s.caravans).toHaveLength(0)

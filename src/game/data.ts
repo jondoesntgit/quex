@@ -9,6 +9,8 @@ export const GOODS = [
   'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore',
   // processed
   'bread', 'smoked_fish', 'cheese', 'bricks', 'charcoal', 'planks', 'leather', 'cloth',
+  // what immigrants carry on the road (see immigrants.ts)
+  'biscuit', 'dried_peas', 'honey',
   'copper', 'iron', 'bronze', 'steel', 'silver',
   // powder and siege
   'saltpetre', 'sulfur', 'gunpowder', 'cannonballs', 'musket', 'cannon', 'ram', 'siege_tower',
@@ -22,6 +24,7 @@ export const GOOD_LABEL: Record<Good, string> = {
   grain: 'Grain', fish: 'Fish', timber: 'Timber', stone: 'Stone', clay: 'Clay', tin: 'Tin',
   wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game',
   copper_ore: 'Malachite', chalcopyrite: 'Chalcopyrite', limonite: 'Limonite', iron_ore: 'Hematite', magnetite: 'Magnetite', silver_ore: 'Galena', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
+  biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
   cheese: 'Cheese', bricks: 'Bricks', charcoal: 'Charcoal', planks: 'Planks', leather: 'Leather',
   cloth: 'Cloth', copper: 'Copper', iron: 'Iron', bronze: 'Bronze', steel: 'Steel',
   relic: 'Relic', dragon_scale: 'Dragon scale',
@@ -36,6 +39,9 @@ export const FOOD: Partial<Record<Good, { value: number; keeps: boolean }>> = {
   fish: { value: 1, keeps: false },
   smoked_fish: { value: 1.2, keeps: true },
   cheese: { value: 1.5, keeps: true },
+  biscuit: { value: 1.2, keeps: true },
+  dried_peas: { value: 1, keeps: true },
+  honey: { value: 2, keeps: true },
   berries: { value: 0.8, keeps: false },
   game: { value: 1, keeps: false },
 }
@@ -100,6 +106,12 @@ export type BuildingId =
   | 'pen' | 'dairy' | 'weaver'
   | 'scout_camp' | 'outfitter'
 
+/** People are counted one by one. Until the conversion at CITY_FROM a "person" was a household of this
+ *  many: every per-person number is derived from it, so the economy stays in balance. */
+export const HEADS = 5
+/** Food one person eats a day. */
+export const EAT = 0.5 / HEADS
+
 export interface BuildingDef {
   id: BuildingId
   name: string
@@ -129,6 +141,8 @@ export interface BuildingDef {
   /** seasonal crop: affected by weekday seasons + rain habit */
   crop?: boolean
   popCap?: number
+  /** no longer built (replaced); existing ones carry on */
+  legacy?: boolean
   storage?: number
   defence?: number
   morale?: number
@@ -141,7 +155,7 @@ export interface Recipe { id: string; name: string; consumes: Goods; produces: G
 const B = (d: BuildingDef) => d
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // any village
-  house: B({ id: 'house', name: 'House', role: 'any', size: 'medium', cost: { timber: 4 }, popCap: 4, blurb: 'Room for four more villagers.' }),
+  house: B({ id: 'house', name: 'House', role: 'any', size: 'medium', cost: { timber: 4 }, popCap: 4 * HEADS, legacy: true, blurb: `A row of cottages: room for ${4 * HEADS} more villagers. (New homes go up in the city, on cobblestone.)` }),
   granary: B({ id: 'granary', name: 'Granary', role: 'any', size: 'medium', cost: { timber: 6, stone: 2 }, storage: 40, blurb: 'Keeps food safe for the Saturday winter.' }),
   palisade: B({ id: 'palisade', name: 'Palisade', role: 'any', size: 'medium', cost: { timber: 8 }, defence: 6, blurb: 'Sharpened logs. Goblins hate it.' }),
   chapel: B({ id: 'chapel', name: 'Chapel', role: 'any', size: 'big', cost: { stone: 8, timber: 4 }, morale: 4, blurb: 'Powered by the devotions habit.' }),
@@ -203,7 +217,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'pick' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition'
+export type ActionKind = 'scout' | 'gather' | 'pick' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
@@ -216,6 +230,9 @@ export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: 
   well: { size: 'medium', name: 'Dig a well', blurb: 'Fresh water that never runs dry (3 stone): herds within a hex of it need water.' },
   dig_clay: { size: 'small', name: 'Dig clay', blurb: 'Dig clay from a riverbank, marsh, hill valley or mountain spring, for bricks and kilns.' },
   build: { size: 'medium', name: 'Build', blurb: 'Raise a building in your territory.' },
+  cobble: { size: 'medium', name: 'Lay cobblestone', blurb: 'Pave this hex as part of your city: homes can stand on it, and it joins the cobbles next to it.' },
+  upgrade: { size: 'big', name: 'Rebuild as a town house', blurb: 'Pull down a cottage and raise a two-storey town house in its place: room for 24 instead of 12.' },
+  home: { size: 'medium', name: 'Build a home', blurb: 'A cottage or town house in your city.' },
   work: { size: 'small', name: 'Work it', blurb: "Put in an extra shift: it makes a night's worth now, if it has what it needs." },
   deepen: { size: 'big', name: 'Sink the shaft', blurb: 'Dig your mine a level deeper, shored up with timber, to reach more ore.' },
   caravan: { size: 'medium', name: 'Caravan', blurb: 'Send goods to a neighbour.' },

@@ -97,12 +97,46 @@ export interface Village {
   sprouted?: ISODate
   /** road hexes laid with stone (see caravanCarry) */
   paved?: number[]
+  /** the city: hexes laid with cobblestone, the village's own first (see city.ts) */
+  city?: number[]
+  /** homes built in the city, where each stands (ground px from the village hex's centre) */
+  homes?: Home[]
+  /** the newest groups of immigrants (see immigrants.ts), shown to the player as a note */
+  arrivals?: Arrival[]
+  /** the winter whose newcomers have already come */
+  welcomed?: ISODate
+
   planted: { cell: number; date: ISODate }[]
   /** hexes whose trees were felled */
   cleared: number[]
   winterForecast: 'stocked' | 'tight' | 'hungry'
   /** today's barters with the merchants: what was bought from each (see game/market) */
   trade?: { date: ISODate; took: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>>; got?: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>> }
+}
+
+/** A group of newcomers, kept as a note: who came, from where, and what they brought. */
+export interface Arrival {
+  id: string
+  at: string
+  /** 'update': the one-time update counting people one by one; 'winter': the spring influx */
+  kind: 'update' | 'winter'
+  people: number
+  /** where they came from ("a farming valley") */
+  from: string
+  /** what they carried: three days of food */
+  goods: Goods
+}
+
+/** A home in the city: a cottage or a town house, with the sprite it's drawn with and where it stands. */
+export interface Home {
+  kind: 'cottage' | 'townhouse'
+  /** sprite on the house sheet, e.g. 'c_M_thatch_x_1' or 't_tile_y_0' */
+  key: string
+  /** ground position of its centre, in px from the village hex's centre (screen y is y * 0.5774) */
+  x: number
+  y: number
+  /** which wall the door is on: the front faces the viewer */
+  side: 'front' | 'back'
 }
 
 export interface Caravan {
@@ -136,6 +170,8 @@ export interface LogEntry {
 }
 
 export interface GameState {
+  /** people are counted one by one (a world made before CITY_FROM counted households of five, and is converted once) */
+  headsScaled?: boolean
   worldSeed: string
   seasonStart: ISODate
   players: Record<string, Player>
@@ -210,7 +246,7 @@ export type GameEvent =
   /** log progress toward a habit's daily goal (negative to correct a mistake) */
   | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
-  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods })
+  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods; /** a home built in the city (for an upgrade, the town house that replaces the cottage at `replace`) */ home?: Home; replace?: number })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */

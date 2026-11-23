@@ -3,6 +3,7 @@ import { generateWorld } from '../world/generate'
 import { line, spiral } from '../world/hex'
 import { apply, caravanCarry, cellIndex, clayAt, clayLeft, clayRenews, mountainSpring, newGame, produce, route, validate } from './reducer'
 import { hasWater, waterAt } from './water'
+import { HEADS } from './data'
 import { lacks, merchants } from './market'
 import type { GameEvent, GameState } from './types'
 
@@ -31,7 +32,7 @@ describe('caravans carry by weight', () => {
   it('porters, then mules, then carts (on roads), and paving carries more', () => {
     const s = setup()
     const ann = s.villages.v_ann, bob = s.villages.v_bob
-    expect(caravanCarry(world, s, ann, bob, 5)).toMatchObject({ animals: 'foot', cap: 30 }) // five people, six each
+    expect(caravanCarry(world, s, ann, bob, 5 * HEADS)).toMatchObject({ animals: 'foot', cap: 30 }) // five households of people, six each
     ann.buildings.push({ id: 'st', type: 'stable', col: ann.col, row: ann.row, progress: 1 })
     s.wells = { [cellIndex(world, ann.col, ann.row)]: true }
     expect(caravanCarry(world, s, ann, bob, 0)).toMatchObject({ animals: 'mules', cap: 60 })
@@ -53,8 +54,8 @@ describe('caravans carry by weight', () => {
     const ann = s.villages.v_ann
     ann.goods = { stone: 20, cheese: 30 }
     // five people carry 30, provisions included: a long cross-country trip takes 9 cheese (weight 9), leaving 21 for stone
-    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 8 }, crew: 5, food: { cheese: 9 } }, 'medium')).toMatch(/Too heavy: .* 30 weight/)
-    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 7 }, crew: 5, food: { cheese: 9 } }, 'medium')).toBeNull()
+    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 8 }, crew: 5 * HEADS, food: { cheese: 9 } }, 'medium')).toMatch(/Too heavy: .* 30 weight/)
+    expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { stone: 7 }, crew: 5 * HEADS, food: { cheese: 9 } }, 'medium')).toBeNull()
   })
 
   it('a cart shed needs a stable first', () => {

@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
-import { actionSize, buildCost, buildingAt, palisades, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { actionSize, buildCost, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
+import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
-import type { Player } from '../game/types'
+import type { Home, Player } from '../game/types'
 import { GEAR, RATION, foodValue, nightsOf, troopsAt } from '../game/garrison'
 import { WEIGHT, weightOf } from '../game/market'
 import { WALLS, strongholdAt, wallsAfter } from '../game/strongholds'
@@ -11,6 +12,9 @@ import { refineTips } from '../game/advisor'
 import { CARRY_EACH, jobs, needOf, people, spare, staffing } from '../game/workers'
 import { THIRSTY, WATER_NAME, hasWater, waterAt } from '../game/water'
 import { eventId, type Game } from '../app/store'
+import { outcome } from '../game/preview'
+import { CITY_RADIUS, HOMES, centreOf, findHome, findUpgrade, groundOf, hexAt, paveable, type HomeKind } from '../game/city'
+import { Confirm, type ConfirmProps } from './Confirm'
 import { useStep } from './Advisor'
 import { mixText, oreHint, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
@@ -34,14 +38,16 @@ const TERRAIN_NAME: Record<string, string> = {
   tundra: 'Tundra', snow: 'Snowfield',
 }
 
-export function Inspector({ game, p, col, row, onClose, notify }: {
-  game: Game; p: Player; col: number; row: number; onClose: () => void; notify: (s: string) => void
+export function Inspector({ game, p, col, row, tap, onClose, notify }: {
+  game: Game; p: Player; col: number; row: number; /** where on the map it was tapped (px, unlifted), so a home goes there */ tap?: { x: number; y: number }; onClose: () => void; notify: (s: string) => void
 }) {
   const { world, state } = game
   const i = cellIndex(world, col, row)
   const cell = world.cells[i]
   const known = state.revealed.includes(i)
-  const [mode, setMode] = useState<'main' | 'build' | 'caravan' | 'troops'>('main')
+  const [mode, setMode] = useState<'main' | 'build' | 'gather' | 'caravan' | 'troops'>('main')
+  // the yes/no window shown before anything is spent
+  const [confirm, setConfirm] = useState<Omit<ConfirmProps, 'onNo'> | null>(null)
   const v = state.villages[p.villageId]
   const here = buildingAt(state, col, row)
   const village = villageAt(state, col, row)
@@ -56,6 +62,9 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const treeNote = stand?.young ? `${stand.young} saplings (trees by winter)`
     : trees ? `${count} tree${count === 1 ? '' : 's'}${land.stumps ? `, ${land.stumps} stump${land.stumps === 1 ? '' : 's'}` : ''}` : null
   const mine = inTerritory(v, col, row)
+  const inCity = !!v.city?.includes(i)
+  /** can cobblestone go on this hex at all (land, near the square, not yet cobbled)? the card says why not when it can't yet */
+  const cobbleOk = !inCity && !!v.city?.length && cell.tier > 0 && distance(cell, v) <= CITY_RADIUS && paveable(cell)
   const left = known ? leftAt(world, state, i) : null
   const wild = known ? gameMax(world, i) : 0
 
@@ -71,8 +80,24 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
     await game.dispatch(r.ev)
     const last = game.state.log[game.state.log.length - 1]
     if (last) notify(logText(game.state, last.text))
+    setConfirm(null)
     setMode('main')
   }
+
+  /** Show what an action would spend and give, and only spend it on a yes. */
+  const ask = (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small', title?: string) => {
+    const r = tryAction(game, p, action, col, row, extra, need)
+    if (!r.ev || !r.tok) return notify(r.error ?? 'Not possible')
+    const o = outcome(world, state, p, action, col, row, extra, { size: r.tok.size, strength: r.tok.strength, merged: !!r.tok.tok2 }, game.now().toISOString())
+    const res = land.resource
+    const what = extra.building ? `Build a ${BUILDINGS[extra.building].name}?`
+      : extra.home ? `Build a ${HOMES[extra.home.kind].name.toLowerCase()}?`
+      : action === 'gather' && res && GATHER[res] ? `Gather ${GOOD_LABEL[GATHER[res]!].toLowerCase()}?`
+      : action === 'road' && r.tok.size === 'medium' ? 'Build a bridge?'
+      : ASK_TITLE[action] ?? `${ACTIONS[action].name}?`
+    setConfirm({ title: title ?? what, ...o, onYes: () => void run(action, extra, need) })
+  }
+  const dialog = confirm && <Confirm {...confirm} onNo={() => setConfirm(null)} />
 
   if (!known) {
     return (
@@ -86,18 +111,86 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
   const title = village ? village.name : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
   const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
+  const tierOf = (to: NonNullable<typeof village>) => caravanTier(world, state, v, to)
+  const acts: ActionKind[] = []
+  /** things you collect (their own sub-menu) and things you make or lay (inside Build) */
+  const gatherActs: ActionKind[] = [], workActs: ActionKind[] = []
+  // scouting is only offered where it would uncover something
+  const canScout = scoutsNew(world, state, col, row, scoutRadius(v, 1))
+  const ownMine = here && here.village.id === v.id && BUILDINGS[here.building.type].mine && here.building.progress >= 1 ? here.building : null
+  const dungeon = state.dungeons?.[i]
+  if (fort && !siege?.fallen) acts.push('siege', ...(canScout ? ['scout' as const] : []))
+  else if (lair) acts.push('expedition', ...(canScout ? ['scout' as const] : []))
+  else if (village && village.id !== v.id) acts.push('caravan', 'troops')
+  else {
+    if (canScout) acts.push('scout')
+    if (trees && !here && !village) gatherActs.push('clear')
+    if (mine && land.resource && land.resource !== 'stone' && GATHER[land.resource]) gatherActs.push('gather')
+    if (mine && left?.ore === 'stone' && left.surface >= 1) gatherActs.push('pick')
+    if (mine && clayLeft(world, state, i) !== null) gatherActs.push('dig_clay')
+    if (mine && !here && !village && !trees) workActs.push('plant')
+    if (cell.tier > 0 && !mine) acts.push('outpost')
+    if (cell.tier > 0) workActs.push(v.roads.includes(i) ? 'pave' : 'road')
+    if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) workActs.push('well')
+    if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
+    if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
+    if (dungeon && dungeon.villageId === v.id && dungeon.raids > 0) acts.unshift('expedition')
+  }
+
+
   if (mode === 'build') {
-    const defs = Object.values(BUILDINGS)
+    // homes go in the city now; the old House only for a village with no open land beside it for a city
+    const stuck = (v.city?.length ?? 0) < 2 && !neighbours(world.cells[cellIndex(world, v.col, v.row)].col, world.cells[cellIndex(world, v.col, v.row)].row).some(([c, r]) => c >= 0 && r >= 0 && c < world.width && r < world.height && paveable(world.cells[cellIndex(world, c, r)]))
+    const defs = Object.values(BUILDINGS).filter((d) => !d.legacy || stuck)
     // what this hex allows first, then the rest (each says why it can't go here)
     const ok = (d: (typeof defs)[number]) => !!tryAction(game, p, 'build', col, row, { building: d.id }, d.size).ev
     const sorted = [...defs.filter(ok), ...defs.filter((d) => !ok(d))]
+    const bldgs = mine && !village && !here && !inCity
     return (
       <Shell onClose={onClose} title={`Build on ${TERRAIN_NAME[terr]}`}>
         <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
+        <p className="muted" style={{ margin: '4px 0' }}>Pick something to see what it costs and what you get. Nothing is spent until you say yes.</p>
+        {(inCity || (cobbleOk && !village)) && (
+          <>
+            <h3 className="sub">City</h3>
+            <div className="actions">
+              {!inCity && <WorkButton game={game} p={p} action="cobble" col={col} row={row} onPick={() => ask('cobble')} />}
+              {inCity && <UpgradeButton game={game} p={p} hex={i} col={col} row={row} onPick={(h, index) => ask('upgrade', { home: h, replace: index }, HOMES.townhouse.size)} />}
+              {inCity && (['cottage', 'townhouse'] as HomeKind[]).map((k) => <HomeButton key={k} game={game} p={p} kind={k} hex={i} col={col} row={row} tap={tap} onPick={(h) => ask('home', { home: h }, HOMES[k].size)} />)}
+            </div>
+          </>
+        )}
+        {workActs.length > 0 && (
+          <>
+            <h3 className="sub">Roads, wells and trees</h3>
+            <div className="actions">
+              {workActs.map((a) => <WorkButton key={a} game={game} p={p} action={a} col={col} row={row} onPick={() => ask(a)} />)}
+            </div>
+          </>
+        )}
+        {bldgs ? (
+          <>
+            <h3 className="sub">Buildings</h3>
+            <div className="actions">
+              {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => ask('build', { building: d.id }, d.size)} />)}
+            </div>
+            <p className="muted">Any village can build anything. Neighbours who each specialise and trade get further than going it alone.</p>
+          </>
+        ) : <p className="muted">{village ? 'The village square: homes go on the cobblestone around it.' : inCity ? 'Workshops need open ground; homes go here.' : here ? 'There is a building here already.' : 'Buildings can only go up inside your territory.'}</p>}
+        {dialog}
+      </Shell>
+    )
+  }
+
+  if (mode === 'gather') {
+    return (
+      <Shell onClose={onClose} title={`Gather on ${TERRAIN_NAME[terr]}`}>
+        <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
+        <p className="muted" style={{ margin: '4px 0' }}>What do you want to gather here? You'll see what you'd get, and what it uses up, before anything is spent.</p>
         <div className="actions">
-          {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => run('build', { building: d.id }, d.size)} />)}
+          {gatherActs.map((a) => <GatherButton key={a} game={game} p={p} action={a} col={col} row={row} onPick={() => ask(a)} />)}
         </div>
-        <p className="muted">Any village can build anything. Neighbours who each specialise and trade get further than going it alone.</p>
+        {dialog}
       </Shell>
     )
   }
@@ -108,28 +201,6 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
 
   if (mode === 'caravan' && village) {
     return <CaravanForm game={game} p={p} to={village.id} onBack={() => setMode('main')} onSend={(goods, crew, food) => run('caravan', { to: village.id, goods, crew, food })} />
-  }
-
-  const tierOf = (to: NonNullable<typeof village>) => caravanTier(world, state, v, to)
-  const acts: ActionKind[] = []
-  const ownMine = here && here.village.id === v.id && BUILDINGS[here.building.type].mine && here.building.progress >= 1 ? here.building : null
-  const dungeon = state.dungeons?.[i]
-  if (fort && !siege?.fallen) acts.push('siege', 'scout')
-  else if (lair) acts.push('expedition', 'scout')
-  else if (village && village.id !== v.id) acts.push('caravan', 'troops')
-  else {
-    acts.push('scout')
-    if (trees && !here && !village) acts.push('clear')
-    if (mine && land.resource && land.resource !== 'stone') acts.push('gather')
-    if (mine && left?.ore === 'stone' && left.surface >= 1) acts.push('pick')
-    if (mine && !here && !village && !trees) acts.push('plant')
-    if (cell.tier > 0 && !mine) acts.push('outpost')
-    if (cell.tier > 0) acts.push(v.roads.includes(i) ? 'pave' : 'road')
-    if (mine && clayLeft(world, state, i) !== null) acts.push('dig_clay')
-    if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) acts.push('well')
-    if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
-    if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
-    if (dungeon && dungeon.villageId === v.id && dungeon.raids > 0) acts.unshift('expedition')
   }
 
   return (
@@ -157,6 +228,7 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
           </p>
         )
       })()}
+      {inCity && <p className="muted" style={{ margin: '4px 0' }}>🧱 Cobbled city: homes can stand here{(v.homes ?? []).length ? ` (${v.homes!.length} in the city so far)` : ''}.</p>}
       {v.paved?.includes(i) && <p className="muted" style={{ margin: '4px 0' }}>A paved road: caravans along it carry more and go faster.</p>}
       {village && <p style={{ margin: '4px 0' }}>👥 {Math.floor(village.population)}{village.away ? ` (${village.away} away)` : ''} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
@@ -188,17 +260,18 @@ export function Inspector({ game, p, col, row, onClose, notify }: {
       {fort && <Siege game={game} p={p} fort={fort} siege={siege} />}
       {lair && <p style={{ margin: '4px 0' }}>Strength {Math.round(lair.strength)}. Bring bronze, iron, leather and food to improve your odds.</p>}
       <div className="actions">
-        {mine && !village && (!here || here.building.progress < 1) && (
-          here
-            ? <button className="btn medium action" onClick={() => run('build', { building: here.building.type }, BUILDINGS[here.building.type].size)}>Finish building<small>{fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
-            : cell.tier > 0 && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>medium or big task</small></button>
-        )}
+        {mine && !village && here && here.building.progress < 1
+          ? <button className="btn medium action" onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
+          : cell.tier > 0 && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && !here))
+            && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>buildings, roads, wells, trees</small></button>}
+        {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {acts.map((a) => a === 'caravan'
           ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
           : a === 'troops'
             ? <button key={a} className="btn medium action" disabled={!palisades(village!)} onClick={() => setMode('troops')}>Send troops…<small>{palisades(village!) ? `medium task · ${troopsAt(state, village!)} on their walls` : 'They have no palisade to hold them'}</small></button>
             : <ActionButton key={a} game={game} p={p} action={a} col={col} row={row} onRun={() => run(a)} />)}
       </div>
+      {dialog}
     </Shell>
   )
 }
@@ -314,13 +387,96 @@ function ActionButton({ game, p, action, col, row, onRun }: { game: Game; p: Pla
   )
 }
 
+const homeCache = new Map<string, Home | null>()
+/** Where a home of this kind would go on this hex (the same answer until the game changes). */
+function homeSpot(game: Game, v: NonNullable<ReturnType<typeof villageAt>>, kind: HomeKind, hex: number, tap?: { x: number; y: number }): Home | null {
+  // where you tapped, if you did; else the middle of the hex
+  const near = tap ? groundOf(v, tap.x, tap.y) : centreOf(game.world, v, hex)
+  const key = `${game.meta.worldSeed}:${game.state.version}:${v.id}:${hex}:${kind}:${Math.round(near[0] / 3)},${Math.round(near[1] / 3)}`
+  if (!homeCache.has(key)) {
+    if (homeCache.size > 200) homeCache.clear()
+    homeCache.set(key, findHome(game.world, v, kind, hex, near))
+  }
+  return homeCache.get(key) ?? null
+}
+
+/** A cottage or town house for this hex: where it would stand is worked out first, so the card can say if there's no room. */
+function HomeButton({ game, p, kind, hex, col, row, tap, onPick }: { game: Game; p: Player; kind: HomeKind; hex: number; col: number; row: number; tap?: { x: number; y: number }; onPick: (h: Home) => void }) {
+  const v = game.state.villages[p.villageId]
+  const def = HOMES[kind]
+  const h = homeSpot(game, v, kind, hex, tap)
+  const r = h ? tryAction(game, p, 'home', col, row, { home: h }, def.size) : null
+  return (
+    <button className={`btn ${r?.ev ? def.size : ''} action`} disabled={!r?.ev} onClick={() => h && onPick(h)} title={def.blurb}>
+      {def.name}
+      <small>{r?.ev ? `room for ${def.cap} · would cost ${fmtGoods(def.cost)}` : h ? r?.error : 'No room on this hex'}</small>
+    </button>
+  )
+}
+
+const upgradeCache = new Map<string, { index: number; home: Home } | null>()
+/** Rebuild a cottage on this hex as a town house, if there is one and there's room (shown only when there's a cottage). */
+function UpgradeButton({ game, p, hex, col, row, onPick }: { game: Game; p: Player; hex: number; col: number; row: number; onPick: (h: Home, index: number) => void }) {
+  const v = game.state.villages[p.villageId]
+  // only on a hex that has a cottage of its own
+  if (!(v.homes ?? []).some((h) => h.kind === 'cottage' && hexAt(game.world, v, [h.x, h.y]) === hex)) return null
+  const key = `${game.meta.worldSeed}:${game.state.version}:${v.id}:${hex}`
+  if (!upgradeCache.has(key)) {
+    if (upgradeCache.size > 100) upgradeCache.clear()
+    upgradeCache.set(key, findUpgrade(game.world, v, hex))
+  }
+  const u = upgradeCache.get(key) ?? null
+  const r = u ? tryAction(game, p, 'upgrade', col, row, { home: u.home, replace: u.index }, HOMES.townhouse.size) : null
+  return (
+    <button className={`btn ${r?.ev ? 'big' : ''} action`} disabled={!r?.ev} onClick={() => u && onPick(u.home, u.index)} title={ACTIONS.upgrade.blurb}>
+      Rebuild a cottage as a town house
+      <small>{r?.ev ? `+${HOMES.townhouse.cap - HOMES.cottage.cap} room · would cost ${fmtGoods(HOMES.townhouse.cost)}` : u ? r?.error : 'No room for a town house in place of a cottage here'}</small>
+    </button>
+  )
+}
+
+/** A thing you can lay or dig (road, paving, well, trees): what it does, until you pick it. */
+function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onPick: () => void }) {
+  const r = tryAction(game, p, action, col, row)
+  const bridge = action === 'road' && actionSize(game.world, action, col, row, game.now().toISOString()) === 'medium'
+  const a = ACTIONS[action]
+  return (
+    <button className={`btn ${r.ev ? (bridge ? 'medium' : a.size) : ''} action`} disabled={!r.ev} onClick={onPick} title={r.error ?? a.blurb}>
+      {bridge ? 'Bridge' : a.name}
+      <small>{r.error ?? (bridge ? 'A wood and stone bridge carries the road over the river.' : a.blurb)}</small>
+    </button>
+  )
+}
+
+const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', clear: 'Fell a tree', dig_clay: 'Dig clay' }
+/** The question each confirmation asks. */
+const ASK_TITLE: Partial<Record<ActionKind, string>> = {
+  pick: 'Pick up the loose stone?', clear: 'Fell a tree?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
+  well: 'Dig a well?', plant: 'Plant trees?',
+}
+
+/** One thing you could gather here, with what you'd get from it (nothing is spent by looking). */
+function GatherButton({ game, p, action, col, row, onPick }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onPick: () => void }) {
+  const r = tryAction(game, p, action, col, row)
+  const i = cellIndex(game.world, col, row)
+  const res = landAt(game.world, game.state, i).resource
+  const name = action === 'gather' && res && GATHER[res] ? `Gather ${GOOD_LABEL[GATHER[res]!].toLowerCase()}` : GATHER_NAME[action] ?? ACTIONS[action].name
+  const o = r.ev && r.tok ? outcome(game.world, game.state, p, action, col, row, {}, { size: r.tok.size, strength: r.tok.strength, merged: !!r.tok.tok2 }, game.now().toISOString()) : null
+  return (
+    <button className={`btn ${r.ev ? 'small' : ''} action`} disabled={!r.ev} onClick={onPick} title={r.error ?? ACTIONS[action].blurb}>
+      {name}
+      <small>{o ? `you'd get ${o.gets[0]}` : r.error}</small>
+    </button>
+  )
+}
+
 function BuildButton({ game, p, def, col, row, onRun }: { game: Game; p: Player; def: BuildingDef; col: number; row: number; onRun: () => void }) {
   const r = tryAction(game, p, 'build', col, row, { building: def.id }, def.size)
   const v = game.state.villages[p.villageId]
   return (
     <button className={`btn ${r.ev ? def.size : ''} action`} disabled={!r.ev} onClick={onRun} title={def.blurb}>
       {def.name}
-      <small>{r.ev ? fmtGoods(buildCost(v, def, game.now().toISOString()), r.tok?.strength ?? 1) : r.error}</small>
+      <small>{r.ev ? `would cost ${fmtGoods(buildCost(v, def, game.now().toISOString()), r.tok?.strength ?? 1)}` : r.error}</small>
     </button>
   )
 }

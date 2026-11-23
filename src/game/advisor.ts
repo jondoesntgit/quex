@@ -13,7 +13,7 @@
  *
  *  Everything is worked out from the state; nothing is stored. */
 import { addDays, playerDate } from './calendar'
-import { BUILDINGS, FOOD, GOOD_LABEL, type BuildingId, type Good, type Goods } from './data'
+import { BUILDINGS, EAT, FOOD, GOOD_LABEL, type BuildingId, type Good, type Goods } from './data'
 import { VALUE, WEIGHT } from './market'
 import { dayScore, foodStock, landAt, popCap, territoryCells } from './reducer'
 import type { GameState, Player, Village } from './types'
@@ -39,13 +39,13 @@ const n = (v: Village, ...gs: Good[]) => gs.reduce((a, g) => a + (v.goods[g] ?? 
 export function shortfalls(v: Village): Shortfall[] {
   const out: Shortfall[] = []
   const pop = Math.max(1, people(v))
-  const days = foodStock(v) / (pop * 0.5)
+  const days = foodStock(v) / (pop * EAT)
   if (days < 3) out.push({ need: 'food', why: `about ${Math.max(0, Math.floor(days))} day${Math.floor(days) === 1 ? '' : 's'} of food in store`, weight: 5 })
   const kinds = (Object.keys(FOOD) as Good[]).filter((g) => (v.goods[g] ?? 0) >= 1).length
   if (kinds < 3) out.push({ need: 'larder', why: `only ${kinds} kind${kinds === 1 ? '' : 's'} of food: a varied larder keeps morale up`, weight: 2 })
   if (v.winterForecast !== 'stocked') out.push({ need: 'winter', why: `Saturday's winter looks ${v.winterForecast}: grain, smoked fish and cheese keep`, weight: v.winterForecast === 'hungry' ? 4 : 2 })
   if (n(v, 'cloth', 'leather', 'wool') < 2) out.push({ need: 'textiles', why: 'no cloth, leather or wool: clothes, sails and gear', weight: 1.5 })
-  if (v.population >= popCap(v) - 0.5) out.push({ need: 'shelter', why: 'every house is full: build a house to grow', weight: 2 })
+  if (v.population >= popCap(v) - 0.5) out.push({ need: 'shelter', why: 'every home is full: lay cobblestone and build a cottage or town house to grow', weight: 2 })
   if ((v.goods.timber ?? 0) < 4 || (v.goods.stone ?? 0) < 3) out.push({ need: 'building', why: `${Math.floor(v.goods.timber ?? 0)} timber and ${Math.floor(v.goods.stone ?? 0)} stone in store`, weight: 1.5 })
   if ((has(v, 'smelter') || has(v, 'bloomery') || has(v, 'silver_refinery')) && (v.goods.charcoal ?? 0) < 2) out.push({ need: 'fuel', why: 'the furnaces are short of charcoal', weight: 2 })
   if (n(v, 'copper', 'iron', 'bronze', 'steel') < 1) out.push({ need: 'metal', why: 'no metal for tools, weapons or trade', weight: 1 })

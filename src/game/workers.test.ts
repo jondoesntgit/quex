@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { apply, caravanCarry, newGame, produce, validate } from './reducer'
+import { HEADS } from './data'
 import { autoJobs, jobs, spare, staffing, stepsFor } from './workers'
 import { strongholdsOf, wallsAfter, WALLS } from './strongholds'
 import type { GameEvent, GameState } from './types'
@@ -24,12 +25,12 @@ describe('workers', () => {
   it('the village feeds itself first, then the rest; anyone else is free', () => {
     const s = setup()
     const v = s.villages.v_ann
-    v.population = 4
+    v.population = 4 * HEADS
     v.buildings.push({ id: 'k', type: 'kiln', col: 0, row: 0, progress: 1 }, { id: 'f', type: 'field', col: 0, row: 1, progress: 1 }, { id: 'h', type: 'house', col: 0, row: 2, progress: 1 })
-    expect(autoJobs(v)).toEqual({ f: 2, k: 1 })
-    expect(spare(v)).toBe(1)
-    v.population = 2
-    expect(autoJobs(v)).toEqual({ f: 2 }) // the field first; the kiln stands idle
+    expect(autoJobs(v)).toEqual({ f: 2 * HEADS, k: HEADS })
+    expect(spare(v)).toBe(HEADS)
+    v.population = 2 * HEADS
+    expect(autoJobs(v)).toEqual({ f: 2 * HEADS }) // the field first; the kiln stands idle
     expect(staffing(v, v.buildings[0])).toBe(0)
   })
 
@@ -39,9 +40,9 @@ describe('workers', () => {
     v.buildings.push({ id: 'k', type: 'kiln', col: 0, row: 0, progress: 1 }, { id: 'l', type: 'lumber_camp', col: 0, row: 1, progress: 1 })
     v.goods = { clay: 50, timber: 50 }
     v.autoJobs = false
-    v.jobs = { l: 2 }
+    v.jobs = { l: 2 * HEADS }
     const full = night(s).timber ?? 0
-    v.jobs = { l: 1 }
+    v.jobs = { l: HEADS }
     expect(night(s).timber).toBeCloseTo(full / 2, 1)
     expect(night(s).bricks).toBeUndefined() // nobody at the kiln
   })
@@ -51,10 +52,10 @@ describe('workers', () => {
     const v = s.villages.v_ann
     v.buildings.push({ id: 'l', type: 'lumber_camp', col: 0, row: 1, progress: 1 })
     const set = (j: Record<string, number>, auto = false) => run(s, { t: 'jobs', id: `j${++n}`, at: AT, playerId: 'ann', auto, jobs: j })
-    expect(set({ l: 3 })).toMatch(/at most 2/)
+    expect(set({ l: 3 * HEADS })).toMatch(new RegExp(`at most ${2 * HEADS}`))
     expect(set({ l: 1 })).toBeNull()
     expect(jobs(v)).toEqual({ l: 1 })
-    expect(spare(v)).toBe(4)
+    expect(spare(v)).toBe(5 * HEADS - 1)
     expect(set({}, true)).toBeNull()
     expect(v.autoJobs).toBe(true)
   })
@@ -63,19 +64,19 @@ describe('workers', () => {
     const s = setup()
     const v = s.villages.v_ann
     v.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 })
-    expect(spare(v)).toBe(1) // four of five work the fields
+    expect(spare(v)).toBe(HEADS) // four of five work the fields
     v.goods = { grain: 30 }
     const send = (crew: number, food: Record<string, number>) => {
       s.players.ann.tokens.push({ id: `m${++n}`, size: 'medium', strength: 1, date: DAY, slot: 1 })
       return run(s, { t: 'act', id: `c${n}`, at: AT, playerId: 'ann', tokenId: `m${n}`, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { grain: 1 }, crew, food } as GameEvent)
     }
     expect(send(0, { grain: 3 })).toMatch(/Someone has to go/)
-    expect(send(2, { grain: 3 })).toMatch(/Only 1 people are free/)
-    expect(send(1, {})).toMatch(/Pack food for the road/)
-    expect(send(1, { grain: 3 })).toBeNull()
-    expect(v.away).toBe(1)
+    expect(send(2 * HEADS, { grain: 3 })).toMatch(new RegExp(`Only ${HEADS} people are free`))
+    expect(send(HEADS, {})).toMatch(/Pack food for the road/)
+    expect(send(HEADS, { grain: 3 })).toBeNull()
+    expect(v.away).toBe(HEADS)
     expect(spare(v)).toBe(0)
-    expect(caravanCarry(world, s, v, s.villages.v_bob, 1).cap).toBe(6)
+    expect(caravanCarry(world, s, v, s.villages.v_bob, HEADS).cap).toBe(6)
   })
 })
 
@@ -105,7 +106,7 @@ describe('workshops and powder', () => {
     const s = setup()
     const v = s.villages.v_ann
     v.buildings.push({ id: 'g', type: 'gun_foundry', col: 0, row: 0, progress: 1 })
-    v.population = 10
+    v.population = 10 * HEADS
     v.goods = { iron: 5, bronze: 9, charcoal: 20 }
     expect(night(s).cannonballs).toBeGreaterThan(0)
     expect(run(s, { t: 'order', id: 'o', at: AT, playerId: 'ann', building: 'g', recipe: 'cannon' })).toBeNull()
@@ -118,7 +119,7 @@ describe('workshops and powder', () => {
   it('roasting chalcopyrite gives off sulfur', () => {
     const s = setup()
     const v = s.villages.v_ann
-    v.population = 10
+    v.population = 10 * HEADS
     v.buildings.push({ id: 's', type: 'smelter', col: 0, row: 0, progress: 1 }, { id: 'r', type: 'roasting_heap', col: 0, row: 1, progress: 1 })
     v.goods = { chalcopyrite: 4, charcoal: 10 }
     expect(night(s).sulfur).toBeGreaterThan(0)
@@ -144,7 +145,7 @@ describe('strongholds', () => {
     const v = s.villages.v_ann
     v.col = fort.col; v.row = fort.row + 3 // march distance
     s.revealed.push(fort.i)
-    v.population = 60
+    v.population = 60 * HEADS
     v.goods = { ram: 2, siege_tower: 1, cannon: 3, cannonballs: 10, gunpowder: 40, musket: 20, steel: 5, bread: 6 }
     s.players.ann.tokens.push({ id: 'b', size: 'big', strength: 1, date: DAY, slot: 0 })
     expect(run(s, { t: 'act', id: 'sg', at: AT, playerId: 'ann', tokenId: 'b', action: 'siege', col: fort.col, row: fort.row } as GameEvent)).toBeNull()
@@ -164,10 +165,10 @@ describe('the staffing gift', () => {
     v.buildings.push({ id: 'm', type: 'copper_mine', col: 0, row: 0, progress: 1 }, { id: 'f', type: 'field', col: 0, row: 1, progress: 1 }, { id: 'k', type: 'kiln', col: 0, row: 2, progress: 1 })
     s.staffGiven = undefined
     apply(s, world, { t: 'resetHour', id: 'r', at: AT, playerId: 'ann', hour: 0 })
-    expect(v.population).toBe(6) // 5 + 1 to staff 3 + 2 + 1
+    expect(v.population).toBe(6 * HEADS) // the 5 households, and the one more it takes to staff 3 + 2 + 1 buildings
     expect(v.buildings.some((b) => b.type === 'house')).toBe(true)
     apply(s, world, { t: 'resetHour', id: 'r2', at: AT, playerId: 'ann', hour: 0 })
-    expect(v.population).toBe(6)
+    expect(v.population).toBe(6 * HEADS)
   })
 })
 
@@ -175,23 +176,23 @@ describe('full stores', () => {
   it('move hands off food (it would only rot) onto other work, keeping enough to eat', () => {
     const s = setup()
     const v = s.villages.v_ann
-    v.population = 6
+    v.population = 6 * HEADS
     v.buildings.push(
       { id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 },
       { id: 'q', type: 'quarry', col: 0, row: 2, progress: 1 },
     )
     v.goods = { grain: 5 }
-    expect(autoJobs(v)).toEqual({ f1: 2, f2: 2, q: 2 })
+    expect(autoJobs(v)).toEqual({ f1: 2 * HEADS, f2: 2 * HEADS, q: 2 * HEADS })
     v.goods = { grain: 29 } // the stores hold 30
     const j = autoJobs(v)
-    expect(j.q).toBe(2)
+    expect(j.q).toBe(2 * HEADS)
     expect((j.f1 ?? 0) + (j.f2 ?? 0)).toBeGreaterThan(0) // still enough to eat
   })
 
   it('bake and smoke without making food from nothing', () => {
     const s = setup()
     const v = s.villages.v_ann
-    v.population = 10
+    v.population = 10 * HEADS
     v.buildings.push({ id: 'm', type: 'mill', col: 0, row: 0, progress: 1 })
     v.goods = { grain: 3 }
     const made = produce(s, world, v, s.players.ann, { habitsDone: [] } as never, DAY, 1, AT)

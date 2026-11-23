@@ -1,7 +1,7 @@
 /** Winter prep: what a village needs before Saturday's winter, what's still
  *  missing, and what finishing real-life tasks would do about it. Pure, read
  *  only: it mirrors the nightly tick's rules (see tick() in reducer.ts). */
-import { BUILDINGS, FOOD, type BuildingId, type Good, type TaskSize } from './data'
+import { BUILDINGS, EAT, FOOD, type BuildingId, type Good, type TaskSize } from './data'
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
 import { defence, foodStock, storageCap } from './reducer'
 import { people } from './workers'
@@ -66,7 +66,7 @@ function keepsMade(v: Village, date: ISODate, score: number): number {
 
 export function winterPrep(v: Village, today: ISODate, score: number): WinterPrep {
   const days = (6 - weekday(today) + 7) % 7
-  const need = people(v) * 0.5
+  const need = people(v) * EAT
   const target = need * 1.5
   const keeps = foodStock(v, true)
   const tonight = { now: keepsMade(v, today, score), full: keepsMade(v, today, 100) }

@@ -26,7 +26,7 @@ import type { GameState, ISODate, Village } from './types'
 export const VALUE: Record<Good, number> = {
   grain: 1, fish: 1, timber: 1, stone: 1, clay: 1, berries: 1.5, game: 1.5, wool: 1.5, herbs: 2, salt: 3,
   copper_ore: 2, chalcopyrite: 1.5, limonite: 2, iron_ore: 2.5, magnetite: 3, silver_ore: 4, tin: 6,
-  bread: 2, smoked_fish: 2.5, cheese: 3, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
+  bread: 2, smoked_fish: 2.5, cheese: 3, biscuit: 2, dried_peas: 1.5, honey: 4, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
   copper: 5, iron: 7, bronze: 10, steel: 15, silver: 50,
   relic: 25, dragon_scale: 40,
   saltpetre: 4, sulfur: 4, gunpowder: 12, cannonballs: 6, musket: 25, cannon: 120, ram: 30, siege_tower: 60,
@@ -40,7 +40,7 @@ export const COPPER_PER_SILVER = 10
 export const WEIGHT: Record<Good, number> = {
   grain: 1, fish: 1, timber: 2, stone: 3, clay: 2, berries: 0.5, game: 1, wool: 0.5, herbs: 0.2, salt: 1,
   copper_ore: 3, chalcopyrite: 3, limonite: 3, iron_ore: 3, magnetite: 3.5, silver_ore: 3, tin: 1,
-  bread: 0.5, smoked_fish: 0.5, cheese: 1, bricks: 2, charcoal: 1, planks: 1.5, leather: 0.5, cloth: 0.5,
+  bread: 0.5, smoked_fish: 0.5, cheese: 1, biscuit: 0.5, dried_peas: 0.8, honey: 1, bricks: 2, charcoal: 1, planks: 1.5, leather: 0.5, cloth: 0.5,
   copper: 1, iron: 1.5, bronze: 1.5, steel: 1.5, silver: 1,
   relic: 0.5, dragon_scale: 1,
   saltpetre: 1, sulfur: 1, gunpowder: 1, cannonballs: 3, musket: 2, cannon: 30, ram: 20, siege_tower: 40,

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { winterPrep } from './winter'
+import { HEADS } from './data'
 import type { Village } from './types'
 
 const village = (over: Partial<Village> = {}): Village => ({
-  id: 'v', playerId: 'p', name: 'Testford', role: 'farm', col: 0, row: 0, population: 6, morale: 60,
+  id: 'v', playerId: 'p', name: 'Testford', role: 'farm', col: 0, row: 0, population: 6 * HEADS, morale: 60,
   goods: {}, buildings: [], outposts: [], roads: [], planted: [], cleared: [], winterForecast: 'tight', ...over,
 })
 const item = (w: ReturnType<typeof winterPrep>, id: string) => w.items.find((x) => x.id === id)!

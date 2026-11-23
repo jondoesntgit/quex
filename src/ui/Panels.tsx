@@ -694,7 +694,7 @@ function Growth({ game, p }: { game: Game; p: Player }) {
   const t = tonight(game.state, game.world, p, game.now())
   const room = popCap(v) - v.population
   const checks = [
-    { ok: room > 0.05, text: room > 0.05 ? `Room in the houses: ${Math.floor(v.population)} of ${popCap(v)} places` : `The houses are full (${popCap(v)} places): build a House for 4 more` },
+    { ok: room > 0.05, text: room > 0.05 ? `Room in the homes: ${Math.floor(v.population)} of ${popCap(v)} places` : `The homes are full (${popCap(v)} places): lay cobblestone, then build a cottage (12 more) or town house (24 more) in the city` },
     { ok: v.morale >= GROW_MORALE, text: `Morale at least ${GROW_MORALE}: it's ${v.morale}${v.morale < GROW_MORALE ? ' (a varied larder, a good day, a chapel or devotions lift it)' : ''}` },
     { ok: t.food >= 0 && !t.hungry, text: t.food >= 0 && !t.hungry ? `Food: tonight the village makes at least what it eats (${t.food >= 0 ? '+' : ''}${t.food})` : `Food: tonight the village eats more than it makes (${t.food}): more fields, fishing, herds, or fewer spoiling stores` },
   ]

@@ -8,7 +8,7 @@
  *
  *  More people come when there's room in the houses, morale is reasonable, and
  *  the village makes at least as much food as it eats (see tick, growth). */
-import { BUILDINGS, FOOD, type BuildingId, type Good, type Goods } from './data'
+import { BUILDINGS, EAT, FOOD, HEADS, type BuildingId, type Good, type Goods } from './data'
 import type { Building, Village } from './types'
 
 /** Hands each building needs to run at full strength (none: houses, walls, halls...). */
@@ -21,9 +21,9 @@ export const WORKERS: Partial<Record<BuildingId, number>> = {
   nitre_beds: 1, powder_mill: 2, gun_foundry: 3, gunsmith: 2, siege_workshop: 2,
 }
 /** Weight each person carries on a caravan. */
-export const CARRY_EACH = 6
+export const CARRY_EACH = 6 / HEADS
 
-export const needOf = (b: { type: BuildingId }) => WORKERS[b.type] ?? 0
+export const needOf = (b: { type: BuildingId }) => (WORKERS[b.type] ?? 0) * HEADS
 /** People at home to work: the village's people, less those away on a neighbour's walls
  *  (who still count as the village's, and still have a house to come back to). */
 export const people = (v: Village) => Math.max(0, Math.floor(v.population) - (v.away ?? 0))
@@ -43,7 +43,7 @@ const room = (v: Village) => 30 + v.buildings.filter((b) => b.progress >= 1).red
 
 /** The stores are as good as full: more food would only rot. */
 export function storesFull(v: Village): boolean {
-  return stock(v) >= room(v) - people(v) * 0.5
+  return stock(v) >= room(v) - people(v) * EAT
 }
 
 /** The village's own choice: food first, then everything else in the order it was built.
@@ -61,7 +61,7 @@ export function autoJobs(v: Village): Record<string, number> {
   }
   if (storesFull(v)) {
     // enough to feed everyone (a fifth over, for bad days), then the rest of the work, then any spare hands back on food
-    let want = people(v) * 0.5 * 1.2
+    let want = people(v) * EAT * 1.2
     for (const b of food) {
       if (want <= 0) break
       const each = netFood(b) / needOf(b)

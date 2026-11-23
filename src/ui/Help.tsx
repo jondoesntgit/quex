@@ -67,15 +67,15 @@ export function Help({ onClose }: { onClose: () => void }) {
           <summary>Your village</summary>
           <p>
             You found your village by tapping a spot on the map. Your land is the hexes within two of the village
-            (yellow border); outposts add more. Villagers need food (about half a unit each a day), houses to live in,
+            (yellow border); outposts add more. Villagers need food (a tenth of a unit each a day), homes to live in,
             and good morale to grow. The <b>Village</b> tab shows people, defence, food in store and goods.
           </p>
           <ul>
             <li>Buildings produce every night. How much depends on how well your day went (a good day means a good harvest).</li>
             <li>Fresh food (fish, berries, bread, game) partly spoils each night. Grain, smoked fish and cheese keep, and a granary stores more. Baking and smoking don't make more food: 3 grain bake 2 loaves (the same food, but bread lifts morale and weighs half as much), and smoking dries fish out (2 fish make 1.6) so it keeps through winter.</li>
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
-            <li><b>Workers:</b> your people at home do the work. Each building needs a few hands (a field 2, a mine 3, a kiln 1), and one with half its workers makes half as much. The village manages its workers for you (food buildings first; once the stores are full, only enough on food to feed everyone, the rest on other work), or switch that off in the Village tab and assign them yourself. People not working are free to go with a caravan or as troops; while they're away they're still yours (their houses kept), but they can't work until they're home.</li>
-            <li><b>More people</b> settle when three things hold: room in the houses (a House holds 4 more), morale of at least 45, and the village making at least as much food as it eats (spoiling and rotting count). The Village tab ticks them off for tonight.</li>
+            <li><b>Workers:</b> your people at home do the work. Each building needs a good few hands (a field 10, a mine 15, a kiln 5), and one with half its workers makes half as much. The village manages its workers for you (food buildings first; once the stores are full, only enough on food to feed everyone, the rest on other work), or switch that off in the Village tab and assign them yourself. People not working are free to go with a caravan or as troops; while they're away they're still yours (their houses kept), but they can't work until they're home.</li>
+            <li><b>More people</b> settle when three things hold: room in the homes (the village square holds 30; each cottage you build in the city holds 12 more, each town house 24; lay cobblestone next to the city first), morale of at least 45, and the village making at least as much food as it eats (spoiling and rotting count). The Village tab ticks them off for tonight.</li>
           </ul>
           <p>Wrong spot? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
         </details>

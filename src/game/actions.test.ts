@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
+import { HEADS } from './data'
 import { line } from '../world/hex'
-import { FREE, HEX_MINUTES, apply, caravanMinutes, caravanTier, cellIndex, newGame, tonight, validate } from './reducer'
+import { FREE, HEX_MINUTES, apply, caravanMinutes, caravanTier, cellIndex, newGame, scoutRadius, scoutsNew, tonight, validate } from './reducer'
 import type { GameEvent, GameState } from './types'
 
 const world = generateWorld('test-seed')
@@ -56,7 +57,7 @@ describe('roads and caravans', () => {
     const s = setup()
     const ann = s.villages.v_ann, bob = s.villages.v_bob
     ann.goods = { grain: 40 }
-    const send = (tokenId: string, id: string) => run(s, { t: 'act', id, at: AT, playerId: 'ann', tokenId, action: 'caravan', col: bob.col, row: bob.row, to: 'v_bob', goods: { grain: 1 }, crew: 1, food: { grain: 3 } } as GameEvent)
+    const send = (tokenId: string, id: string) => run(s, { t: 'act', id, at: AT, playerId: 'ann', tokenId, action: 'caravan', col: bob.col, row: bob.row, to: 'v_bob', goods: { grain: 1 }, crew: HEADS, food: { grain: 3 } } as GameEvent)
     expect(caravanTier(world, s, ann, bob)).toBe('medium')
     expect(send(tok(s, 'small'), 'c1')).toMatch(/medium task/)
     const way = line(ann, bob).map((o) => cellIndex(world, o.col, o.row))
@@ -99,5 +100,32 @@ describe('tonight', () => {
     expect(JSON.stringify(s)).toBe(before) // nothing changed
     const fish = t.rows.find((r) => r.good === 'fish')!
     expect(fish.net[0]).toBeLessThan(0) // eaten and spoiling
+  })
+})
+
+describe('scouting', () => {
+  it('is refused on explored land with nothing new around it, and allowed from the edge', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    const scout = (id: string, col: number, row: number) => run(s, { t: 'act', id, at: AT, playerId: 'ann', tokenId: tok(s, 'small'), action: 'scout', col, row } as GameEvent)
+    // the village sees 4 hexes round it: scouting from its own square shows nothing new
+    expect(scoutsNew(world, s, v.col, v.row, 2)).toBe(false)
+    expect(scout('c1', v.col, v.row)).toMatch(/Nothing new/)
+    // from the edge of what's known, the party sees beyond it
+    const edge = { col: v.col + 4, row: v.row }
+    expect(scoutsNew(world, s, edge.col, edge.row, 2)).toBe(true)
+    expect(scout('c2', edge.col, edge.row)).toBeNull()
+    // and once that's uncovered, the same spot is spent
+    expect(scoutsNew(world, s, edge.col, edge.row, 2)).toBe(false)
+    expect(scout('c3', edge.col, edge.row)).toMatch(/Nothing new/)
+  })
+
+  it('sees one hex further with a whole action than with half, and one more with a scout camp', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    expect(scoutRadius(v, 1)).toBe(2)
+    expect(scoutRadius(v, 0.5)).toBe(1)
+    v.buildings.push({ id: 'sc', type: 'scout_camp', col: v.col + 1, row: v.row, progress: 1 })
+    expect(scoutRadius(v, 1)).toBe(3)
   })
 })

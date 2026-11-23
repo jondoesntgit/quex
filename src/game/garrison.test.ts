@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { apply, newGame, validate } from './reducer'
 import { garrison, nightsOf, troopsAt } from './garrison'
+import { HEADS } from './data'
 import type { GameEvent, GameState } from './types'
 
 const world = generateWorld('test-seed')
@@ -18,7 +19,7 @@ function setup(): GameState {
   const ann = s.villages.v_ann
   ann.buildings.push({ id: 'pal', type: 'palisade', col: ann.col + 1, row: ann.row, progress: 1 })
   const bob = s.villages.v_bob
-  bob.population = 10
+  bob.population = 10 * HEADS
   bob.goods = { iron: 3, steel: 1, cheese: 4, grain: 6, timber: 5 }
   return s
 }
@@ -41,28 +42,28 @@ const tick = (s: GameState, pid: string, date: string) => apply(s, world, { t: '
 describe('troops at a palisade', () => {
   it('need a palisade, food for a night, and two people left at home', () => {
     const s = setup()
-    expect(send(s, 2, { cheese: 1 }, 'v_bob')).toMatch(/neighbour/)
+    expect(send(s, 2 * HEADS, { cheese: 1 }, 'v_bob')).toMatch(/neighbour/)
     s.villages.v_ann.buildings = []
-    expect(send(s, 2, { cheese: 1 })).toMatch(/palisade/)
+    expect(send(s, 2 * HEADS, { cheese: 1 })).toMatch(/palisade/)
     const t = setup()
-    expect(send(t, 9, { cheese: 4 })).toMatch(/two people/)
-    expect(send(t, 3, { grain: 1 })).toMatch(/at least a night/)
-    expect(send(t, 2, { timber: 1, cheese: 1 })).toMatch(/weapons, armour and food/)
+    expect(send(t, 9 * HEADS, { cheese: 4 })).toMatch(new RegExp(`at least ${2 * HEADS} people`))
+    expect(send(t, 3 * HEADS, { grain: 1 })).toMatch(/at least a night/)
+    expect(send(t, 2 * HEADS, { timber: 1, cheese: 1 })).toMatch(/weapons, armour and food/)
   })
 
   it('wait at the gate, then the host takes them in: they guard and march, eating their own food', () => {
     const s = setup()
-    expect(send(s, 3, { iron: 2, steel: 1, cheese: 2, grain: 1.5 })).toBeNull()
+    expect(send(s, 3 * HEADS, { iron: 2, steel: 1, cheese: 2, grain: 1.5 })).toBeNull()
     const bob = s.villages.v_bob
-    expect(bob.population).toBe(10) // still Bob's people
-    expect(bob.away).toBe(3)
+    expect(bob.population).toBe(10 * HEADS) // still Bob's people
+    expect(bob.away).toBe(3 * HEADS)
     expect(bob.goods).toMatchObject({ iron: 1, cheese: 2, grain: 4.5 })
     const [d] = garrison(s, s.villages.v_ann)
-    expect(d).toMatchObject({ status: 'waiting', troops: 3, gear: { iron: 2, steel: 1 } })
+    expect(d).toMatchObject({ status: 'waiting', troops: 3 * HEADS, gear: { iron: 2, steel: 1 } })
     expect(nightsOf(d)).toBe(3) // 4.5 food value, 1.5 a night
     expect(troopsAt(s, s.villages.v_ann)).toBe(0) // not until they're let in
     expect(decide(s, d.id, true)).toBeNull()
-    expect(troopsAt(s, s.villages.v_ann)).toBe(3)
+    expect(troopsAt(s, s.villages.v_ann)).toBe(3 * HEADS)
     const annFood = s.villages.v_ann.goods.grain
     tick(s, 'ann', '2026-11-23')
     expect(s.villages.v_ann.goods.grain).toBeLessThanOrEqual(annFood!) // ann's own stores don't feed them
@@ -77,31 +78,31 @@ describe('troops at a palisade', () => {
 
   it('are turned back with everything they brought', () => {
     const s = setup()
-    send(s, 2, { iron: 1, cheese: 1 })
+    send(s, 2 * HEADS, { iron: 1, cheese: 1 })
     const [d] = garrison(s, s.villages.v_ann)
     expect(decide(s, d.id, false)).toBeNull()
     expect(s.villages.v_bob.goods).toMatchObject({ iron: 3, cheese: 4 })
-    expect(s.villages.v_bob.population).toBe(10)
+    expect(s.villages.v_bob.population).toBe(10 * HEADS)
   })
 
   it('give up after waiting three days at the gate', () => {
     const s = setup()
-    send(s, 2, { cheese: 2 })
+    send(s, 2 * HEADS, { cheese: 2 })
     tick(s, 'ann', '2026-11-23')
     tick(s, 'ann', '2026-11-24')
     expect(garrison(s, s.villages.v_ann)).toHaveLength(1)
     tick(s, 'ann', '2026-11-25')
     tick(s, 'ann', '2026-11-26')
     expect(garrison(s, s.villages.v_ann)).toHaveLength(0)
-    expect(s.villages.v_bob.population).toBe(10)
+    expect(s.villages.v_bob.population).toBe(10 * HEADS)
   })
 
   it('go home if the host abandons the village', () => {
     const s = setup()
-    send(s, 2, { steel: 1, cheese: 1 })
+    send(s, 2 * HEADS, { steel: 1, cheese: 1 })
     decide(s, garrison(s, s.villages.v_ann)[0].id, true)
     apply(s, world, { t: 'abandon', id: 'ab', at: AT, playerId: 'ann' })
-    expect(s.villages.v_bob.population).toBe(10)
+    expect(s.villages.v_bob.population).toBe(10 * HEADS)
     expect(s.villages.v_bob.goods.steel).toBe(1)
   })
 })

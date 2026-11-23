@@ -8,15 +8,15 @@
  *  They eat only the food they brought. When it runs out, or the host sends
  *  them home, they walk home and disband, and their gear goes back with them.
  */
-import { FOOD, type Good, type Goods } from './data'
+import { EAT, FOOD, HEADS, type Good, type Goods } from './data'
 import type { GameState, Village } from './types'
 
 /** Weapons and armour a detachment can bring. */
 export const GEAR: Good[] = ['bronze', 'iron', 'steel', 'leather']
 /** Food (in food value) each soldier eats a night. */
-export const RATION = 0.5
+export const RATION = EAT
 /** Troops a palisade can hold (waiting at the gate included). */
-export const PER_PALISADE = 10
+export const PER_PALISADE = 10 * HEADS
 /** Days a detachment waits at the gate before giving up and going home. */
 export const WAIT_DAYS = 3
 

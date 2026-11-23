@@ -9,20 +9,23 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, DEEPEN_COST, GOOD_LABEL, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, DEEPEN_COST, EAT, GOOD_LABEL, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
+import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
+import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, homeFits, homesCap, hexAt, paveable, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
 import { CARRY_EACH, people, spare, staffing, needOf } from './workers'
 import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
 import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
 import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, dig, dungeonUnder, gameLeft, gameMax, hunt, leftAt, levels, mineDig, stonyness } from './deposits'
-import type { Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
+import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
+    headsScaled: true,
     worldSeed: world.seed,
     seasonStart,
     players: {},
@@ -42,6 +45,16 @@ export function ensureDay(p: Player, date: ISODate): DayRecord {
   return (p.days[date] ??= {
     date, slots: PLAN_SIZES.map((size) => ({ size, status: 'none' })), habitsDone: [], frozen: false, ticked: false,
   })
+}
+
+/** How far a scouting party sees: two hexes with a whole action, one with half; a Scout camp adds one. */
+export function scoutRadius(v: Village, strength: number): number {
+  return (strength >= 1 ? 2 : 1) + (done(v).some((b) => b.type === 'scout_camp') ? 1 : 0)
+}
+
+/** Would scouting from this hex show any land you haven't seen? (A hex of unknown land always would.) */
+export function scoutsNew(world: World, s: GameState, col: number, row: number, radius: number): boolean {
+  return spiral({ col, row }, radius).some((o) => o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height && !s.revealed.includes(cellIndex(world, o.col, o.row)))
 }
 
 export function dayScore(d: DayRecord | undefined): number {
@@ -254,8 +267,10 @@ export function villageAt(s: GameState, col: number, row: number) {
   return Object.values(s.villages).find((v) => v.col === col && v.row === row) ?? null
 }
 
+/** What the village square itself holds (the town houses round the well). */
+export const BASE_CAP = 6 * HEADS
 export function popCap(v: Village) {
-  return 6 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].popCap ?? 0), 0)
+  return BASE_CAP + done(v).reduce((a, b) => a + (BUILDINGS[b.type].popCap ?? 0), 0) + homesCap(v)
 }
 
 export function defence(v: Village) {
@@ -280,7 +295,7 @@ function sendHome(s: GameState, host: Village, d: Detachment, at: string, why: s
 
 export function power(v: Village) {
   const g = v.goods
-  return people(v) + defence(v) * 1.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 + Math.min(g.steel ?? 0, 5) * 4
+  return people(v) / HEADS + defence(v) * 1.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 + Math.min(g.steel ?? 0, 5) * 4
 }
 
 export function done(v: Village) {
@@ -467,6 +482,10 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     const def = ev.building && BUILDINGS[ev.building]
     if (!def) return 'Unknown building'
     if (SIZE_RANK[tok.size] < SIZE_RANK[def.size]) return `${def.name} needs a ${def.size} task`
+  } else if (ev.action === 'home' || ev.action === 'upgrade') {
+    const def = ev.action === 'upgrade' ? HOMES.townhouse : ev.home && HOMES[ev.home.kind]
+    if (!def) return 'Pick a home to build'
+    if (SIZE_RANK[tok.size] < SIZE_RANK[def.size]) return `A ${def.name} needs a ${def.size} task`
   } else if (SIZE_RANK[tok.size] < SIZE_RANK[need]) return ev.action === 'road' && need === 'medium' ? 'A bridge needs a medium task' : `${ACTIONS[ev.action].name} needs a ${need} task`
   if (ev.col < 0 || ev.row < 0 || ev.col >= world.width || ev.row >= world.height) return 'Off the map'
   const i = cellIndex(world, ev.col, ev.row)
@@ -476,7 +495,8 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   const terr = land.terrain
   switch (ev.action) {
     case 'scout': {
-      if (revealed) return null
+      // on land you've seen already, scouting is only for what lies beyond it
+      if (revealed) return scoutsNew(world, s, ev.col, ev.row, scoutRadius(v, tok.strength)) ? null : 'Nothing new to uncover here: the land around it is explored'
       const near = spiral(ev, 1).some((o) => s.revealed.includes(cellIndex(world, o.col, o.row)))
       return near ? null : 'Scout from the edge of what you know'
     }
@@ -516,6 +536,27 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Roads must start from your territory'
       if (v.roads.includes(i)) return 'Already a road'
       return null
+    case 'cobble': return cobbleError(world, s, v, i)
+    case 'home': {
+      const h = ev.home, def = h && HOMES[h.kind]
+      if (!h || !def) return 'Pick a home to build'
+      if (!validKey(h.kind, h.key) || !Number.isFinite(h.x) || !Number.isFinite(h.y) || (h.side !== 'front' && h.side !== 'back')) return 'That is not a home'
+      if (!v.city?.length) return 'Lay cobblestone first'
+      if (hexAt(world, v, [h.x, h.y]) !== i) return 'That home is not on this hex'
+      if (!hasGoods(v, def.cost)) return `Needs ${fmtGoods(def.cost)}`
+      return homeFits(world, v, h) ? null : 'No room for that there: it would cover a door or block the way'
+    }
+    case 'upgrade': {
+      const h = ev.home, k = ev.replace, def = HOMES.townhouse
+      if (!h || h.kind !== 'townhouse' || !validKey('townhouse', h.key) || !Number.isFinite(h.x) || !Number.isFinite(h.y) || (h.side !== 'front' && h.side !== 'back')) return 'That is not a town house'
+      const old = k === undefined ? undefined : v.homes?.[k]
+      if (!old || old.kind !== 'cottage') return 'Pick a cottage to rebuild'
+      // the hex is where the cottage stands (the town house reaches back from its front, and may lean into the next hex)
+      if (hexAt(world, v, [old.x, old.y]) !== i) return 'That cottage is not on this hex'
+      if (!hasGoods(v, def.cost)) return `Needs ${fmtGoods(def.cost)}`
+      const without = { ...v, homes: v.homes!.filter((_, n) => n !== k) }
+      return homeFits(world, without, h) ? null : 'No room for a town house there: it would cover a door, hide a home or block the way'
+    }
     case 'pave':
       if (!v.roads.includes(i)) return 'Only one of your roads'
       if (v.paved?.includes(i)) return 'Already paved'
@@ -538,6 +579,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       const def = BUILDINGS[ev.building!]
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
       if (cell.tier === 0) return 'Not on water'
+      if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
       if (ev.col === v.col && ev.row === v.row) return 'That is your village square'
       const existing = buildingAt(s, ev.col, ev.row)
       if (existing) {
@@ -584,7 +626,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!palisades(to)) return 'They need a palisade to hold troops'
       const n = ev.troops ?? 0
       if (!Number.isInteger(n) || n < 1) return 'Send at least one person'
-      if (n > people(v) - 2) return 'Keep at least two people at home'
+      if (n > people(v) - 2 * HEADS) return `Keep at least ${2 * HEADS} people at home`
       const goods = ev.goods ?? {}
       if (Object.keys(goods).some((g) => !GEAR.includes(g as Good) && !FOOD[g as Good])) return 'Troops carry only weapons, armour and food'
       if (!hasGoods(v, goods)) return 'Not enough goods'
@@ -674,6 +716,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   deliverCaravans(s, ev.at)
   crewsHome(s, ev.at)
   givePurses(s, ev.at)
+  convertToCities(s, world, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
   if (err) {
@@ -820,6 +863,90 @@ function log(s: GameState, at: string, playerId: string | null, text: string, ki
   if (s.log.length > 300) s.log.splice(0, s.log.length - 300)
 }
 
+/** Why a hex can't be laid with cobblestone (null if it can). */
+export function cobbleError(world: World, s: GameState, v: Village, i: number): string | null {
+  const c = world.cells[i]
+  if (!v.city?.length) return 'Your village has no city yet'
+  if (v.city.includes(i)) return 'Cobbled already'
+  if (!paveable(c)) return c.tier === 0 ? 'Not on water' : c.riverTo !== -1 ? 'Not over a river' : 'Cobblestone cannot be laid on this ground'
+  if (distance(c, v) > CITY_RADIUS) return 'Too far from the village square'
+  if (!neighbours(c.col, c.row).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && v.city!.includes(nr * world.width + nc))) return 'Cobbles must join the city'
+  if (buildingAt(s, c.col, c.row) || villageAt(s, c.col, c.row)) return 'Something is built here already'
+  if (!hasGoods(v, COBBLE_COST)) return `Needs ${fmtGoods(COBBLE_COST)}`
+  return null
+}
+
+/** A hex taken into a city is cleared of trees for good (the open land stays open). Returns how many stood. */
+function clearForCity(world: World, s: GameState, i: number, at: string): number {
+  const land = landAt(world, s, i)
+  if (!hasTrees(land)) return 0
+  const standing = treeCount(land)
+  const old = s.woods?.[i]
+  ;(s.woods ??= {})[i] = { n: 0, young: 0, max: old?.max ?? Math.max(1, standing), kind: old?.kind ?? (land.feature?.startsWith('pine') ? 'pine' : 'oak'), since: at.slice(0, 10) }
+  return standing
+}
+
+/** Immigrants arrive, with their travel food: the people and the food go in, and the arrival is kept as
+ *  a note for the player (and a line in the log). */
+function welcome(s: GameState, v: Village, at: string, kind: 'update' | 'winter', people: number) {
+  if (people < 1) return
+  const origin = originFor(`${v.id}|${at.slice(0, 10)}|${kind}`)
+  const goods = travelFood(people, origin)
+  if (kind === 'winter') v.population = round2(v.population + people)
+  addGoods(v, goods)
+  const a: Arrival = { id: `${kind}-${at.slice(0, 10)}`, at, kind, people, from: origin.name, goods }
+  v.arrivals = [...(v.arrivals ?? []), a].slice(-6)
+  log(s, at, v.playerId, `${people} newcomers from ${origin.name} settled in ${V(v)}, with ${TRAVEL_DAYS} days of food: ${fmtGoods(goods)}.`, 'good')
+}
+
+/** Hexes a village's city can't take: any village's square, and anything built. */
+function takenHexes(world: World, s: GameState, except: Village): Set<number> {
+  const taken = new Set<number>()
+  for (const o of Object.values(s.villages)) {
+    taken.add(cellIndex(world, o.col, o.row))
+    for (const b of o.buildings) taken.add(cellIndex(world, b.col, b.row))
+    for (const x of o.outposts) taken.add(cellIndex(world, x.col, x.row))
+    if (o !== except) for (const i of o.city ?? []) taken.add(i)
+  }
+  return taken
+}
+
+/** From this moment people are counted one by one: until then a village counted households of five. Every
+ *  village (and every caravan crew, band of troops and worker assignment) is converted once, and each gets
+ *  a city: its square and two cobbled hexes beside it, where the player lays more and builds homes. */
+export const CITY_FROM = '2026-11-22T20:30:00.000Z'
+function convertToCities(s: GameState, world: World, at: string) {
+  if (s.headsScaled || at < CITY_FROM) return
+  // A surprise in an old world's data must never stop the game (every event passes through here): the
+  // conversion is done in place, but on any failure the world is put back as it was and tried again later.
+  const snap = structuredClone({ villages: s.villages, caravans: s.caravans, homeward: s.homeward, garrisons: s.garrisons, woods: s.woods, log: s.log })
+  try {
+    for (const v of Object.values(s.villages)) {
+      const before = v.population
+      v.population = Math.round(v.population * HEADS)
+      welcome(s, v, at, 'update', v.population - Math.round(before))
+      if (v.away) v.away *= HEADS
+      if (v.jobs) for (const k of Object.keys(v.jobs)) v.jobs[k] *= HEADS
+      v.city = claimCity(world, v, takenHexes(world, s, v))
+      for (const i of v.city) clearForCity(world, s, i, at)
+    }
+    for (const c of s.caravans ?? []) if (c.crew) c.crew *= HEADS
+    for (const h of s.homeward ?? []) h.crew *= HEADS
+    for (const ds of Object.values(s.garrisons ?? {})) for (const d of ds) d.troops *= HEADS
+    if (Object.keys(s.villages).length) log(s, at, null, `A one-time update: villagers are counted one by one now, so every village is ${HEADS} times bigger on paper (the same food, work and fighting strength). Each has a cobbled city: lay more cobblestone and build cottages and town houses there for room to grow.`, 'good')
+    s.headsScaled = true
+  } catch (e) {
+    console.error('the one-time update could not run yet:', e)
+    for (const [id, saved] of Object.entries(snap.villages)) {
+      const v = s.villages[id] as unknown as Record<string, unknown>
+      for (const k of Object.keys(v)) delete v[k]
+      Object.assign(v, saved)
+    }
+    s.caravans = snap.caravans; s.homeward = snap.homeward; s.garrisons = snap.garrisons; s.woods = snap.woods; s.log = snap.log
+    delete s.headsScaled
+  }
+}
+
 function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>) {
   const vid = 'v_' + ev.playerId
   const p: Player = {
@@ -829,12 +956,14 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   }
   const v: Village = {
     id: vid, playerId: p.id, name: `${ev.name}'s ${ev.role ? ROLE_TOWN[ev.role] : 'Village'}`, ...(ev.role ? { role: ev.role } : {}),
-    col: ev.site.col, row: ev.site.row, population: 5, morale: 60,
+    col: ev.site.col, row: ev.site.row, population: 5 * HEADS, morale: 60,
     goods: { grain: 12, timber: 8, stone: 3, berries: 4, ...(ev.at >= PURSE_FROM ? PURSE : {}) }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',
   }
   s.players[p.id] = p
   s.villages[vid] = v
+  v.city = claimCity(world, v, takenHexes(world, s, v))
+  for (const i of v.city) clearForCity(world, s, i, ev.at)
   reveal(world, s, ev.site, 4)
   log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role ? `${ev.role} ` : ''}village.`, 'good')
   return s
@@ -910,8 +1039,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
   if (ev.tokenId2) consumeToken(p, ev.tokenId2)
   switch (ev.action) {
     case 'scout': {
-      const camp = done(v).some((b) => b.type === 'scout_camp') ? 1 : 0
-      const radius = (k >= 1 ? 2 : 1) + camp
+      const radius = scoutRadius(v, k)
       reveal(world, s, ev, radius)
       const found = spiral(ev, radius).map((o) => s.lairs.find((l) => !l.cleared && l.col === o.col && l.row === o.row)).find(Boolean)
       log(s, ev.at, p.id, found ? `Scouts spotted ${found.kind} nearby!` : 'Scouts mapped new land.', found ? 'monster' : 'info')
@@ -972,6 +1100,29 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       v.planted.push({ cell: i, date: ev.at.slice(0, 10) })
       log(s, ev.at, p.id, 'Saplings planted. A forest in three days.', 'good')
       break
+    case 'cobble': {
+      addGoods(v, COBBLE_COST, -1)
+      ;(v.city ??= []).push(i)
+      const felled = clearForCity(world, s, i, ev.at)
+      const timber = round2(felled * (world.cells[i].terrain === 'forest' ? 3 : 1) * 0.5)
+      if (timber > 0) addGoods(v, { timber })
+      log(s, ev.at, p.id, felled ? `Cobblestone was laid: another hex of the city. ${felled} tree${felled === 1 ? '' : 's'} came down for it (+${timber} timber).` : 'Cobblestone was laid: another hex of the city.', 'good')
+      break
+    }
+    case 'home': {
+      const h = ev.home!, def = HOMES[h.kind]
+      addGoods(v, def.cost, -1)
+      ;(v.homes ??= []).push({ kind: h.kind, key: h.key, x: h.x, y: h.y, side: h.side })
+      log(s, ev.at, p.id, `A ${def.name.toLowerCase()} went up in the city: room for ${def.cap} more villagers.`, 'good')
+      break
+    }
+    case 'upgrade': {
+      const h = ev.home!
+      addGoods(v, HOMES.townhouse.cost, -1)
+      v.homes![ev.replace!] = { kind: 'townhouse', key: h.key, x: h.x, y: h.y, side: h.side }
+      log(s, ev.at, p.id, `A cottage was pulled down and a town house raised in its place: room for ${HOMES.townhouse.cap - HOMES.cottage.cap} more villagers.`, 'good')
+      break
+    }
     case 'pave':
       addGoods(v, PAVE_COST, -1)
       ;(v.paved ??= []).push(i)
@@ -1072,7 +1223,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const muskets = Math.min(Math.floor(g.musket ?? 0), Math.floor(powder))
       const walls = wallsAfter(v.goods, cannon)
       const food = Math.min(6, (v.goods.bread ?? 0) + (v.goods.cheese ?? 0) + (v.goods.smoked_fish ?? 0))
-      const pw = (4 + (people(v) + troopsAt(s, v)) * 0.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
+      const pw = (4 + (people(v) + troopsAt(s, v)) * 0.5 / HEADS + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
         Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + food * 0.5 + muskets * 4 + cannon * 6) * (k >= 1 ? 1 : 0.6)
       const defend = state.strength * walls
       const win = rng() < pw / (pw + defend)
@@ -1104,7 +1255,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const lair = dungeon ? null : s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)!
       const food = Math.min(6, (g.bread ?? 0) + (g.cheese ?? 0) + (g.smoked_fish ?? 0))
       const outfitter = done(v).some((b) => b.type === 'outfitter') ? 5 : 0
-      let pw = 4 + (people(v) + troopsAt(s, v)) * 0.5 + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
+      let pw = 4 + (people(v) + troopsAt(s, v)) * 0.5 / HEADS + Math.min(g.bronze ?? 0, 5) * 2 + Math.min(g.iron ?? 0, 5) * 2.5 +
         Math.min(g.steel ?? 0, 5) * 4 + Math.min(g.leather ?? 0, 5) * 0.5 + outfitter + food * 0.5
       pw *= k >= 1 ? 1 : 0.6
       const win = rng() < pw / (pw + (dungeon ?? lair!).strength)
@@ -1237,9 +1388,9 @@ function roadSets(world: World, s: GameState) {
   return { roads, paved, towns }
 }
 
-/** Food (value) a caravan's people need for the road, there and back: half a unit each a day, a day at least. */
+/** Food (value) a caravan's people need for the road, there and back: what each eats a day, a day at least. */
 export function provisionsFor(crew: number, minutesOneWay: number): number {
-  return crew * 0.5 * Math.max(1, Math.ceil((minutesOneWay * 2) / 1440))
+  return crew * EAT * Math.max(1, Math.ceil((minutesOneWay * 2) / 1440))
 }
 
 /** Stone to pave a hex of road. */
@@ -1368,7 +1519,7 @@ const HUNTS = new Set(['hunting_lodge', 'forager_camp'])
  *  everything (variety lifts morale). Returns the food still needed (if they ran short). */
 function eatFood(v: Village): { need: number; eaten: Set<Good> } {
   // those away on a neighbour's walls eat their own provisions
-  let need = people(v) * 0.5
+  let need = people(v) * EAT
   const eaten = new Set<Good>()
   const order = (Object.entries(FOOD) as [Good, { value: number; keeps: boolean }][]).sort((a, b) => Number(a[1].keeps) - Number(b[1].keeps))
   // spread across foods for variety: one pass taking a little of each, then fill
@@ -1550,8 +1701,8 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
     const harsh = winter ? 12 : 6
     v.morale -= harsh
     notes.push(winter ? 'a hard winter — the stores ran out' : 'not enough food')
-    if (need > pop * 0.25 && v.population > 3) {
-      v.population -= 1
+    if (need > pop * EAT * 0.5 && v.population > 3 * HEADS) {
+      v.population -= HEADS
       notes.push('a family left to find food')
     }
   }
@@ -1563,7 +1714,17 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   // 4. growth: room in the houses, reasonable morale, and the village making at least as much food as it eats
   const fed = foodStock(v) >= foodBefore - 1e-6
   if (!short && fed && !winter && v.morale >= GROW_MORALE && v.population < popCap(v)) {
-    v.population = round2(Math.min(popCap(v), v.population + 0.15 + 0.35 * (score / 100)))
+    v.population = round2(Math.min(popCap(v), v.population + (0.15 + 0.35 * (score / 100)) * HEADS))
+  }
+
+  // 4a. after winter, newcomers arrive: as many as the village has room and morale for, with food for three days
+  if (!winter && weekSeason(addDays(ev.date, -1)) === 'winter' && v.welcomed !== ev.date) {
+    v.welcomed = ev.date
+    const n = influx(v.population, popCap(v) - v.population, v.morale, GROW_MORALE)
+    if (n > 0) {
+      welcome(s, v, ev.at, 'winter', n)
+      notes.push(`${n} newcomers settled`)
+    }
   }
 
   // 4b. troops at the palisade eat their own provisions; those left waiting too long give up
@@ -1609,7 +1770,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   if (weekday(ev.date) === 6) p.freezes = Math.max(p.freezes, 1) // fresh freeze for the new week
   if (weekday(ev.date) === 4 || weekday(ev.date) === 5) {
     const keeps = foodStock(v, true)
-    const needWinter = people(v) * 0.5
+    const needWinter = people(v) * EAT
     v.winterForecast = keeps >= needWinter * 1.5 ? 'stocked' : keeps >= needWinter ? 'tight' : 'hungry'
   }
 

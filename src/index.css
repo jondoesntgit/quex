@@ -343,3 +343,24 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .steps { display: inline-flex; gap: 4px; }
 .steps .chip { cursor: pointer; padding: 2px 8px; border: 2px solid var(--ink); border-radius: var(--radius); background: var(--paper); font: inherit; }
 .steps .chip.on { background: var(--gold); }
+
+/* the big yes/no window: what you spend, what you get */
+.confirm-scrim { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(20, 20, 36, 0.62); padding: 16px; }
+.card.confirm { width: min(520px, 100%); }
+.card.confirm h2 { margin: 0 0 10px; font-weight: 400; }
+.confirm-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 420px) { .confirm-boxes { grid-template-columns: 1fr; } }
+.confirm-box { border: 2px solid var(--ink); border-radius: 6px; padding: 8px 10px; }
+.confirm-box h3 { margin: 0 0 4px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }
+.confirm-box ul { margin: 0; padding-left: 18px; }
+.confirm-box li { margin: 2px 0; }
+.confirm-box.spend { background: #f6dcd4; }
+.confirm-box.get { background: #dcefd2; }
+.confirm-note { margin: 8px 0 0; }
+.confirm-warn { margin: 10px 0 0; padding: 8px 10px; border: 2px solid var(--danger); border-radius: 6px; background: #fbe3df; font-weight: 700; }
+.confirm-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.confirm-buttons .btn { min-width: 110px; padding: 10px 14px; }
+.actions + h3.sub, h3.sub { margin: 10px 0 2px; font-weight: 400; }
+.arrival-goods { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+.arrival-goods li { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 420px) { .arrival-goods { grid-template-columns: 1fr; } }
