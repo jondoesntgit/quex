@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { distance as distanceOf } from '../world/hex'
 import { generateWorld } from '../world/generate'
 import { addDays } from './calendar'
 import { activeParty, recommend, refineTips, refinedGain, shortfalls, weekPoints } from './advisor'
@@ -12,7 +13,7 @@ const NOW = new Date('2026-11-23T12:00:00Z')
 function setup(): GameState {
   const s = newGame(world, '2026-11-15')
   apply(s, world, { t: 'join', id: 'ja', at: '2026-11-16T08:00:00Z', playerId: 'ann', name: 'Ann', site: sites[0], resetHour: 0, tz: 0 })
-  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites[1], resetHour: 0, tz: 0 })
+  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites.find((x) => distanceOf(x, sites[0]) >= 10) ?? sites[1], resetHour: 0, tz: 0 })
   return s
 }
 /** a week of perfect days for a player */

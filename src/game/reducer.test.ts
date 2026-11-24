@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { distance as distanceOf } from '../world/hex'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
@@ -17,10 +18,11 @@ function ev<T extends GameEvent['t']>(t: T, playerId: string, at: string, rest: 
   return { t, id: `e${++n}`, at, playerId, ...rest } as unknown as GameEvent
 }
 
+const hexDist = (a: { col: number; row: number }, b: { col: number; row: number }) => distanceOf(a, b)
 function setup(): GameState {
   const s = newGame(world, SUN)
   const port = sites.find((x) => x.role === 'port') ?? sites[0]
-  const farm = sites.find((x) => x.role === 'farm') ?? sites[1]
+  const farm = sites.find((x) => x.role === 'farm' && hexDist(x, port) >= 10) ?? sites.find((x) => hexDist(x, port) >= 10) ?? sites[1]
   apply(s, world, ev('join', 'ann', `${SUN}T08:00:00Z`, { name: 'Ann', role: port.role, site: port, resetHour: 0, tz: 0 }))
   apply(s, world, ev('join', 'bob', `${SUN}T08:00:00Z`, { name: 'Bob', role: farm.role, site: farm, resetHour: 0, tz: 0 }))
   return s
@@ -118,10 +120,10 @@ describe('trees, one at a time (from the tree rule on)', () => {
     apply(s, world, ev('join', 'ann', `${SUN2}T08:00:00Z`, { name: 'Ann', role: 'forestry', site, resetHour: 0, tz: 0 }))
     return s
   }
-  function fell(s: GameState, t: { col: number; row: number }, date: string) {
+  function fell(s: GameState, t: { col: number; row: number }, date: string, action: 'chop' | 'clear' = 'clear') {
     apply(s, world, ev('progress', 'ann', at(date), { date, slot: 3, status: 'full' }))
     const small = s.players.ann.tokens.find((x) => x.size === 'small')!
-    apply(s, world, ev('act', 'ann', at(date), { tokenId: small.id, action: 'clear', ...t }))
+    apply(s, world, ev('act', 'ann', at(date), { tokenId: small.id, action, ...t }))
   }
   /** ticks every night from `from` through `to` */
   function nights(s: GameState, from: string, to: string) {
@@ -129,39 +131,31 @@ describe('trees, one at a time (from the tree rule on)', () => {
   }
   it('is the rule after its start', () => expect(`${SUN2}T00:00:00Z` > TREES_FROM).toBe(true))
 
-  it('felling takes one tree, leaving a stump; winter doubles the rest back up to the hex\'s number', () => {
+  it('gathering wood takes timber and leaves the forest as it was, as often as you like', () => {
     const s = forester()
     const t = findIn(s, (i) => world.cells[i].feature === 'pine3')!
     expect(t).toBeTruthy()
     const i = cellIndex(world, t.col, t.row)
     const timber = s.villages.v_ann.goods.timber!
-    fell(s, t, SUN2); fell(s, t, addDays(SUN2, 1))
+    fell(s, t, SUN2, 'chop'); fell(s, t, addDays(SUN2, 1), 'chop')
     expect(s.villages.v_ann.goods.timber).toBe(timber + 6)
-    let land = landAt(world, s, i)
+    const land = landAt(world, s, i)
     expect(land.terrain).toBe('forest')
-    expect(land.stumps).toBe(2) // 1 standing
-    nights(s, SUN2, addDays(SUN2, 5))
-    expect(landAt(world, s, i).stumps).toBe(2) // nothing regrows before winter
-    nights(s, addDays(SUN2, 6), addDays(SUN2, 6)) // Saturday: 1 -> 2
-    expect(landAt(world, s, i).stumps).toBe(1)
-    nights(s, addDays(SUN2, 7), addDays(SUN2, 13)) // next winter: 2 -> 3, never 4
-    land = landAt(world, s, i)
-    expect(land.stumps).toBeUndefined()
+    expect(land.stumps ?? 0).toBe(0)
     expect(land.feature).toBe(world.cells[i].feature)
-    expect(s.woods?.[i]).toBeUndefined()
   })
 
-  it('felling the last tree opens the land for good', () => {
+  it('clearing takes every tree at once and the land stays open, winter after winter', () => {
     const s = forester()
-    const t = findIn(s, (i) => world.cells[i].feature === 'oak3' || world.cells[i].feature === 'pine3' || world.cells[i].feature === 'pine1' || world.cells[i].feature === 'oak1')!
+    const t = findIn(s, (i) => world.cells[i].feature === 'pine3')!
     const i = cellIndex(world, t.col, t.row)
-    const trees = Number(world.cells[i].feature!.slice(-1))
-    for (let k = 0; k < trees; k++) fell(s, t, addDays(SUN2, k))
-    let land = landAt(world, s, i)
+    const timber = s.villages.v_ann.goods.timber!
+    fell(s, t, SUN2)
+    expect(s.villages.v_ann.goods.timber).toBe(timber + 9) // 3 trees, 3 timber each in a forest
+    expect(hasTrees(landAt(world, s, i))).toBe(false)
+    nights(s, SUN2, addDays(SUN2, 13))
+    const land = landAt(world, s, i)
     expect(hasTrees(land)).toBe(false)
-    nights(s, SUN2, addDays(SUN2, 6))
-    land = landAt(world, s, i)
-    expect(hasTrees(land)).toBe(false) // zero doubled is zero
     expect(land.terrain).not.toBe('forest')
   })
 
@@ -418,7 +412,7 @@ describe('founding and shared fog', () => {
     const ann = s.villages.v_ann
     const limit = VILLAGE_RADIUS * 2 + FOUNDING_GAP
     const land = world.cells.filter((c) => c.tier > 0)
-    const near = land.find((c) => distance(c, ann) === limit)!
+    const near = land.find((c) => isVillageSite(cellLand(c)) && distance(c, ann) === limit)!
     expect(foundingProblem(s, world, near)).toMatch(/Too close/)
     const far = land.find((c) => isVillageSite(cellLand(c)) && Object.values(s.villages).every((v) => distance(c, v) > limit + 3) &&
       !s.lairs.some((l) => l.col === c.col && l.row === c.row))!

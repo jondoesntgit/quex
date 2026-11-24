@@ -13,7 +13,7 @@
  *  every client agrees on what's for sale. */
 import { spiral } from '../world/hex'
 import { treeCount } from '../world/land'
-import { clayAt } from './reducer'
+import { clayAt, outpostRadius } from './reducer'
 import { rngFor } from '../world/rng'
 import type { World } from '../world/types'
 import { addDays, isSabbath } from './calendar'
@@ -113,7 +113,7 @@ export const WAGON_ROADS = 8
 
 export function reach(world: World, v: Village): Reach {
   const cells = new Set<number>()
-  const centres = [{ col: v.col, row: v.row, radius: 2 }, ...v.outposts.map((o) => ({ ...o, radius: (o as { radius?: number }).radius ?? 1 }))]
+  const centres = [{ col: v.col, row: v.row, radius: 2 }, ...v.outposts.map((o) => ({ ...o, radius: outpostRadius(o) }))]
   for (const t of centres) {
     for (const o of spiral(t, t.radius)) {
       if (o.col >= 0 && o.row >= 0 && o.col < world.width && o.row < world.height) cells.add(o.row * world.width + o.col)

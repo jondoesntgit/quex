@@ -128,7 +128,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
   else if (village && village.id !== v.id) acts.push('caravan', 'troops')
   else {
     if (canScout) acts.push('scout')
-    if (trees && !here && !village) gatherActs.push('clear')
+    if (trees && !here && !village) gatherActs.push('chop', 'clear')
     if (mine && land.resource && land.resource !== 'stone' && GATHER[land.resource]) gatherActs.push('gather')
     if (mine && left?.ore === 'stone' && left.surface >= 1) gatherActs.push('pick')
     if (mine && clayLeft(world, state, i) !== null) gatherActs.push('dig_clay')
@@ -149,7 +149,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     // what this hex allows first, then the rest (each says why it can't go here)
     const ok = (d: (typeof defs)[number]) => !!tryAction(game, p, 'build', col, row, { building: d.id }, d.size).ev
     const sorted = [...defs.filter(ok), ...defs.filter((d) => !ok(d))]
-    const bldgs = mine && !village && !here && !inCity
+    const ownHere = !!here && here.village.id === v.id
+    const bldgs = mine && !village && (!here || ownHere) && !inCity
     return (
       <Shell onClose={onClose} title={`Build on ${TERRAIN_NAME[terr]}`}>
         <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
@@ -174,7 +175,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
         )}
         {bldgs ? (
           <>
-            <h3 className="sub">Buildings</h3>
+            <h3 className="sub">{ownHere ? `Replace the ${BUILDINGS[here!.building.type].name}` : 'Buildings'}</h3>
+            {ownHere && <p className="muted" style={{ margin: '0 0 4px' }}>Building over it pulls it down at no cost in actions, and every material that went into it comes back.</p>}
             <div className="actions">
               {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => ask('build', { building: d.id }, d.size)} />)}
             </div>
@@ -283,8 +285,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       <div className="actions">
         {mine && !village && here && here.building.progress < 1
           ? <button className="btn medium action" onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
-          : cell.tier > 0 && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && !here))
-            && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>buildings, roads, wells, trees</small></button>}
+          : cell.tier > 0 && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
+            && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {acts.map((a) => a === 'caravan'
           ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
@@ -469,10 +471,10 @@ function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Play
   )
 }
 
-const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', clear: 'Fell a tree', dig_clay: 'Dig clay' }
+const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', clear: 'Clear the forest', dig_clay: 'Dig clay' }
 /** The question each confirmation asks. */
 const ASK_TITLE: Partial<Record<ActionKind, string>> = {
-  pick: 'Pick up the loose stone?', clear: 'Fell a tree?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
+  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
   well: 'Dig a well?', plant: 'Plant trees?',
 }
 

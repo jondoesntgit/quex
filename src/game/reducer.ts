@@ -22,7 +22,7 @@ import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
 import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
 import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, HUNT_SHARE, dig, dungeonUnder, gameLeft, hunt, huntRange, leftAt, levels, mineDig, stonyness } from './deposits'
-import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
+import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Token, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
@@ -51,9 +51,9 @@ export function ensureDay(p: Player, date: ISODate): DayRecord {
   })
 }
 
-/** How far a scouting party sees: two hexes with a whole action, one with half; a Scout camp adds one. */
+/** How far a scouting party sees: three hexes with a whole action, two with half; a Scout camp adds one. */
 export function scoutRadius(v: Village, strength: number): number {
-  return (strength >= 1 ? 2 : 1) + (done(v).some((b) => b.type === 'scout_camp') ? 1 : 0)
+  return (strength >= 1 ? 3 : 2) + (done(v).some((b) => b.type === 'scout_camp') ? 1 : 0)
 }
 
 /** Would scouting from this hex show any land you haven't seen? (A hex of unknown land always would.) */
@@ -70,8 +70,13 @@ export function cellIndex(world: World, col: number, row: number) {
   return row * world.width + col
 }
 
+/** An outpost holds one hex more than the radius it was founded with (a camp 1, a full outpost 2). */
+export function outpostRadius(o: object): number {
+  return ((o as { radius?: number }).radius ?? 1) + 1
+}
+
 export function territory(v: Village): { col: number; row: number; radius: number }[] {
-  return [{ col: v.col, row: v.row, radius: VILLAGE_RADIUS }, ...v.outposts.map((o) => ({ col: o.col, row: o.row, radius: (o as { radius?: number }).radius ?? 1 }))]
+  return [{ col: v.col, row: v.row, radius: VILLAGE_RADIUS }, ...v.outposts.map((o) => ({ col: o.col, row: o.row, radius: outpostRadius(o) }))]
 }
 
 export function inTerritory(v: Village, col: number, row: number): boolean {
@@ -133,8 +138,8 @@ function lateTick(p: Player, ev: { at: string; date: ISODate }) {
   return ev.at >= LATE_TICKS_FROM && !!p.days[ev.date]?.ticked && ev.date === addDays(playerDate(ev.at, p.resetHour, p.tz), -1)
 }
 
-export const VILLAGE_RADIUS = 2
-export const FOUNDING_GAP = 2
+export const VILLAGE_RADIUS = 3
+export const FOUNDING_GAP = 3 // empty hexes between territories: new villages stand at least 2 * VILLAGE_RADIUS + FOUNDING_GAP + 1 = 10 hexes apart
 
 /** Why a village can't be founded here (null = fine). */
 export function foundingProblem(s: GameState, world: World, site: { col: number; row: number }): string | null {
@@ -326,6 +331,13 @@ export function buildCost(v: Village, def: BuildingDef, at: string): Goods {
   const k = at >= ROLELESS_FROM || def.role === 'any' || def.role === v.role ? 1 : 2
   const out: Goods = {}
   for (const [g, n] of Object.entries(def.cost)) out[g as Good] = (n ?? 0) * k
+  return out
+}
+
+/** What pulling a building down gives back: all the materials that went into it (a half-built one, half). */
+export function refundOf(v: Village, b: Building, at: string): Goods {
+  const out: Goods = {}
+  for (const [g, n] of Object.entries(buildCost(v, BUILDINGS[b.type], at))) out[g as Good] = round2((n ?? 0) * Math.min(1, b.progress))
   return out
 }
 
@@ -534,6 +546,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (left.surface < 1) return left.deep >= 1 ? 'Picked clean: a quarry could cut the rock below' : 'Picked clean'
       return null
     }
+    case 'chop':
     case 'clear':
       if (!hasTrees(land)) return 'No trees to fell here'
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Only in or next to your territory'
@@ -597,9 +610,12 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
       if (ev.col === v.col && ev.row === v.row) return 'That is your village square'
       const existing = buildingAt(s, ev.col, ev.row)
+      // building over one of your own pulls it down: no action needed, and its materials come back
+      const replaced = existing && existing.village.id === v.id && !(existing.building.type === def.id && existing.building.progress < 1) ? existing.building : null
       if (existing) {
-        if (existing.building.type === def.id && existing.building.progress < 1) return null // finishing
-        return 'Something is already built here'
+        if (existing.building.type === def.id && existing.building.progress < 1 && existing.village.id === v.id) return null // finishing
+        if (!replaced) return 'Something is already built here'
+        if (existing.building.type === def.id) return `You already have a ${def.name} here`
       }
       const woodland = def.terrain?.includes('forest')
       if (hasTrees(land) && !woodland) return 'Fell the trees here first'
@@ -616,7 +632,10 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
         return def.nearTerrain!.includes(effectiveTerrain(world, s, j))
       })) return `${def.name} must be next to ${def.nearTerrain.join('/')}${def.river ? ' or a river' : ''}`
       const cost = buildCost(v, def, ev.at)
-      if (!hasGoods(v, cost, tok.strength)) return `Needs ${fmtGoods(cost, tok.strength)}`
+      // the old building's materials come back first, so they can pay for the new one
+      const purse: Village = replaced ? { ...v, goods: { ...v.goods } } : v
+      if (replaced) addGoods(purse, refundOf(v, replaced, ev.at))
+      if (!hasGoods(purse, cost, tok.strength)) return `Needs ${fmtGoods(cost, tok.strength)}`
       return null
     }
     case 'caravan': {
@@ -1148,22 +1167,27 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       log(s, ev.at, p.id, `Cleared ${n} stone.${rest < 1 ? ' The ground is picked clean' + (field && BUILDINGS[field.type].crop ? ': the crops will grow better.' : '.') : ''}`, 'good')
       break
     }
+    case 'chop': {
+      // cutting wood from a forest takes branches and the odd tree, and the forest stays as it was
+      const n = round2((land0.terrain === 'forest' ? 3 : 1) * k)
+      addGoods(v, { timber: n })
+      log(s, ev.at, p.id, `Cut wood: +${n} timber. The forest is as thick as before.`, 'good')
+      break
+    }
     case 'clear': {
       const wood = land0.terrain === 'forest' ? 3 : 1
-      const n = round2(wood * k)
       if (ev.at >= TREES_FROM) {
-        // one tree comes down; the rest stand, and double back at winter
+        // every tree comes down, and the land is open for good (until someone plants it again)
+        const standing = Math.max(1, treeCount(land0) - (land0.stumps ?? 0))
+        const n = round2(wood * standing * k)
         const woods = (s.woods ??= {})
-        const max = s.woods[i]?.max ?? treeCount(land0)
-        const w: Stand = woods[i] ??= { n: max, young: 0, max, kind: land0.feature?.startsWith('pine') ? 'pine' : 'oak', since: ev.at.slice(0, 10) }
-        w.n = Math.max(0, w.n - 1)
-        w.since = ev.at.slice(0, 10)
+        const old = woods[i]
+        woods[i] = { n: 0, young: 0, max: old?.max ?? Math.max(1, treeCount(land0)), kind: old?.kind ?? (land0.feature?.startsWith('pine') ? 'pine' : 'oak'), since: ev.at.slice(0, 10) }
         addGoods(v, { timber: n })
-        log(s, ev.at, p.id, w.n === 0
-          ? `Felled the last tree: +${n} timber. The land is open.`
-          : `Felled a tree: +${n} timber. ${w.n} still standing; they spread back over the stumps in winter.`, 'good')
+        log(s, ev.at, p.id, `Cleared the trees: +${n} timber. The land is open for good.`, 'good')
         break
       }
+      const n = round2(wood * k)
       v.planted = v.planted.filter((x) => x.cell !== i)
       if (!v.cleared.includes(i)) v.cleared.push(i)
       addGoods(v, { timber: n })
@@ -1229,7 +1253,15 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       break
     case 'build': {
       const def = BUILDINGS[ev.building!]
-      const existing = buildingAt(s, ev.col, ev.row)
+      let existing = buildingAt(s, ev.col, ev.row)
+      if (existing && !(existing.building.type === def.id && existing.building.progress < 1)) {
+        // pulled down to make room: the materials come back
+        const old = existing.building
+        addGoods(v, refundOf(v, old, ev.at))
+        v.buildings = v.buildings.filter((b) => b !== old)
+        log(s, ev.at, p.id, `${BUILDINGS[old.type].name} pulled down: ${fmtGoods(refundOf(v, old, ev.at)) || 'nothing'} back in the stores.`, 'info')
+        existing = null
+      }
       addGoods(v, buildCost(v, def, ev.at), -k)
       if (existing) existing.building.progress = Math.min(1, existing.building.progress + k)
       else v.buildings.push({ id: ev.id, type: def.id, col: ev.col, row: ev.row, progress: Math.min(1, k) })
@@ -1670,6 +1702,18 @@ export const workable = (b: { type: BuildingId }) => {
   return !def.crop && !!(def.produces || def.mine || def.smelts || def.recipes)
 }
 
+/** A sawmill beside a river makes this many times the planks. */
+export const RIVER_SAW = 3
+
+/** Is there a river on this hex or one next to it? */
+export function riverBeside(world: World, col: number, row: number): boolean {
+  return spiral({ col, row }, 1).some((o) => {
+    if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
+    const c = world.cells[cellIndex(world, o.col, o.row)]
+    return c.riverTo !== -1 && c.tier !== 0
+  })
+}
+
 /** One building's shift at strength k (1 = a full night at a full day's work, before morale).
  *  Rare finds (a mine's byproducts) come whole or not at all: `odds` collects what was expected. */
 export function shift(s: GameState, world: World, v: Village, b: Building, k: number, date: ISODate, at: string, opts: { rain?: boolean; odds?: Odds; roll?: string } = {}): Goods {
@@ -1754,6 +1798,8 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     const r = want > 0 ? got / want : 0
     out = { ...yields, game: yields.game * r, ...(yields.leather ? { leather: yields.leather * r } : {}) }
   }
+  // a mill by running water has a wheel to turn its saw: three times the planks from the same timber
+  if (b.type === 'sawmill' && out.planks && riverBeside(world, b.col, b.row)) out = { ...out, planks: out.planks * RIVER_SAW }
   addGoods(v, out, k)
   note(out, k)
   return made

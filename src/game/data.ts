@@ -237,7 +237,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   lumber_camp: B({ id: 'lumber_camp', name: 'Lumber camp', role: 'forestry', size: 'medium', cost: { stone: 1 }, terrain: ['forest'], produces: { timber: 3 }, blurb: 'Logs for everyone.' }),
   hunting_lodge: B({ id: 'hunting_lodge', name: 'Hunting lodge', role: 'forestry', size: 'medium', cost: { timber: 4 }, terrain: ['forest', 'tundra', 'savannah'], produces: { game: 4, leather: 1 }, blurb: 'A small crew in a rich forest brings in about 4 rations a worker, taken from the game within two hexes (never the last of it). Bows make it 6, muskets 8.' }),
   charcoal_kiln: B({ id: 'charcoal_kiln', name: 'Charcoal kiln', role: 'forestry', size: 'medium', cost: { stone: 3, clay: 2 }, consumes: { timber: 2 }, produces: { charcoal: 2 }, blurb: 'Charcoal for the miners.' }),
-  sawmill: B({ id: 'sawmill', name: 'Sawmill', role: 'forestry', size: 'big', cost: { timber: 6, copper: 2 }, consumes: { timber: 2 }, produces: { planks: 2 }, blurb: 'Any metal blade works; better metal, more planks.' }),
+  sawmill: B({ id: 'sawmill', name: 'Sawmill', role: 'forestry', size: 'big', cost: { timber: 6, copper: 2 }, consumes: { timber: 2 }, produces: { planks: 2 }, blurb: 'Any metal blade works; better metal, more planks. Beside a river, a water wheel drives the saw: three times the planks.' }),
   // herding
   pen: B({ id: 'pen', name: 'Sheep pen', role: 'herding', size: 'medium', cost: { timber: 3 }, terrain: ['hills', 'meadow', 'savannah', 'grass'], produces: { wool: 2 }, herd: true, blurb: 'A flock of sheep: wool and cheese all year, mutton at the autumn cull. 5 rations a worker, net of winter feed. The flock grows by half a year but only as far as the pasture within a hex of a well or pen allows.' }),
   dairy: B({ id: 'dairy', name: 'Dairy', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, produces: { cheese: 22.5 }, consumes: { salt: 22.5 }, legacy: true, blurb: 'Cheese keeps, so it trades well. Each ration takes a pinch of salt. (The sheep pen makes cheese now.)' }),
@@ -295,13 +295,14 @@ export function toolMult(tools: readonly string[] | undefined, type: BuildingId)
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'pick' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
+export type ActionKind = 'scout' | 'gather' | 'pick' | 'chop' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
   gather: { size: 'small', name: 'Gather', blurb: "Collect a hex's resource by hand." },
   pick: { size: 'small', name: 'Clear stone', blurb: 'Pick the loose stone off this land for building. Cleared fields grow more.' },
-  clear: { size: 'small', name: 'Fell a tree', blurb: 'One tree for timber; the rest spread back in winter. Fell the last to open the land.' },
+  chop: { size: 'small', name: 'Gather wood', blurb: 'Cut timber from the forest. The trees stay: it is as thick as before, so wood never runs out.' },
+  clear: { size: 'small', name: 'Clear the forest', blurb: 'Fell every tree here for timber. The land is open for good: no trees grow back unless you plant them.' },
   plant: { size: 'small', name: 'Plant trees', blurb: 'Two saplings that take root in winter, then spread.' },
   road: { size: 'small', name: 'Dirt road', blurb: 'Faster caravans through this hex.' },
   pave: { size: 'small', name: 'Pave the road', blurb: 'Lay stone on your road (2 stone): caravans along it carry more, and go faster.' },

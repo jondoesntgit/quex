@@ -9,7 +9,7 @@
  *  (preview.test.ts checks it against the reducer). Nothing here changes the game. */
 import { ACTIONS, BUILDINGS, FOOD, GATHER, gatherAmount, GOOD_LABEL, type ActionKind, type BuildingId, type TaskSize } from './data'
 import { DEPLETION_FROM, gameLeft, leftAt } from './deposits'
-import { PAVE_COST, buildCost, fmtGoods, landAt, cellIndex } from './reducer'
+import { PAVE_COST, buildCost, buildingAt, fmtGoods, landAt, cellIndex, refundOf } from './reducer'
 import { COBBLE_COST, HOMES } from './city'
 import type { GameState, Home, Player } from './types'
 import { WELL_COST, clayLeft, clayRenews, mountainSpring } from './water'
@@ -61,12 +61,16 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
       out.notes.push(rest < 1 ? 'The ground is picked clean: fields here grow better.' : `About ${Math.round(rest)} more loose stone afterwards.`)
       break
     }
+    case 'chop': {
+      out.gets.push(`+${round2((land.terrain === 'forest' ? 3 : 1) * k)} timber`)
+      out.notes.push('The forest stays as thick as it was: you can cut wood here as often as you like.')
+      break
+    }
     case 'clear': {
-      const n = round2((land.terrain === 'forest' ? 3 : 1) * k)
-      out.gets.push(`+${n} timber`)
       const stand = s.woods?.[i]
-      const standing = stand ? stand.n : treeCount(land) - (land.stumps ?? 0)
-      out.notes.push(standing <= 1 ? 'That is the last tree: the land opens up.' : `One tree comes down; ${standing - 1} stay standing, and the trees spread back over the stumps in winter.`)
+      const standing = Math.max(1, stand ? stand.n : treeCount(land) - (land.stumps ?? 0))
+      out.gets.push(`+${round2((land.terrain === 'forest' ? 3 : 1) * standing * k)} timber`)
+      out.notes.push(`All ${standing} tree${standing === 1 ? '' : 's'} come down and the land opens up for good. Only planting brings trees back.`)
       break
     }
     case 'dig_clay': {
@@ -124,6 +128,11 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
       const def = BUILDINGS[extra.building!]
       if (!def) break
       const cost = buildCost(v, def, at)
+      const old = buildingAt(s, col, row)
+      if (old && old.village.id === v.id && old.building.type !== def.id) {
+        const back = refundOf(v, old.building, at)
+        if (Object.keys(back).length) out.gets.push(`${fmtGoods(back)} back from the ${BUILDINGS[old.building.type].name} pulled down`)
+      }
       if (Object.keys(cost).length) out.spends.push(`${fmtGoods(cost, k)}${k < 1 ? ' (half the cost)' : ''}`)
       out.gets.push(k < 1 ? `A half-built ${def.name}: another task finishes it` : `A ${def.name}`)
       out.notes.push(def.blurb)

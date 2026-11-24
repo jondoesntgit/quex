@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { distance as distanceOf } from '../world/hex'
 import { generateWorld } from '../world/generate'
-import { HEADS } from './data'
+import { BUILDINGS, HEADS } from './data'
 import { line } from '../world/hex'
 import { FREE, HEX_MINUTES, apply, caravanMinutes, caravanTier, cellIndex, newGame, scoutRadius, scoutsNew, tonight, validate } from './reducer'
 import type { GameEvent, GameState } from './types'
@@ -14,7 +15,7 @@ let n = 0
 function setup(): GameState {
   const s = newGame(world, '2026-11-15')
   apply(s, world, { t: 'join', id: 'ja', at: '2026-11-16T08:00:00Z', playerId: 'ann', name: 'Ann', site: sites[0], resetHour: 0, tz: 0 })
-  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites[1], resetHour: 0, tz: 0 })
+  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites.find((x) => distanceOf(x, sites[0]) >= 10) ?? sites[1], resetHour: 0, tz: 0 })
   return s
 }
 const tok = (s: GameState, size: 'big' | 'medium' | 'small', strength = 1) => {
@@ -123,9 +124,60 @@ describe('scouting', () => {
   it('sees one hex further with a whole action than with half, and one more with a scout camp', () => {
     const s = setup()
     const v = s.villages.v_ann
-    expect(scoutRadius(v, 1)).toBe(2)
-    expect(scoutRadius(v, 0.5)).toBe(1)
-    v.buildings.push({ id: 'sc', type: 'scout_camp', col: v.col + 1, row: v.row, progress: 1 })
     expect(scoutRadius(v, 1)).toBe(3)
+    expect(scoutRadius(v, 0.5)).toBe(2)
+    v.buildings.push({ id: 'sc', type: 'scout_camp', col: v.col + 1, row: v.row, progress: 1 })
+    expect(scoutRadius(v, 1)).toBe(4)
+  })
+})
+
+describe('building over a building', () => {
+  it('pulls the old one down for no action and returns all its materials', async () => {
+    const { territoryCells, buildCost, landAt } = await import('./reducer')
+    const { hasTrees } = await import('../world/land')
+    const s = setup()
+    const v = s.villages.v_ann
+    const plain = Object.values(BUILDINGS).filter((d) => !d.terrain && !d.resource && !d.needs && !d.nearTerrain && !d.mountain && !d.legacy)
+    const [a, b] = plain.filter((d) => d.id !== 'palisade')
+    const i = territoryCells(world, v).find((j) => j !== world.cells.findIndex((c) => c.col === v.col && c.row === v.row) && world.cells[j].tier > 0 && !hasTrees(landAt(world, s, j)) && !v.city?.includes(j))
+    const c = world.cells[i!]
+    v.buildings.push({ id: 'old', type: a.id, col: c.col, row: c.row, progress: 1 })
+    v.goods = {}
+    const cost = buildCost(v, b, AT)
+    // no materials at all: refused, unless the old building's own materials pay for the new
+    const enough = Object.entries(buildCost(v, a, AT)).every(([g, n]) => (n ?? 0) >= (cost[g as keyof typeof cost] ?? 0))
+    const t = tok(s, b.size)
+    const err = run(s, { t: 'act', id: 'b1', at: AT, playerId: 'ann', tokenId: t, action: 'build', building: b.id, col: c.col, row: c.row } as GameEvent)
+    if (enough) expect(err).toBeNull(); else expect(err).toMatch(/Needs/)
+    v.goods = { timber: 50, stone: 50, planks: 50, copper: 50, bricks: 50 }
+    const before = { ...v.goods }
+    expect(run(s, { t: 'act', id: 'b2', at: AT, playerId: 'ann', tokenId: t, action: 'build', building: b.id, col: c.col, row: c.row } as GameEvent)).toBeNull()
+    expect(v.buildings.filter((x) => x.col === c.col && x.row === c.row).map((x) => x.type)).toEqual([b.id])
+    for (const g of Object.keys({ ...cost, ...buildCost(v, a, AT) }) as (keyof typeof before)[]) {
+      expect(v.goods[g] ?? 0).toBeCloseTo((before[g] ?? 0) + (buildCost(v, a, AT)[g] ?? 0) - (cost[g] ?? 0), 5)
+    }
+    // the same kind again is pointless
+    expect(run(s, { t: 'act', id: 'b3', at: AT, playerId: 'ann', tokenId: tok(s, b.size), action: 'build', building: b.id, col: c.col, row: c.row } as GameEvent)).toMatch(/already/)
+  })
+})
+
+describe('sawmills', () => {
+  it('make three times the planks beside a river', async () => {
+    const { shift, riverBeside } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const land = world.cells.filter((c) => c.tier > 0)
+    const wet = land.find((c) => riverBeside(world, c.col, c.row))!
+    const dry = land.find((c) => !riverBeside(world, c.col, c.row))!
+    const planks = (c: { col: number; row: number }) => {
+      v.goods = { timber: 50 }
+      const b = { id: `sw${c.col}_${c.row}`, type: 'sawmill' as const, col: c.col, row: c.row, progress: 1 }
+      v.buildings = [b]
+      v.jobs = { [b.id]: 1000 }
+      return shift(s, world, v, b, 1, DAY, AT).planks ?? 0
+    }
+    const base = planks(dry)
+    expect(base).toBeGreaterThan(0)
+    expect(planks(wet)).toBeCloseTo(base * 3, 5)
   })
 })

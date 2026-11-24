@@ -68,6 +68,10 @@ export class MapView {
   root = new Container()
   cells = new Container()
   overlay = new Container()
+  /** the white outline on the tapped hex: redrawn alone, so a tap doesn't rebuild the scene */
+  private selection = new Graphics()
+  private sceneKey: unknown[] | null = null
+  private revealedNow: Set<number> = new Set()
   people!: People
   traders!: Traders
   /** surf, glints, swaying trees, shimmering fields */
@@ -130,7 +134,7 @@ export class MapView {
     this.host = host
     // villagers live inside `cells` so they sort into the painter's order with trees and houses
     this.cells.sortableChildren = true
-    this.root.addChild(this.cells, this.overlay)
+    this.root.addChild(this.cells, this.overlay, this.selection)
     await this.startRenderer()
     this.ro = new ResizeObserver(() => this.resize())
     this.ro.observe(host)
@@ -293,8 +297,28 @@ export class MapView {
 
   // ---------------------------------------------------------------- scene
 
+  private drawSelection(input: SceneInput) {
+    const g = this.selection
+    g.clear()
+    if (!input.selected) return
+    const { col, row } = input.selected
+    const { world } = input
+    const i = row * world.width + col
+    const cell = world.cells[i]
+    if (!cell) return
+    const p = hexToPixel(col, row, this.W)
+    const tier = this.revealedNow.has(i) ? cell.tier : 0
+    const cs = hexCorners(p.x, p.y - tier * this.atlas.meta.tier, this.W)
+    g.poly(cs.flat(), true).stroke({ width: 2, color: 0xffffff })
+  }
+
   render(input: SceneInput) {
+    // only the selection changed (a tap): move the outline, keep the scene as it is
+    const key = [input.world, input.state, input.state.version, input.viewer, input.focus, input.showAll, input.guest, input.prospect, input.today, input.highlight?.join(','), input.blocked]
+    const same = this.sceneKey && key.every((k, n) => k === this.sceneKey![n])
     this.last = input
+    if (same) { this.drawSelection(input); return }
+    this.sceneKey = key
     const { world, state, viewer } = input
     const { tier: TP } = this.atlas.meta
     const W = this.W
@@ -309,6 +333,7 @@ export class MapView {
     this.unsettlable = []
 
     const revealed = visibleSet(input)
+    this.revealedNow = revealed
     // draw box: revealed bounds + margin of fog
     let c0 = Infinity, r0 = Infinity, c1 = -Infinity, r1 = -Infinity
     for (const i of revealed) {
@@ -682,16 +707,7 @@ export class MapView {
       g.poly(cs, true).stroke({ width: 4, color: 0x141424 })
       g.poly(cs, true).stroke({ width: 2, color: rim })
     }
-    if (input.selected) {
-      const { col, row } = input.selected
-      const cell = world.cells[idx(col, row)]
-      if (cell) {
-        const p = hexToPixel(col, row, W)
-        const tier = revealed.has(idx(col, row)) ? cell.tier : 0
-        const cs = hexCorners(p.x, p.y - tier * TP, W)
-        g.poly(cs.flat(), true).stroke({ width: 2, color: 0xffffff })
-      }
-    }
+    this.drawSelection(input)
     // caravans on the road
     const now = Date.now()
     for (const cv of state.caravans) {

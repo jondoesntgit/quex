@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { distance as distanceOf } from '../world/hex'
 import { generateWorld } from '../world/generate'
 import { apply, newGame, validate } from './reducer'
 import { garrison, nightsOf, troopsAt } from './garrison'
@@ -15,7 +16,7 @@ let n = 0
 function setup(): GameState {
   const s = newGame(world, '2026-11-15')
   apply(s, world, { t: 'join', id: 'ja', at: '2026-11-16T08:00:00Z', playerId: 'ann', name: 'Ann', site: sites[0], resetHour: 0, tz: 0 })
-  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites[1], resetHour: 0, tz: 0 })
+  apply(s, world, { t: 'join', id: 'jb', at: '2026-11-16T08:00:00Z', playerId: 'bob', name: 'Bob', site: sites.find((x) => distanceOf(x, sites[0]) >= 10) ?? sites[1], resetHour: 0, tz: 0 })
   const ann = s.villages.v_ann
   ann.buildings.push({ id: 'pal', type: 'palisade', col: ann.col + 1, row: ann.row, progress: 1 })
   const bob = s.villages.v_bob
