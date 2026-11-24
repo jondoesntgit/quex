@@ -2,7 +2,8 @@
  *
  *  A pen keeps a flock, counted by age (index 0 is this year's lambs). A crew of one slot (HEADS people) tends
  *  PEN_PER_SLOT sheep and, net of winter feed, brings in about 5 rations a worker a day:
- *    - cheese all through spring, summer and autumn (a pinch of salt to each ration),
+ *    - milk all year, the same every season: cheese as far as the salt goes (a pinch to each ration), the rest
+ *      fresh milk, which spoils overnight like other fresh food,
  *    - wool all year,
  *    - mutton at the autumn cull (the oldest tenth of the flock, and any sheep above what the pasture feeds),
  *      salted into cured meat as far as the salt goes, the rest fresh,
@@ -31,8 +32,8 @@ export const MEAT_PER_HEAD = 12
 export const WOOL_PER_HEAD = 0.1
 /** Rations of grain a head eats on a winter day. */
 export const FEED_PER_HEAD = 0.4
-/** Cheese by season: the spring flush and summer grass, then it dries off. */
-export const MILK: Record<'spring' | 'summer' | 'autumn' | 'winter', number> = { spring: 1, summer: 1.2, autumn: 0.6, winter: 0 }
+/** Milk by season: the same all year. */
+export const MILK: Record<'spring' | 'summer' | 'autumn' | 'winter', number> = { spring: 1, summer: 1, autumn: 1, winter: 1 }
 /** Less than this many days of food in store, and the village slaughters. */
 export const LEAN_DAYS = 3
 /** The most of the flock slaughtered in one night of need. */

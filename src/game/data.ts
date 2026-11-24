@@ -5,7 +5,7 @@ import type { Resource, Role, Terrain } from '../world/types'
 
 export const GOODS = [
   // raw (also world resources)
-  'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game', 'peat', 'rice',
+  'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game', 'peat', 'rice', 'milk',
   // garden produce, one for each growing season
   'worts', 'turnips',
   // ores (copper_ore is malachite, iron_ore hematite, silver_ore galena: the ids predate the minerals)
@@ -24,7 +24,7 @@ export type Good = (typeof GOODS)[number]
 export type Goods = Partial<Record<Good, number>>
 
 export const GOOD_LABEL: Record<Good, string> = {
-  grain: 'Grain', fish: 'Fish', timber: 'Timber', peat: 'Peat', rice: 'Wild rice', stone: 'Stone', clay: 'Clay', tin: 'Tin',
+  grain: 'Grain', fish: 'Fish', timber: 'Timber', peat: 'Peat', rice: 'Wild rice', milk: 'Milk', stone: 'Stone', clay: 'Clay', tin: 'Tin',
   wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game', worts: 'Worts', turnips: 'Turnips',
   copper_ore: 'Malachite', chalcopyrite: 'Chalcopyrite', limonite: 'Limonite', iron_ore: 'Hematite', magnetite: 'Magnetite', silver_ore: 'Galena', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
   cured_meat: 'Cured meat', biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
@@ -42,6 +42,7 @@ export const FOOD_SCALE = 10
 export const FOOD: Partial<Record<Good, { value: number; keeps: boolean }>> = {
   grain: { value: 1 * FOOD_SCALE, keeps: true },
   rice: { value: 1 * FOOD_SCALE, keeps: true }, // wild rice from the marshes
+  milk: { value: 1, keeps: false }, // rations, like cheese: the milk no salt was left for, gone off in a day or two
   bread: { value: 1.5 * FOOD_SCALE, keeps: false },
   fish: { value: 1 * FOOD_SCALE, keeps: false },
   smoked_fish: { value: 1.2 * FOOD_SCALE, keeps: true },
@@ -69,7 +70,7 @@ export const foodUnit = (g: Good) => FOOD_UNIT[g] ?? 1
 
 /** Goods counted in wagon loads (what one wagon carries), so the numbers mean something. Metals, cloth and
  *  the like are counted in pieces. */
-export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'peat', 'rice', 'stone', 'clay', 'tin', 'wool', 'berries', 'worts', 'turnips', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
+export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'peat', 'rice', 'stone', 'clay', 'tin', 'wool', 'berries', 'worts', 'turnips', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'milk', 'smoked_fish', 'biscuit', 'dried_peas']
 export const isBulk = (g: Good) => BULK.includes(g)
 export const BULK_UNIT = 'wagon loads'
 

@@ -248,7 +248,9 @@ describe('sheep', () => {
     expect(made.wool ?? 0).toBeGreaterThan(0)
     expect(v.goods.salt).toBeCloseTo(100 - (made.cheese ?? 0), 1)
     v.goods = {}
-    expect(make(s, day(2)).cheese).toBeUndefined()
+    const dry = make(s, day(2))
+    expect(dry.cheese).toBeUndefined()
+    expect(dry.milk ?? 0).toBeGreaterThan(0) // no salt: fresh milk instead, which spoils
   })
 })
 

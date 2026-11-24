@@ -1871,9 +1871,12 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   if (def.herd) {
     // a flock: cheese (a pinch of salt a ration) and wool, from every sheep, all year
     const y = dailyYield(heads(b), season)
-    const cheese = Math.min(y.cheese * k, v.goods.salt ?? 0)
+    const milked = y.cheese * k
+    const cheese = Math.min(milked, v.goods.salt ?? 0)
     const out: Goods = { wool: round2(y.wool * k) }
     if (cheese > 0.005) { out.cheese = round2(cheese); addGoods(v, { salt: -round2(cheese) }) }
+    // the milk with no salt left for it is sold or drunk fresh, and goes off overnight
+    if (milked - cheese > 0.005) out.milk = round2(milked - cheese)
     addGoods(v, out)
     note(out)
     return made
