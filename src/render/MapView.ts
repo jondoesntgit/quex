@@ -765,6 +765,8 @@ export class MapView {
       const p = hexToPixel(cell.col, cell.row, W)
       const cs = hexCorners(p.x, p.y - cell.tier * TP, W).flat()
       g.poly(cs, true).stroke({ width: 1, color: 0xe8b860, alpha: 0.9 })
+      // the hex being dug shows its digger instead of a number (the badge would sit on top of them)
+      if (k === 0 && (mine.roadCrew ?? 0) > 0) return
       badge(g, p.x, p.y - cell.tier * TP, k + 1)
     })
     // caravans on the road

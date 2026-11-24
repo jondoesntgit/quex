@@ -219,7 +219,7 @@ export class People {
   private roadsSeen = false
   private puffs: Puff[] = []
   /** one villager shovelling the hex each road team is on (by village) */
-  private diggers = new Map<string, { g: Graphics; cell: number; shirt: number; skin: number }>()
+  private diggers = new Map<string, { g: Graphics; cell: number; shirt: number; skin: number; done: number }>()
   private clock = 0
   private parent: Container | null = null
   private state: GameState | null = null
@@ -286,7 +286,7 @@ export class People {
     const want = new Map<string, number>()
     for (const v of Object.values(state.villages)) if (v.roadPlan?.length && (v.roadCrew ?? 0) > 0) want.set(v.id, v.roadPlan[0])
     for (const [vid, d] of this.diggers) {
-      if (want.get(vid) !== d.cell) { d.g.destroy(); this.diggers.delete(vid) } else d.shirt = shirtOf(state, vid)
+      if (want.get(vid) !== d.cell) { d.g.destroy(); this.diggers.delete(vid) } else { d.shirt = shirtOf(state, vid); d.done = state.villages[vid]?.roadDone ?? 0 }
     }
     // the digger and the shepherds are the village's own villagers, taken from the crowd while they work
     // (never extra ones): one for a road team, one for each pen someone is set to work
@@ -301,7 +301,7 @@ export class People {
       if (this.diggers.has(vid)) continue
       const g = new Graphics()
       this.parent?.addChild(g)
-      this.diggers.set(vid, { g, cell, shirt: shirtOf(state, vid), skin: SKIN[hashString(`dig-${vid}`) % SKIN.length] })
+      this.diggers.set(vid, { g, cell, shirt: shirtOf(state, vid), skin: SKIN[hashString(`dig-${vid}`) % SKIN.length], done: state.villages[vid]?.roadDone ?? 0 })
     }
   }
 
@@ -742,7 +742,10 @@ export class People {
     for (const d of this.diggers.values()) {
       const h = this.hex(d.cell)
       d.g.zIndex = (this.rank[d.cell] ?? -1) * 4 + 3.5
-      this.draw(d, Math.round(h.cx), Math.round(h.cy - h.tier * this.TP + this.W * 0.1), 'work', Math.floor(this.clock * 2.2) & 1)
+      const x = Math.round(h.cx), y = Math.round(h.cy - h.tier * this.TP + this.W * 0.1)
+      const down = !(Math.floor(this.clock * 2.2) & 1)
+      this.draw(d, x, y, 'work', down ? 0 : 1)
+      this.drawDig(d.g, x, y, d.done, down)
     }
     for (const f of this.folk) if (f.g.visible) this.stepFolk(f, dt)
     for (const w of this.walkers) {
@@ -933,6 +936,24 @@ export class People {
       note.forEach((rowStr, ry) => {
         for (let c = 0; c < rowStr.length; c++) if (rowStr[c] === 'k') g.rect(nx + c, ny + ry, 1, 1).fill({ color: 0x1c1828, alpha })
       })
+    }
+  }
+
+  /** Beside a digger: the trench dug so far across the hex, a spoil heap that grows with it,
+   *  and earth flying off the shovel on each down stroke. */
+  private drawDig(g: Graphics, x: number, y: number, done: number, down: boolean) {
+    const dirt = 0x8a6a44, dark = 0x5a4228
+    // the trench runs out behind them to the left, as long as the hex is done (up to ~half a hex)
+    const len = Math.round(2 + Math.max(0, Math.min(1, done)) * this.W * 0.45)
+    g.rect(x - 4 - len, y, len, 2).fill(dark)
+    g.rect(x - 4 - len, y - 1, len, 1).fill(dirt)
+    // the spoil heap at the shovel's end
+    const heap = 1 + Math.round(Math.max(0, Math.min(1, done)) * 3)
+    for (let r = 0; r < heap; r++) g.rect(x + 4 + r, y - r, 2 * (heap - r), 1).fill(r === heap - 1 ? dirt : dark)
+    if (down) {
+      const t = (this.clock * 2.2) % 1
+      g.rect(x + 5 + Math.round(t * 3), y - 4 - Math.round(t * 2), 1, 1).fill(dirt)
+      g.rect(x + 7 + Math.round(t * 2), y - 3 - Math.round(t * 3), 1, 1).fill(dirt)
     }
   }
 
