@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, HEADS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
 import { CARRY, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
@@ -12,7 +12,7 @@ import { WALLS, strongholdAt, wallsAfter } from '../game/strongholds'
 import { refineTips } from '../game/advisor'
 import { CARRY_EACH, jobs, needOf, people, spare, staffing } from '../game/workers'
 import { SEASON_ICON, weekSeason } from '../game/calendar'
-import { PEN_PER_SLOT, heads, pastureCap } from '../game/herds'
+import { SHEEP_PER_SHEPHERD, heads, pastureCap, penCrew } from '../game/herds'
 import { THIRSTY, WATER_NAME, hasWater, waterAt } from '../game/water'
 import { eventId, type Game } from '../app/store'
 import { outcome } from '../game/preview'
@@ -280,7 +280,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       )}
       {here && here.village.id === v.id && here.building.progress >= 1 && BUILDINGS[here.building.type].herd && (
         <p className="muted" style={{ margin: '4px 0' }}>
-          🐑 {heads(here.building)} sheep, {PEN_PER_SLOT} to each {HEADS} people tending them. Your pasture feeds {pastureCap(world, state, v, (c, r) => inTerritory(v, c, r))} in all (the hexes within a hex of a well or pen that have nothing built on them). The flock grows by half each spring, and the oldest tenth is culled each autumn.
+          🐑 {heads(here.building)} sheep, a shepherd to every {SHEEP_PER_SHEPHERD}: {penCrew(here.building)} to tend them. Your pasture feeds {pastureCap(world, state, v, (c, r) => inTerritory(v, c, r))} in all (the hexes within a hex of a well or pen that have nothing built on them). The flock grows by half each spring, and the oldest tenth is culled each autumn.
         </p>
       )}
       {here && here.village.id === v.id && BUILDINGS[here.building.type].recipes && (

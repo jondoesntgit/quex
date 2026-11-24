@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { rationsOf } from '../game/units'
 import { BUILDINGS, FOOD, GOOD_LABEL, ROAD_TEAM, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
-import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
+import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight, type Source } from '../game/reducer'
 import { hands, jobs, needOf, people, spare, storesFull } from '../game/workers'
 import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
 import type { Habit, Player, TaskStatus, Village } from '../game/types'
@@ -629,6 +630,7 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
     return <small className={hi > 0 ? 'up' : 'down'}>{text}</small>
   }
   const all = [...goods, ...coming]
+  const [open, setOpen] = useState<Good | null>(null)
   return (
     <>
       <h3 style={{ marginBottom: 2 }}>Goods <small className="muted">(in wagon loads)</small></h3>
@@ -638,10 +640,37 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
       </p>
       {all.length ? (
         <div className="goods">{all.map(([g, n]) => (
-          <span key={g} className="good"><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{FOOD[g] ? Math.round(rationsOf(g, n)) : Math.round(n * 10) / 10}</b>{FOOD[g] ? <small className="muted"> rations</small> : isBulk(g) && <small className="muted"> loads</small>} {change(g)}</span></span>
+          <button key={g} className="good" title="How tonight's number comes about" onClick={() => setOpen(g)}><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{FOOD[g] ? Math.round(rationsOf(g, n)) : Math.round(n * 10) / 10}</b>{FOOD[g] ? <small className="muted"> rations</small> : isBulk(g) && <small className="muted"> loads</small>} {change(g)}</span></button>
         ))}</div>
       ) : <p className="muted">Nothing in store.</p>}
+      {open && <Breakdown good={open} sources={t.sources} net={net.get(open)?.net ?? [0, 0]} score={t.score} onClose={() => setOpen(null)} />}
     </>
+  )
+}
+
+/** Tap a good: where tonight's change comes from, building by building, with every step that scales it
+ *  (the day's score, morale, workers, water, salt...), then what the village eats and what spoils. */
+function Breakdown({ good, sources, net, score, onClose }: { good: Good; sources: Source[]; net: [number, number]; score: number; onClose: () => void }) {
+  const k = rationsOf(good, 1)
+  const unit = FOOD[good] ? 'rations' : isBulk(good) ? 'loads' : ''
+  const fmt = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(Math.round(x * k * 100) / 100)}`
+  const lines = sources.filter((s) => s.delta[good] || s.makes?.includes(good))
+  return createPortal(
+    <div className="modal fixed" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="card breakdown">
+        <h2><Icon name={good} title={GOOD_LABEL[good]} /> {GOOD_LABEL[good]} tonight</h2>
+        <p className="muted">If the day ended now, at today's score ({score}/100).{unit && ` In ${unit}.`}</p>
+        {lines.length ? lines.map((s, n) => (
+          <div key={n} className="src">
+            <div className="row src-head"><b>{s.label}</b><b className={(s.delta[good] ?? 0) > 0 ? 'up' : (s.delta[good] ?? 0) < 0 ? 'down' : 'muted'}>{s.delta[good] ? fmt(s.delta[good]!) : 'none'}</b></div>
+            {s.factors.map((f, j) => <div key={j} className="row factor"><span>{f.label}</span><span>{f.value}</span></div>)}
+          </div>
+        )) : <p className="muted">Nothing makes or uses any tonight.</p>}
+        <div className="row src-head total"><b>Tonight</b><b>{net[0] === net[1] ? fmt(net[0]) : `${fmt(net[0])} to ${fmt(net[1])}`}</b></div>
+        <button className="btn" onClick={onClose}>Close</button>
+      </div>
+    </div>,
+    document.body,
   )
 }
 

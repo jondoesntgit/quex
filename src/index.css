@@ -332,6 +332,15 @@ b, strong { font-weight: 400; text-shadow: 1px 0 0 currentColor; }
 .guide li.next { font-weight: 700; }
 .focus { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--gold); background: var(--paper); }
 .good small.up { color: #287828; } .good small.down { color: var(--danger); }
+button.good { font: inherit; color: inherit; background: none; border: 0; padding: 2px; margin: 0; text-align: left; cursor: pointer; border-radius: var(--radius); }
+button.good:hover { background: rgba(0, 0, 0, 0.06); }
+.modal.fixed { position: fixed; }
+.card.breakdown h2 { margin: 0 0 4px; font-weight: 400; display: flex; gap: 8px; align-items: center; }
+.breakdown .src { margin: 10px 0; }
+.breakdown .src-head, .breakdown .factor { justify-content: space-between; gap: 12px; }
+.breakdown .factor { font-size: 0.9em; color: var(--muted, #6a6258); padding-left: 12px; }
+.breakdown .total { border-top: 2px solid var(--ink); padding-top: 6px; margin: 10px 0; }
+.breakdown .up { color: #287828; } .breakdown .down { color: var(--danger); }
 .token[role=button], .split-btn { cursor: pointer; pointer-events: auto; }
 .token.armed { outline: 2px solid var(--gold); }
 .split-btn { padding: 2px 8px; font-size: 0.85em; }

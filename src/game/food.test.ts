@@ -4,7 +4,7 @@ import { neighbours } from '../world/hex'
 import { weekSeason } from './calendar'
 import { BUILDINGS, FOOD, HEADS, TOOLS, producesIn, toolMult, type BuildingId } from './data'
 import { gameLeft } from './deposits'
-import { FOOD_FROM, apply, foodStock, newGame, produce, validate } from './reducer'
+import { FOOD_FROM, apply, foodStock, newGame, produce, tonight, validate } from './reducer'
 import { LEAN_DAYS, age, lamb, mutton, pastureCap, slaughter } from './herds'
 import { WORKERS, autoJobs, needOf } from './workers'
 import type { Building, GameEvent, GameState } from './types'
@@ -165,10 +165,34 @@ describe('sheep', () => {
     return b
   }
 
+  it("tonight's breakdown adds up to the forecast, and says what scales the pen", () => {
+    const s = setup()
+    const b = pen(s)
+    const v = s.villages.v_ann
+    v.goods = { ...v.goods, salt: 0.01, grain: 20 }
+    v.autoJobs = false
+    v.jobs = { [b.id]: 1 }
+    const t = tonight(s, world, s.players.ann, new Date('2026-11-24T12:00:00Z'))
+    for (const r of t.rows) {
+      const sum = t.sources.reduce((a, x) => a + (x.delta[r.good] ?? 0), 0)
+      expect(sum).toBeCloseTo(r.net[0], 1)
+    }
+    const src = t.sources.find((x) => x.label === 'Sheep pen')!
+    const labels = src.factors.map((f) => f.label).join(' | ')
+    expect(labels).toMatch(/Workers: 1 of 2/)
+    expect(labels).toMatch(/6 sheep/)
+    expect(labels).toMatch(/score \d+\/100/)
+    expect(labels).toMatch(/Salt for cheese/)
+    expect(src.makes).toContain('cheese')
+    expect(t.sources.some((x) => x.label === 'Eaten')).toBe(true)
+  })
+
   it('start with six, are slaughtered oldest first, and get a year older each winter', () => {
     const s = setup()
     const b = pen(s)
-    expect(needOf(b)).toBe(HEADS)
+    // a shepherd to every four sheep: two for six, five for twenty
+    expect(needOf(b)).toBe(2)
+    expect(needOf({ ...b, herd: [0, 10, 10, 0, 0] })).toBe(HEADS)
     expect(slaughter(b, 2)).toBe(2)
     expect(b.herd).toEqual([0, 3, 1, 0, 0])
     age(b)

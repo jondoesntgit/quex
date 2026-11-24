@@ -16,8 +16,8 @@ import { barterProblem, noteTrade, weightOf } from './market'
 import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
 import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, hexAt, paveable, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
-import { CARRY_EACH, people, spare, staffing, needOf } from './workers'
-import { CULL_RATE, FEED_PER_HEAD, LEAN_CULL, LEAN_DAYS, age, dailyYield, heads, lamb, mutton, pastureCap, sheepOf, slaughter } from './herds'
+import { CARRY_EACH, people, spare, staffing, needOf, jobs } from './workers'
+import { CHEESE_PER_HEAD, WOOL_PER_HEAD, CULL_RATE, FEED_PER_HEAD, LEAN_CULL, LEAN_DAYS, age, dailyYield, heads, lamb, mutton, pastureCap, sheepOf, slaughter } from './herds'
 import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
 import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
@@ -1791,9 +1791,14 @@ export function tonight(s: GameState, world: World, p: Player, now: Date) {
   const before: Goods = { ...tv.goods }
   const foodBefore = foodStock(tv)
   const odds: Odds = { expected: {}, rolled: {} }
-  const made = produce(test, world, tv, tp, d, date, prod, at, odds)
+  const sources: Source[] = []
+  const made = produce(test, world, tv, tp, d, date, prod, at, odds, sources, score)
+  const beforeEat = { ...tv.goods }
   const { need } = eatFood(tv)
-  spoil(tv)
+  sources.push({ label: 'Eaten', delta: goodsDiff(beforeEat, tv.goods), factors: [{ label: `${people(tv)} people at home`, value: `${EAT} ration each` }, { label: 'A little of every food first', value: '' }] })
+  const beforeSpoil = { ...tv.goods }
+  const rotted = spoil(tv)
+  sources.push({ label: 'Spoiled', delta: goodsDiff(beforeSpoil, tv.goods), factors: [{ label: 'Fresh food', value: 'loses 30% overnight' }, ...(rotted ? [{ label: 'Past what the stores hold', value: 'rots' }] : [])] })
   const rows: { good: Good; have: number; made: number; net: [number, number] }[] = []
   for (const g of new Set([...Object.keys(before), ...Object.keys(tv.goods)]) as Set<Good>) {
     const net = round2((tv.goods[g] ?? 0) - (before[g] ?? 0))
@@ -1804,7 +1809,7 @@ export function tonight(s: GameState, world: World, p: Player, now: Date) {
     if (!(before[g] ?? 0) && !hi) continue
     rows.push({ good: g, have: round2(before[g] ?? 0), made: round2(made[g] ?? 0), net: [lo, hi] })
   }
-  return { score, rows, hungry: need > 1e-6, food: round2(foodStock(tv) - foodBefore) }
+  return { score, rows, hungry: need > 1e-6, food: round2(foodStock(tv) - foodBefore), sources: sources.filter((x) => Object.keys(x.delta).length || x.makes?.length) }
 }
 
 /** What a building can be worked by hand for (a Work action): anything that makes goods, but not crops. */
@@ -1827,7 +1832,10 @@ export function riverBeside(world: World, col: number, row: number): boolean {
 
 /** One building's shift at strength k (1 = a full night at a full day's work, before morale).
  *  Rare finds (a mine's byproducts) come whole or not at all: `odds` collects what was expected. */
-export function shift(s: GameState, world: World, v: Village, b: Building, k: number, date: ISODate, at: string, opts: { rain?: boolean; odds?: Odds; roll?: string } = {}): Goods {
+export function shift(s: GameState, world: World, v: Village, b: Building, k: number, date: ISODate, at: string, opts: { rain?: boolean; odds?: Odds; roll?: string; why?: Factor[] } = {}): Goods {
+  // the working, for the stores' breakdown (see tonight): what each step multiplies the shift by
+  const why = (label: string, value: string) => { opts.why?.push({ label, value }) }
+  const mul = (label: string, x: number) => { if (Math.abs(x - 1) > 1e-6) why(label, times(x)) }
   const def0 = BUILDINGS[b.type]
   // a workshop makes whatever it's been ordered to (the first thing, if nothing)
   const recipe = def0.recipes ? def0.recipes.find((r) => r.id === b.order) ?? def0.recipes[0] : null
@@ -1839,7 +1847,12 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     // a field is sown in spring (the share of the crew it has makes the share of the crop that goes in), is
     // left in summer, and is all reaped in autumn: the rest of the year it makes nothing
     if (season === 'spring') b.sown = Math.min(1, (b.sown ?? 1) + 0.5 * st)
-    if (season !== 'autumn') return {}
+    if (season !== 'autumn') { why(`It's ${season}`, 'reaped in autumn'); return {} }
+  }
+  if (opts.why) {
+    const need = needOf(b, season)
+    if (need) why(`Workers: ${jobs(v, season)[b.id] ?? 0} of ${need}`, times(st))
+    mul('Tools', toolMult(v.tools, b.type))
   }
   k *= st * toolMult(v.tools, b.type)
   if (k <= 0) return {}
@@ -1849,7 +1862,7 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   // herds with no fresh water within a hex give half
   if (THIRSTY.has(b.type)) {
     const w = hasWater(world, s, i, date)
-    if (!w || w.dry) k *= THIRST
+    if (!w || w.dry) { k *= THIRST; why(w?.dry ? 'Its water has dried up' : 'No fresh water within a hex', times(THIRST)) }
   }
   if (def.mine) {
     // the shaft brings up whatever lies at the level it's working
@@ -1879,8 +1892,11 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   if (def.herd) {
     // a flock: cheese (a pinch of salt a ration) and wool, from every sheep, all year
     const y = dailyYield(heads(b), season)
+    why(`${heads(b)} sheep × ${CHEESE_PER_HEAD} milk, ${WOOL_PER_HEAD} wool`, `${round2(y.cheese)} milk, ${round2(y.wool)} wool`)
+    why('All together', times(k))
     const milked = y.cheese * k
     const cheese = Math.min(milked, v.goods.salt ?? 0)
+    if (cheese < milked - 0.005) why('Salt for cheese', `only ${round2(v.goods.salt ?? 0)}: the rest is fresh milk`)
     const out: Goods = { wool: round2(y.wool * k) }
     if (cheese > 0.005) { out.cheese = round2(cheese); addGoods(v, { salt: -round2(cheese) }) }
     // the milk with no salt left for it is sold or drunk fresh, and goes off overnight
@@ -1890,16 +1906,21 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     return made
   }
   const yields = producesIn(def, season)
-  if (!yields) return made
+  if (!yields) { why(`It's ${season}`, 'nothing to make'); return made }
+  why('A full shift makes', fmtGoods(yields))
+  if (def.consumes) why('…from', fmtGoods(def.consumes))
+  if (def.harvest) { mul(`Sown: ${Math.round((b.sown ?? 1) * 100)}%`, 0.25 + 0.75 * (b.sown ?? 1)); if (opts.rain) mul('Rain habit', 1.2) }
   if (def.harvest) k *= (0.25 + 0.75 * (b.sown ?? 1)) * (opts.rain ? 1.2 : 1) // unsown ground still gives volunteer grain
+  if (def.crop && !def.harvest) { mul(`Season: ${weekSeason(date)}`, CROP_SEASON[weekSeason(date)]); if (opts.rain) mul('Rain habit', 1.2) }
   if (def.crop && !def.harvest) k *= CROP_SEASON[weekSeason(date)] * (opts.rain ? 1.2 : 1)
   // ground picked clean of stone grows more
-  if (def.crop && at >= DEPLETION_FROM) k *= 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, i))
+  if (def.crop && at >= DEPLETION_FROM) { const c = 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, i)); mul('Stone picked off the field', c); k *= c }
   if (k <= 0) return made
   if (def.consumes) {
     // limited by inputs on hand
     let avail = 1
     for (const [g, n] of Object.entries(def.consumes)) avail = Math.min(avail, (v.goods[g as Good] ?? 0) / ((n ?? 0) * k))
+    mul('Short of what it uses', Math.max(0, Math.min(1, avail)))
     k *= Math.max(0, Math.min(1, avail))
     if (k <= 0) return made
     addGoods(v, def.consumes, -k)
@@ -1910,16 +1931,18 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     const want = yields.game * k
     const got = huntRange(world, s, b, date, want, HUNT_SHARE * toolMult(v.tools, b.type) * st)
     const r = want > 0 ? got / want : 0
+    mul('Game within two hexes', r)
     out = { ...yields, game: yields.game * r, ...(yields.leather ? { leather: yields.leather * r } : {}) }
   }
   // a mill by running water has a wheel to turn its saw: three times the planks from the same timber
-  if (b.type === 'sawmill' && out.planks && riverBeside(world, b.col, b.row)) out = { ...out, planks: out.planks * RIVER_SAW }
+  if (b.type === 'sawmill' && out.planks && riverBeside(world, b.col, b.row)) { out = { ...out, planks: out.planks * RIVER_SAW }; why('Water wheel', `planks ×${RIVER_SAW}`) }
+  why('All together', times(k))
   addGoods(v, out, k)
   note(out, k)
   return made
 }
 
-export function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord, date: ISODate, prod: number, at: string, odds?: Odds): Goods {
+export function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord, date: ISODate, prod: number, at: string, odds?: Odds, trace?: Source[], score?: number): Goods {
   const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
   const moraleK = 0.75 + v.morale / 200
   const libraryK = habitOn('library') && done(v).some((b) => b.type === 'library') ? 1.05 : 1
@@ -1927,10 +1950,39 @@ export function produce(s: GameState, world: World, v: Village, p: Player, d: Da
   for (const b of done(v)) {
     const def = BUILDINGS[b.type]
     if (!def.produces && !def.mine && !def.smelts && !def.recipes) continue
-    const k = prod * moraleK * libraryK * (onRole(v, def, at) ? 1.25 : 1)
-    for (const [g, n] of Object.entries(shift(s, world, v, b, k, date, at, { rain: habitOn('rain'), odds }))) made[g as Good] = round2((made[g as Good] ?? 0) + (n ?? 0))
+    const role = onRole(v, def, at) ? 1.25 : 1
+    const k = prod * moraleK * libraryK * role
+    const why: Factor[] | undefined = trace ? [] : undefined
+    if (why) {
+      why.push({ label: weekSeason(date) === 'winter' ? 'Winter: the buildings rest' : `Today's tasks: score ${score ?? '?'}/100`, value: times(prod) })
+      why.push({ label: `Morale ${Math.round(v.morale)}`, value: times(moraleK) })
+      if (libraryK !== 1) why.push({ label: 'Library habit', value: times(libraryK) })
+      if (role !== 1) why.push({ label: "The village's calling", value: times(role) })
+    }
+    const before = trace ? { ...v.goods } : null
+    for (const [g, n] of Object.entries(shift(s, world, v, b, k, date, at, { rain: habitOn('rain'), odds, why }))) made[g as Good] = round2((made[g as Good] ?? 0) + (n ?? 0))
+    if (trace && before) {
+      // what it makes when it works, so a building making nothing tonight still says why
+      const makes = Object.keys({ ...def.produces, ...Object.assign({}, ...(def.recipes ?? []).map((r) => r.produces)), ...(def.herd ? { cheese: 1, milk: 1 } : {}) }) as Good[]
+      trace.push({ label: def.name, delta: goodsDiff(before, v.goods), factors: why!, makes })
+    }
   }
   return made
+}
+
+/** One line of the stores' breakdown: a building's shift (or the village eating, or food spoiling), what it
+ *  changed, and the steps that got there. */
+export interface Factor { label: string; value: string }
+export interface Source { label: string; delta: Goods; factors: Factor[]; makes?: Good[] }
+/** A multiplier, written short: ×0.15, ×1.25. */
+export const times = (x: number) => `×${Math.round(x * 100) / 100}`
+function goodsDiff(a: Goods, b: Goods): Goods {
+  const out: Goods = {}
+  for (const g of new Set([...Object.keys(a), ...Object.keys(b)]) as Set<Good>) {
+    const n = (b[g] ?? 0) - (a[g] ?? 0)
+    if (Math.abs(n) > 1e-6) out[g] = n
+  }
+  return out
 }
 
 /** A field for a village's first harvest, on the nearest open grass or meadow in its land (already sown). */

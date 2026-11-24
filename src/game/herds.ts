@@ -1,7 +1,7 @@
 /** Sheep: wool, cheese and mutton, from a flock that grows with the pasture.
  *
- *  A pen keeps a flock, counted by age (index 0 is this year's lambs). A crew of one slot (HEADS people) tends
- *  PEN_PER_SLOT sheep and, net of winter feed, brings in about 5 rations a worker a day:
+ *  A pen keeps a flock, counted by age (index 0 is this year's lambs). A shepherd tends SHEEP_PER_SHEPHERD
+ *  sheep (a crew of one slot, HEADS people, tends PEN_PER_SLOT) and, net of winter feed, brings in about 5 rations a worker a day:
  *    - milk all year, the same every season: cheese as far as the salt goes (a pinch to each ration), the rest
  *      fresh milk, which spoils overnight like other fresh food,
  *    - wool all year,
@@ -46,8 +46,10 @@ export const flock = (b: Building): number[] => (b.herd ? [...b.herd] : [...STAR
 export const heads = (b: Building) => flock(b).reduce((a, n) => a + n, 0)
 export const sheepOf = (v: Village) => v.buildings.filter((b) => b.progress >= 1 && b.type === 'pen').reduce((a, b) => a + heads(b), 0)
 
-/** Crew a pen needs: one slot for each PEN_PER_SLOT sheep (at least one). */
-export const penCrew = (b: Building) => Math.max(1, Math.ceil(heads(b) / PEN_PER_SLOT - 1e-9)) * HEADS
+/** Sheep one shepherd tends. */
+export const SHEEP_PER_SHEPHERD = PEN_PER_SLOT / HEADS
+/** Crew a pen needs: a shepherd for every SHEEP_PER_SHEPHERD sheep (at least one), so a small flock needs few. */
+export const penCrew = (b: Building) => Math.max(1, Math.ceil(heads(b) / SHEEP_PER_SHEPHERD - 1e-9))
 
 /** Sheep the pasture around a village's wells and pens feeds, all its pens together. */
 export function pastureCap(world: World, s: GameState, v: Village, inside: (col: number, row: number) => boolean): number {
