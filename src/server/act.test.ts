@@ -50,6 +50,27 @@ describe('the game server', () => {
     expect(dueTicks(s, now, id)).toEqual([])
   })
 
+  it('has the hourly job advance road teams, so roads appear while nobody is playing', () => {
+    const t0 = new Date('2026-11-16T10:00:00Z')
+    const r = act(newGame(world, '2026-11-15'), world, join('ann', 0), t0)
+    if (!r.ok) throw new Error(r.error)
+    let s = r.state
+    const v = s.villages.v_ann
+    const hex = world.cells.find((c) => c.tier > 0 && (c.col !== v.col || c.row !== v.row) && Math.abs(c.col - v.col) + Math.abs(c.row - v.row) <= 2)!
+    const plan = act(s, world, { t: 'roadplan', id: id(), at: '', playerId: 'ann', plan: [{ col: hex.col, row: hex.row }], crew: 10 }, t0)
+    if (!plan.ok) throw new Error(plan.error)
+    s = plan.state
+    // nothing yet to nudge for a village with no team
+    expect(dueTicks(newGame(world, '2026-11-15'), t0, id)).toEqual([])
+    const later = new Date('2026-11-17T11:00:00Z') // a day and an hour on
+    const nudge = dueTicks(s, later, id).filter((e) => e.t === 'roads')
+    expect(nudge).toHaveLength(1)
+    const done = act(s, world, nudge[0], later)
+    if (!done.ok) throw new Error(done.error)
+    expect(done.state.villages.v_ann.roads).toContain(world.cells.indexOf(hex))
+    expect(done.state.villages.v_ann.roadPlan).toEqual([])
+  })
+
   it('leaves players from before join dates were kept, and never ticked, to their own app', () => {
     const r = act(newGame(world, '2026-11-15'), world, join('ann', 0), new Date('2026-11-16T10:00:00Z'))
     if (!r.ok) throw new Error(r.error)

@@ -246,7 +246,7 @@ function Main({ game }: { game: Game }) {
   }
 
   const season = weekSeason(today)
-  const week = seasonWeek(game.meta.seasonStart, today)
+  const week = seasonWeek(game.state.seasonStart, today)
   const score = p ? dayScore(p.days[today]) : 0
   const v = p ? game.state.villages[p.villageId] : null
 

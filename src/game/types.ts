@@ -277,6 +277,8 @@ export type GameEvent =
   /** change the player's display name (themselves, or a guardian for them) */
   | (Base & { t: 'rename'; name: string })
   /** the road planner: the hexes to dig, in order of priority, and/or how many people are on the team */
+  /** the server's hourly nudge: road teams dig up to this moment (digRoads runs on every event; this one only carries the time) */
+  | (Base & { t: 'roads' })
   | (Base & { t: 'roadplan'; plan?: { col: number; row: number }[]; crew?: number })
   /** pick the colours of the player's borders and villagers (null puts the default back; a missing key is left alone) */
   | (Base & { t: 'colors'; border?: string | null; meeple?: string | null })

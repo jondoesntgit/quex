@@ -521,6 +521,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       if (p.resetChangedAt && daysBetween(p.resetChangedAt.slice(0, 10), ev.at.slice(0, 10)) < 7)
         return 'Bedtime can only change once a week'
       return null
+    case 'roads': return null
     case 'tick':
       if (p.days[ev.date]?.ticked) return 'Already ticked'
       if (p.lastTick && ev.date <= p.lastTick) return 'Already ticked'
@@ -876,6 +877,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       p.resetChangedAt = ev.at
       return s
     case 'act': return act(s, world, p, ev)
+    case 'roads': return s // digRoads has already run, up to this moment
     case 'tick': return tick(s, world, p, ev)
     case 'abandon': return abandon(s, p, ev.at)
     case 'jobs': {

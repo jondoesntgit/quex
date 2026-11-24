@@ -59,6 +59,9 @@ export function dueTicks(state: GameState, now: Date, id: () => string): GameEve
     for (const date of pendingTicks(p, today, from ?? today)) {
       out.push({ t: 'tick', id: id(), at: now.toISOString(), playerId: p.id, date })
     }
+    // road teams dig by the hour: the hourly job carries the time to them, so the roads appear without anyone acting
+    const v = state.villages[p.villageId]
+    if (v?.roadPlan?.length && (v.roadCrew ?? 0) > 0) out.push({ t: 'roads', id: id(), at: now.toISOString(), playerId: p.id })
   }
   return out
 }
