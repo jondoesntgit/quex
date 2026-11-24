@@ -5,7 +5,7 @@ import type { Resource, Role, Terrain } from '../world/types'
 
 export const GOODS = [
   // raw (also world resources)
-  'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game',
+  'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game', 'peat',
   // garden produce, one for each growing season
   'worts', 'turnips',
   // ores (copper_ore is malachite, iron_ore hematite, silver_ore galena: the ids predate the minerals)
@@ -24,7 +24,7 @@ export type Good = (typeof GOODS)[number]
 export type Goods = Partial<Record<Good, number>>
 
 export const GOOD_LABEL: Record<Good, string> = {
-  grain: 'Grain', fish: 'Fish', timber: 'Timber', stone: 'Stone', clay: 'Clay', tin: 'Tin',
+  grain: 'Grain', fish: 'Fish', timber: 'Timber', peat: 'Peat', stone: 'Stone', clay: 'Clay', tin: 'Tin',
   wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game', worts: 'Worts', turnips: 'Turnips',
   copper_ore: 'Malachite', chalcopyrite: 'Chalcopyrite', limonite: 'Limonite', iron_ore: 'Hematite', magnetite: 'Magnetite', silver_ore: 'Galena', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
   cured_meat: 'Cured meat', biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
@@ -68,7 +68,7 @@ export const foodUnit = (g: Good) => FOOD_UNIT[g] ?? 1
 
 /** Goods counted in wagon loads (what one wagon carries), so the numbers mean something. Metals, cloth and
  *  the like are counted in pieces. */
-export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'worts', 'turnips', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
+export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'peat', 'stone', 'clay', 'tin', 'wool', 'berries', 'worts', 'turnips', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
 export const isBulk = (g: Good) => BULK.includes(g)
 export const BULK_UNIT = 'wagon loads'
 
@@ -297,13 +297,14 @@ export function toolMult(tools: readonly string[] | undefined, type: BuildingId)
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'pick' | 'chop' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
+export type ActionKind = 'scout' | 'gather' | 'pick' | 'chop' | 'peat' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
   gather: { size: 'small', name: 'Gather', blurb: "Collect a hex's resource by hand." },
   pick: { size: 'small', name: 'Clear stone', blurb: 'Pick the loose stone off this land for building. Cleared fields grow more.' },
   chop: { size: 'small', name: 'Gather wood', blurb: 'Cut timber from the forest. The trees stay: it is as thick as before, so wood never runs out.' },
+  peat: { size: 'small', name: 'Cut peat', blurb: 'Cut and stack peat from the bog. It burns through the winter like wood, and the bog never runs out.' },
   clear: { size: 'small', name: 'Clear the forest', blurb: 'Fell every tree here for timber. The land is open for good: no trees grow back unless you plant them.' },
   plant: { size: 'small', name: 'Plant trees', blurb: 'Two saplings that take root in winter, then spread.' },
   road: { size: 'small', name: 'Dirt road', blurb: 'Faster caravans through this hex.' },
@@ -322,6 +323,9 @@ export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: 
   expedition: { size: 'big', name: 'Expedition', blurb: 'Take on a monster lair for loot.' },
   siege: { size: 'big', name: 'Lay siege', blurb: 'Storm a stronghold. Its walls triple its strength: bring rams, siege towers or cannon to break them, and muskets for the assault.' },
 }
+
+/** Winter fuel: wood or peat, this many people to the unit burned on the winter night. */
+export const FUEL_PEOPLE = 100
 
 export const SIZE_RANK: Record<TaskSize, number> = { small: 1, medium: 2, big: 3 }
 

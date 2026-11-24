@@ -9,7 +9,7 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, FUEL_PEOPLE, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
@@ -584,6 +584,11 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (left.surface < 1) return left.deep >= 1 ? 'Picked clean: a quarry could cut the rock below' : 'Picked clean'
       return null
     }
+    case 'peat':
+      if (terr !== 'swamp') return 'Peat is cut from swamp and bog'
+      if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
+      if (buildingAt(s, ev.col, ev.row) || villageAt(s, ev.col, ev.row)) return 'Something is built here'
+      return null
     case 'chop':
     case 'clear':
       if (!hasTrees(land)) return 'No trees to fell here'
@@ -1195,6 +1200,12 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const rest = leftAt(world, s, i)!.surface
       const field = buildingAt(s, ev.col, ev.row)?.building
       log(s, ev.at, p.id, `Cleared ${n} stone.${rest < 1 ? ' The ground is picked clean' + (field && BUILDINGS[field.type].crop ? ': the crops will grow better.' : '.') : ''}`, 'good')
+      break
+    }
+    case 'peat': {
+      const n = round2(3 * k)
+      addGoods(v, { peat: n })
+      log(s, ev.at, p.id, `Cut peat: +${n}. The bog fills in behind you.`, 'good')
       break
     }
     case 'chop': {
@@ -1980,6 +1991,21 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
     }
   }
   v.morale = Math.round(Math.max(0, Math.min(100, v.morale + (moraleTarget - v.morale) * 0.25)))
+
+  // 2b. the winter night: wood or peat on the fire, a unit for every FUEL_PEOPLE people (peat first)
+  if (winter) {
+    const want = round2(pop / FUEL_PEOPLE)
+    let burn = want
+    const burned: Goods = {}
+    for (const g of ['peat', 'timber'] as const) {
+      const n = round2(Math.min(burn, v.goods[g] ?? 0))
+      if (n > 0) { addGoods(v, { [g]: -n }); burned[g] = n; burn = round2(burn - n) }
+    }
+    if (burn > 0.005) {
+      v.morale -= 6
+      notes.push('no wood or peat to burn: a cold night')
+    } else if (want > 0) notes.push(`burned ${fmtGoods(burned)} to keep warm`)
+  }
 
   // 3. spoilage + storage cap
   if (spoil(v)) notes.push('food rotted for want of a granary')

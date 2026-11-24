@@ -129,6 +129,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
   else {
     if (canScout) acts.push('scout')
     if (trees && !here && !village) gatherActs.push('chop', 'clear')
+    if (mine && terr === 'swamp' && !here && !village) gatherActs.push('peat')
     if (mine && land.resource && land.resource !== 'stone' && GATHER[land.resource]) gatherActs.push('gather')
     if (mine && left?.ore === 'stone' && left.surface >= 1) gatherActs.push('pick')
     if (mine && clayLeft(world, state, i) !== null) gatherActs.push('dig_clay')
@@ -475,10 +476,10 @@ function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Play
   )
 }
 
-const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', clear: 'Clear the forest', dig_clay: 'Dig clay' }
+const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', peat: 'Cut peat', clear: 'Clear the forest', dig_clay: 'Dig clay' }
 /** The question each confirmation asks. */
 const ASK_TITLE: Partial<Record<ActionKind, string>> = {
-  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
+  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', peat: 'Cut peat here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
   well: 'Dig a well?', plant: 'Plant trees?',
 }
 

@@ -242,3 +242,40 @@ describe('what a hex could take', () => {
     expect(open).toBeDefined()
   })
 })
+
+describe('winter fuel and peat', () => {
+  const SAT = '2026-11-28'
+  const winterNight = (s: GameState) => run(s, { t: 'tick', id: `w${++n}`, at: `2026-11-29T00:05:00Z`, playerId: 'ann', date: SAT } as GameEvent)
+  it('burns a unit of peat, then wood, for every 100 people, and a cold night costs morale', async () => {
+    const { people } = await import('./workers')
+    const s = setup()
+    const v = s.villages.v_ann
+    v.population = 200
+    const need = people(v) / 100
+    expect(need).toBeGreaterThan(0)
+    v.goods = { grain: 50, peat: need / 2, timber: 10 }
+    winterNight(s)
+    expect(v.goods.peat ?? 0).toBe(0)
+    expect(v.goods.timber).toBeCloseTo(10 - need / 2, 1)
+    expect(s.log.some((l) => /cold night/.test(l.text))).toBe(false)
+    // nothing to burn
+    const s2 = setup()
+    const w = s2.villages.v_ann
+    w.population = 200
+    w.goods = { grain: 50 }
+    w.morale = 80
+    winterNight(s2)
+    expect(w.morale).toBeLessThan(80)
+    expect(s2.log.some((l) => /cold night/.test(l.text))).toBe(true)
+  })
+  it('lets you cut peat from swamp in your territory', async () => {
+    const { territoryCells, landAt } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const i = territoryCells(world, v).find((j) => world.cells[j].tier > 0 && landAt(world, s, j).terrain === 'swamp')
+    if (i === undefined) return // no swamp near this village in the test world
+    const c = world.cells[i]
+    expect(run(s, { t: 'act', id: 'p1', at: AT, playerId: 'ann', tokenId: tok(s, 'small'), action: 'peat', col: c.col, row: c.row } as GameEvent)).toBeNull()
+    expect(v.goods.peat).toBe(3)
+  })
+})

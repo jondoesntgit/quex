@@ -61,6 +61,11 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
       out.notes.push(rest < 1 ? 'The ground is picked clean: fields here grow better.' : `About ${Math.round(rest)} more loose stone afterwards.`)
       break
     }
+    case 'peat': {
+      out.gets.push(`+${round2(3 * k)} peat`)
+      out.notes.push('Burns in winter in place of wood. The bog never runs out.')
+      break
+    }
     case 'chop': {
       out.gets.push(`+${round2((land.terrain === 'forest' ? 3 : 1) * k)} timber`)
       out.notes.push('The forest stays as thick as it was: you can cut wood here as often as you like.')
