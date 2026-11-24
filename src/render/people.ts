@@ -217,6 +217,8 @@ export class People {
   private roads = new Set<number>()
   private roadsSeen = false
   private puffs: Puff[] = []
+  /** one villager shovelling the hex each road team is on (by village) */
+  private diggers = new Map<string, { g: Graphics; cell: number; shirt: number; skin: number }>()
   private clock = 0
   private parent: Container | null = null
   private state: GameState | null = null
@@ -232,7 +234,7 @@ export class People {
   }
 
   /** Graphics owned by the crowd (MapView keeps these when it redraws). */
-  nodes() { return [...this.walkers.map((w) => w.g), ...this.folk.map((f) => f.g), ...this.puffs.map((p) => p.g)] }
+  nodes() { return [...this.walkers.map((w) => w.g), ...this.folk.map((f) => f.g), ...this.puffs.map((p) => p.g), ...[...this.diggers.values()].map((d) => d.g)] }
 
   /** Put the crowd into the map container and take its painter's ranks. */
   attach(parent: Container, rank: Int32Array) {
@@ -240,6 +242,7 @@ export class People {
     this.parent = parent
     for (const w of [...this.walkers, ...this.folk]) if (w.g.parent !== parent) parent.addChild(w.g)
     for (const p of this.puffs) if (p.g.parent !== parent) parent.addChild(p.g)
+    for (const d of this.diggers.values()) if (d.g.parent !== parent) parent.addChild(d.g)
   }
 
   /** Rebuild the crowd when villages, population, buildings or outposts change;
@@ -270,7 +273,23 @@ export class People {
       for (const v of vs) this.plans.set(v.id, this.planFor(world, v, revealed))
     }
     for (const r of fresh) this.newRoad(r)
+    this.syncDiggers(state)
     this.checkSabbath()
+  }
+
+  /** A road team shows as one villager with a shovel on the hex they are digging (the first in the plan). */
+  private syncDiggers(state: GameState) {
+    const want = new Map<string, number>()
+    for (const v of Object.values(state.villages)) if (v.roadPlan?.length && (v.roadCrew ?? 0) > 0) want.set(v.id, v.roadPlan[0])
+    for (const [vid, d] of this.diggers) {
+      if (want.get(vid) !== d.cell) { d.g.destroy(); this.diggers.delete(vid) } else d.shirt = shirtOf(state, vid)
+    }
+    for (const [vid, cell] of want) {
+      if (this.diggers.has(vid)) continue
+      const g = new Graphics()
+      this.parent?.addChild(g)
+      this.diggers.set(vid, { g, cell, shirt: shirtOf(state, vid), skin: SKIN[hashString(`dig-${vid}`) % SKIN.length] })
+    }
   }
 
   /** Where a village's people may go: its land and roads, and what's worth visiting. */
@@ -707,6 +726,11 @@ export class People {
     for (const p of this.puffs) { p.t += dt; this.drawPuff(p) }
     for (const p of this.puffs.filter((x) => x.t >= PUFF_TIME)) p.g.destroy()
     this.puffs = this.puffs.filter((x) => x.t < PUFF_TIME)
+    for (const d of this.diggers.values()) {
+      const h = this.hex(d.cell)
+      d.g.zIndex = (this.rank[d.cell] ?? -1) * 4 + 3.5
+      this.draw(d, Math.round(h.cx), Math.round(h.cy - h.tier * this.TP + this.W * 0.1), 'work', Math.floor(this.clock * 2.2) & 1)
+    }
     for (const f of this.folk) this.stepFolk(f, dt)
     for (const w of this.walkers) {
       let pose: Pose
