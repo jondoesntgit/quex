@@ -610,7 +610,13 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     case 'build': {
       const def = BUILDINGS[ev.building!]
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
-      if (cell.tier === 0) return 'Not on water'
+      if (def.shallows) {
+        // docks and shipyards stand out in the shallows, reached from your own shore
+        if (cell.tier > 0) return `${def.name} is built out over the shallows, not on land`
+        if (terr !== 'shallow') return `${def.name} needs the shallows: the water is too deep out here`
+        const shore = neighbours(ev.col, ev.row).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].tier > 0 && inTerritory(v, nc, nr))
+        if (!shore) return `${def.name} has to reach out from your own shore`
+      } else if (cell.tier === 0) return 'Not on water'
       if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
       if (ev.col === v.col && ev.row === v.row) return 'That is your village square'
       const existing = buildingAt(s, ev.col, ev.row)

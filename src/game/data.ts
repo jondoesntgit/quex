@@ -177,6 +177,8 @@ export interface BuildingDef {
   herd?: boolean
   /** may be built beside a river as well as the sea */
   river?: boolean
+  /** built out over the shallows, from your own shore (not on land) */
+  shallows?: boolean
   popCap?: number
   /** no longer built (replaced); existing ones carry on */
   legacy?: boolean
@@ -219,8 +221,8 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
       { id: 'cure', name: 'Cured meat', consumes: { game: 2, salt: 18, timber: 0.5 }, produces: { cured_meat: 18 } },
     ] }),
   salt_pans: B({ id: 'salt_pans', name: 'Salt pans', role: 'port', size: 'medium', cost: { stone: 3 }, terrain: ['beach', 'desert'], produces: { salt: 1.5 * SALT_PER_OLD }, blurb: 'Salt preserves food (one pinch to a ration) and trades well.' }),
-  docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 4.5 }, blurb: 'A big crew on the water. Spears and boats raise its catch like the shore fishery\'s.' }),
-  shipyard: B({ id: 'shipyard', name: 'Shipyard', role: 'port', size: 'big', cost: { planks: 10, iron: 3, cloth: 2 }, nearTerrain: ['shallow', 'ocean'], blurb: 'NPC trade at the best rates; ships for explorers.' }),
+  docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, shallows: true, produces: { fish: 4.5 }, blurb: 'A pier of planks out into the shallows, a big crew on the water. Spears and boats raise its catch like the shore fishery\'s.' }),
+  shipyard: B({ id: 'shipyard', name: 'Shipyard', role: 'port', size: 'big', cost: { planks: 10, iron: 3, cloth: 2 }, shallows: true, blurb: 'Built out over the shallows. NPC trade at the best rates; ships for explorers.' }),
   // mining
   quarry: B({ id: 'quarry', name: 'Quarry', role: 'mining', size: 'medium', cost: { timber: 2 }, nearTerrain: ['rock', 'hills'], mountain: true, mine: true, blurb: 'Building stone from the hillside. Cut it deeper, level by level, to reach more rock.' }),
   kiln: B({ id: 'kiln', name: 'Brick kiln', role: 'mining', size: 'medium', cost: { stone: 3 }, consumes: { clay: 2, timber: 0.5 }, produces: { bricks: 2 }, blurb: 'Fired bricks from river clay.' }),

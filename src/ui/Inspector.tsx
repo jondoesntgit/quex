@@ -285,7 +285,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       <div className="actions">
         {mine && !village && here && here.building.progress < 1
           ? <button className="btn medium action" onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
-          : cell.tier > 0 && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
+          : (cell.tier > 0 || terr === 'shallow') && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
             && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {acts.map((a) => a === 'caravan'

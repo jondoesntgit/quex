@@ -194,3 +194,26 @@ describe('colours', () => {
     expect(s.players.ann.colors).toEqual({ meeple: '#00aa55' })
   })
 })
+
+describe('docks and shipyards', () => {
+  it('go out into the shallows from your own shore, never on land', async () => {
+    const { territoryCells, inTerritory } = await import('./reducer')
+    const { neighbours } = await import('../world/hex')
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = { planks: 100, stone: 100, iron: 100, cloth: 100 }
+    const cells = territoryCells(world, v)
+    const shallow = cells.find((i) => world.cells[i].terrain === 'shallow' && world.cells[i].tier === 0 && neighbours(world.cells[i].col, world.cells[i].row)
+      .some(([c, r]) => c >= 0 && r >= 0 && c < world.width && r < world.height && world.cells[r * world.width + c].tier > 0 && inTerritory(v, c, r)))
+    expect(shallow).toBeDefined()
+    const sh = world.cells[shallow!]
+    const build = (id: string, b: 'docks' | 'shipyard', c: { col: number; row: number }) =>
+      run(s, { t: 'act', id, at: AT, playerId: 'ann', tokenId: tok(s, 'big'), action: 'build', building: b, col: c.col, row: c.row } as GameEvent)
+    const land = world.cells[cells.find((i) => world.cells[i].tier > 0 && !(world.cells[i].col === v.col && world.cells[i].row === v.row))!]
+    expect(build('d0', 'docks', land)).toMatch(/not on land/)
+    expect(build('d1', 'docks', sh)).toBeNull()
+    expect(v.buildings.some((b) => b.type === 'docks' && b.col === sh.col && b.row === sh.row)).toBe(true)
+    // other buildings still stay off the water
+    expect(run(s, { t: 'act', id: 'g1', at: AT, playerId: 'ann', tokenId: tok(s, 'medium'), action: 'build', building: 'granary', col: sh.col, row: sh.row } as GameEvent)).toMatch(/Not on water/)
+  })
+})
