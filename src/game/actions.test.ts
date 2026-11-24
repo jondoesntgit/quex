@@ -279,3 +279,45 @@ describe('winter fuel and peat', () => {
     expect(v.goods.peat).toBe(3)
   })
 })
+
+describe('the road planner and wild rice', () => {
+  const plan = (s: GameState, at: string, rest: object) => run(s, { t: 'roadplan', id: `rp${++n}`, at, playerId: 'ann', ...rest } as GameEvent)
+  it('digs planned hexes in order: a team of 10 lays a hex a day, pro rata by the hour', async () => {
+    const { territoryCells } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const hexes = territoryCells(world, v).map((i) => world.cells[i]).filter((c) => c.tier > 0 && !v.roads.includes(world.cells.indexOf(c))).slice(0, 3)
+    const t0 = `${DAY}T00:00:00Z`
+    expect(plan(s, t0, { plan: hexes.map((c) => ({ col: c.col, row: c.row })), crew: 10 })).toBeNull()
+    // twelve hours: half a hex, nothing laid yet
+    run(s, { t: 'tick', id: `x${++n}`, at: `${DAY}T12:00:00Z`, playerId: 'ann', date: '2026-11-22' } as GameEvent)
+    expect(v.roads.length).toBe(0)
+    expect(v.roadDone).toBeCloseTo(0.5, 2)
+    // a day and a half in: the first is down
+    run(s, { t: 'tick', id: `x${++n}`, at: `2026-11-24T12:00:00Z`, playerId: 'ann', date: '2026-11-23' } as GameEvent)
+    expect(v.roads).toContain(world.cells.indexOf(hexes[0]))
+    expect(v.roadPlan!.length).toBe(2)
+    // bigger team, faster; nothing costs goods or actions
+    expect(plan(s, `2026-11-24T12:00:00Z`, { crew: 20 })).toBeNull()
+    expect(v.roadCrew).toBe(20)
+  })
+  it('refuses plans on water, outside the territory and teams bigger than the village', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    const water = world.cells.find((c) => c.tier === 0)!
+    expect(plan(s, AT, { plan: [{ col: water.col, row: water.row }] })).toMatch(/land/)
+    expect(plan(s, AT, { crew: 100000 })).toMatch(/at most/)
+    expect(plan(s, AT, {})).toMatch(/Nothing/)
+    expect(v.roadPlan).toBeUndefined()
+  })
+  it('gathers wild rice from marshes in territory, any season', async () => {
+    const { territoryCells, landAt } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const i = territoryCells(world, v).find((j) => world.cells[j].tier > 0 && landAt(world, s, j).terrain === 'swamp')
+    if (i === undefined) return
+    const c = world.cells[i]
+    expect(run(s, { t: 'act', id: 'r1', at: AT, playerId: 'ann', tokenId: tok(s, 'small'), action: 'rice', col: c.col, row: c.row } as GameEvent)).toBeNull()
+    expect(v.goods.rice).toBe(3)
+  })
+})

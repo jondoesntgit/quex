@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { rationsOf } from '../game/units'
-import { BUILDINGS, FOOD, GOOD_LABEL, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
+import { BUILDINGS, FOOD, GOOD_LABEL, ROAD_TEAM, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
 import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
-import { jobs, needOf, people, spare, storesFull } from '../game/workers'
+import { hands, jobs, needOf, people, spare, storesFull } from '../game/workers'
 import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
 import type { Habit, Player, TaskStatus, Village } from '../game/types'
 import { SEASON_ICON, addDays, isSabbath, weekSeason, weekday } from '../game/calendar'
@@ -339,6 +339,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
       <Garrison game={game} p={p} />
       <Growth game={game} p={p} />
       <Workers game={game} p={p} />
+      <RoadPlanner game={game} p={p} />
       <Tools game={game} p={p} />
       <h3>Start over</h3>
       {!confirm ? (
@@ -652,7 +653,7 @@ function Workers({ game, p }: { game: Game; p: Player }) {
   const auto = v.autoJobs !== false
   // taking the work over by hand: a reminder of what the year asks of the fields first
   const [asking, setAsking] = useState(false)
-  const home = people(v)
+  const home = hands(v)
   const busy = Object.values(j).reduce((a, n) => a + n, 0)
   const [step, stepChips] = useStep(Math.floor(v.population))
   const set = (id: string, d: number) => {
@@ -715,6 +716,63 @@ function Workers({ game, p }: { game: Game; p: Player }) {
         </p>
       )}
       {!v.buildings.length && <p className="muted">Tap a hex in your territory (yellow border) and finish a medium task to build.</p>}
+    </>
+  )
+}
+
+/** The road planner: dirt roads are dug by a team of villagers, hex by hex in the order planned. Costs no
+ *  actions or goods, only the team's time (ROAD_TEAM people lay a hex a day). Stone roads still take a small
+ *  action and stone each (tap a road hex). */
+function RoadPlanner({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  const w = game.world.width
+  const plan = v.roadPlan ?? []
+  const crew = v.roadCrew ?? 0
+  const [step, stepChips] = useStep(Math.floor(v.population))
+  const send = (ev: { plan?: { col: number; row: number }[]; crew?: number }) =>
+    void game.dispatch({ t: 'roadplan', id: eventId(), at: game.now().toISOString(), playerId: p.id, ...ev })
+  const cells = plan.map((i) => ({ col: i % w, row: Math.floor(i / w) }))
+  const move = (k: number, d: number) => {
+    const next = [...cells]
+    const [h] = next.splice(k, 1)
+    next.splice(Math.max(0, Math.min(next.length, k + d)), 0, h)
+    send({ plan: next })
+  }
+  const perDay = crew / ROAD_TEAM
+  const days = perDay > 0 ? Math.max(0, plan.length - (v.roadDone ?? 0)) / perDay : 0
+  const free = people(v)
+  return (
+    <>
+      <h3 style={{ marginBottom: 2 }}>Road planner</h3>
+      <p className="muted" style={{ margin: '0 0 4px' }}>
+        A team of {ROAD_TEAM} lays a hex of dirt road a day (by the hour); no actions or goods, just the team's time, taken off the buildings' workers. Plan hexes from the map (Build… on a hex next to your land). Stone roads still take a small action and 2 stone each.
+      </p>
+      <div className="row worker-row">
+        <span>Road team {crew > 0 && plan.length > 0 && <span className="muted">· {perDay.toFixed(perDay < 1 ? 1 : 0)} hex a day</span>}</span>
+        <span className="row stepper">
+          <button className="btn icon" disabled={crew <= 0} onClick={() => send({ crew: Math.max(0, crew - step) })}>−</button>
+          <b className="qty">{crew}</b>
+          <button className="btn icon" disabled={crew >= free} onClick={() => send({ crew: Math.min(free, crew + step) })}>+</button>
+        </span>
+      </div>
+      <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>
+      {plan.length === 0
+        ? <p className="muted" style={{ margin: '2px 0' }}>Nothing planned.</p>
+        : (
+          <>
+            <p className="muted" style={{ margin: '2px 0' }}>{plan.length} hex{plan.length === 1 ? '' : 'es'} planned, in this order{crew > 0 ? `: about ${days < 1 ? 'a day' : `${Math.ceil(days)} days`} to finish` : ' (put people on the team to start)'}.</p>
+            {cells.map((c, k) => (
+              <div key={`${c.col},${c.row}`} className="row worker-row">
+                <span><b>{k + 1}.</b> hex {c.col},{c.row}{k === 0 && crew > 0 && (v.roadDone ?? 0) > 0 ? <span className="muted"> · {Math.round((v.roadDone ?? 0) * 100)}% dug</span> : null}</span>
+                <span className="row stepper">
+                  <button className="btn icon" disabled={k === 0} onClick={() => move(k, -1)} aria-label="higher priority">↑</button>
+                  <button className="btn icon" disabled={k === cells.length - 1} onClick={() => move(k, 1)} aria-label="lower priority">↓</button>
+                  <button className="btn icon" onClick={() => send({ plan: cells.filter((_, j) => j !== k) })} aria-label="remove">✕</button>
+                </span>
+              </div>
+            ))}
+          </>
+        )}
     </>
   )
 }

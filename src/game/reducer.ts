@@ -9,7 +9,7 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, FUEL_PEOPLE, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, FUEL_PEOPLE, ROAD_TEAM, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
@@ -495,6 +495,24 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       if (n.length > 20) return 'Names are at most 20 letters'
       return n === p.name ? 'That is already the name' : null
     }
+    case 'roadplan': {
+      if (ev.plan === undefined && ev.crew === undefined) return 'Nothing to change'
+      if (ev.plan) {
+        if (ev.plan.length > 80) return 'Plan at most 80 hexes at a time'
+        const seen = new Set<number>()
+        for (const h of ev.plan) {
+          if (!Number.isInteger(h.col) || !Number.isInteger(h.row) || h.col < 0 || h.row < 0 || h.col >= world.width || h.row >= world.height) return 'That is not a hex'
+          const j = cellIndex(world, h.col, h.row)
+          if (seen.has(j)) return 'A hex is on the plan twice'
+          seen.add(j)
+          if (world.cells[j].tier === 0) return 'Roads need land'
+          if (!territory(v).some((t) => distance(t, h) <= t.radius + 1)) return 'Roads must start from your territory'
+          if (v.roads.includes(j)) return 'Already a road'
+        }
+      }
+      if (ev.crew !== undefined && (!Number.isInteger(ev.crew) || ev.crew < 0 || ev.crew > people(v))) return `The team can be at most ${people(v)} people`
+      return null
+    }
     case 'colors': {
       for (const c of [ev.border, ev.meeple]) if (c != null && !/^#[0-9a-f]{6}$/i.test(c)) return 'Colours look like #aabbcc'
       return ev.border === undefined && ev.meeple === undefined ? 'Pick a colour' : null
@@ -584,6 +602,11 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (left.surface < 1) return left.deep >= 1 ? 'Picked clean: a quarry could cut the rock below' : 'Picked clean'
       return null
     }
+    case 'rice':
+      if (terr !== 'swamp') return 'Wild rice grows in the marshes'
+      if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
+      if (buildingAt(s, ev.col, ev.row) || villageAt(s, ev.col, ev.row)) return 'Something is built here'
+      return null
     case 'peat':
       if (terr !== 'swamp') return 'Peat is cut from swamp and bog'
       if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
@@ -782,6 +805,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   const err = validate(s, world, ev)
   s.version++
   deliverCaravans(s, ev.at)
+  digRoads(s, world, ev.at)
   crewsHome(s, ev.at)
   givePurses(s, ev.at)
   convertToCities(s, world, ev.at)
@@ -837,6 +861,14 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       if (ev.border !== undefined) { if (ev.border) c.border = ev.border.toLowerCase(); else delete c.border }
       if (ev.meeple !== undefined) { if (ev.meeple) c.meeple = ev.meeple.toLowerCase(); else delete c.meeple }
       p.colors = c
+      return s
+    }
+    case 'roadplan': {
+      const v = s.villages[p.villageId]
+      // the team has been digging up to this moment (apply did that first); now it takes the new orders
+      if (ev.plan) { v.roadPlan = ev.plan.map((h) => cellIndex(world, h.col, h.row)); v.roadDone = 0 }
+      if (ev.crew !== undefined) v.roadCrew = ev.crew
+      v.roadAt = ev.at
       return s
     }
     case 'resetHour':
@@ -1200,6 +1232,12 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const rest = leftAt(world, s, i)!.surface
       const field = buildingAt(s, ev.col, ev.row)?.building
       log(s, ev.at, p.id, `Cleared ${n} stone.${rest < 1 ? ' The ground is picked clean' + (field && BUILDINGS[field.type].crop ? ': the crops will grow better.' : '.') : ''}`, 'good')
+      break
+    }
+    case 'rice': {
+      const n = round2(3 * k)
+      addGoods(v, { rice: n })
+      log(s, ev.at, p.id, `Gathered ${n} wild rice. The marsh reseeds itself.`, 'good')
       break
     }
     case 'peat': {
@@ -1645,6 +1683,28 @@ function crewsHome(s: GameState, at: string) {
 
 /** How many arrived caravans the world remembers for its caravan page. */
 const ARRIVED_KEPT = 40
+
+/** Each village's road team digs the planned hexes in order: ROAD_TEAM people lay a hex a day, pro rata
+ *  by the hour (so 5 people take two days, 20 lay two a day). Dirt roads cost nothing but the people's time. */
+export function digRoads(s: GameState, world: World, at: string) {
+  const now = Date.parse(at)
+  for (const v of Object.values(s.villages)) {
+    const plan = v.roadPlan
+    if (!plan?.length || !(v.roadCrew && v.roadCrew > 0)) continue
+    const was = v.roadAt ? Date.parse(v.roadAt) : now
+    if (now <= was) continue
+    v.roadAt = at
+    let work = (v.roadDone ?? 0) + (v.roadCrew / ROAD_TEAM) * ((now - was) / 86_400_000)
+    while (work >= 1 && plan.length) {
+      work -= 1
+      const i = plan.shift()!
+      if (world.cells[i].tier === 0 || v.roads.includes(i)) { work += 1; continue }
+      v.roads.push(i)
+      log(s, at, v.playerId, world.cells[i].riverTo !== -1 ? 'The road team built a bridge over the river.' : 'The road team finished a stretch of dirt road.', 'good')
+    }
+    v.roadDone = plan.length ? Math.round(work * 1000) / 1000 : 0
+  }
+}
 
 function deliverCaravans(s: GameState, at: string) {
   const now = Date.parse(at)

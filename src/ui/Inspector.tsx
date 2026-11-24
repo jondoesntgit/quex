@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, HEADS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
-import { CARRY, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { CARRY, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
@@ -129,7 +129,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
   else {
     if (canScout) acts.push('scout')
     if (trees && !here && !village) gatherActs.push('chop', 'clear')
-    if (mine && terr === 'swamp' && !here && !village) gatherActs.push('peat')
+    if (mine && terr === 'swamp' && !here && !village) gatherActs.push('rice', 'peat')
     if (mine && land.resource && land.resource !== 'stone' && GATHER[land.resource]) gatherActs.push('gather')
     if (mine && left?.ore === 'stone' && left.surface >= 1) gatherActs.push('pick')
     if (mine && clayLeft(world, state, i) !== null) gatherActs.push('dig_clay')
@@ -169,6 +169,22 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
             </div>
           </>
         )}
+        {cell.tier > 0 && (() => {
+          const inPlan = (v.roadPlan ?? []).includes(i)
+          const next = inPlan ? (v.roadPlan ?? []).filter((j) => j !== i) : [...(v.roadPlan ?? []), i]
+          const w = game.world.width
+          const ev = { t: 'roadplan' as const, id: eventId(), at: game.now().toISOString(), playerId: p.id, plan: next.map((j) => ({ col: j % w, row: Math.floor(j / w) })) }
+          const err = inPlan ? null : validate(game.state, game.world, ev)
+          return (
+            <div className="actions">
+              <button className="btn small action" disabled={!!err} title={err ?? undefined}
+                onClick={() => { void game.dispatch(ev) }}>
+                {inPlan ? 'Take off the road plan' : 'Add to the road plan'}
+                <small>{err ?? (inPlan ? 'the team will skip this hex' : `a team of villagers digs it as no. ${next.length}; no action needed`)}</small>
+              </button>
+            </div>
+          )
+        })()}
         {workActs.length > 0 && (
           <>
             <h3 className="sub">Roads, wells and trees</h3>
@@ -476,10 +492,10 @@ function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Play
   )
 }
 
-const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', peat: 'Cut peat', clear: 'Clear the forest', dig_clay: 'Dig clay' }
+const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', rice: 'Gather wild rice', peat: 'Cut peat', clear: 'Clear the forest', dig_clay: 'Dig clay' }
 /** The question each confirmation asks. */
 const ASK_TITLE: Partial<Record<ActionKind, string>> = {
-  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', peat: 'Cut peat here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
+  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', rice: 'Gather wild rice here?', peat: 'Cut peat here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
   well: 'Dig a well?', plant: 'Plant trees?',
 }
 

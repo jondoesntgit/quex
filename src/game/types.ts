@@ -103,6 +103,12 @@ export interface Village {
   sprouted?: ISODate
   /** road hexes laid with stone (see caravanCarry) */
   paved?: number[]
+  /** the road planner: dirt-road hexes in the order the team digs them (first is next) */
+  roadPlan?: number[]
+  /** people on the road team, and how much of the hex they are on is done (0..1), as of `roadAt` */
+  roadCrew?: number
+  roadDone?: number
+  roadAt?: string
   /** the city: hexes laid with cobblestone, the village's own first (see city.ts) */
   city?: number[]
   /** homes built in the city, where each stands (ground px from the village hex's centre) */
@@ -270,6 +276,8 @@ export type GameEvent =
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */
   | (Base & { t: 'rename'; name: string })
+  /** the road planner: the hexes to dig, in order of priority, and/or how many people are on the team */
+  | (Base & { t: 'roadplan'; plan?: { col: number; row: number }[]; crew?: number })
   /** pick the colours of the player's borders and villagers (null puts the default back; a missing key is left alone) */
   | (Base & { t: 'colors'; border?: string | null; meeple?: string | null })
   /** barter with a merchant calling at the village today (game/market) */

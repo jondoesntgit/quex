@@ -63,6 +63,27 @@ const BUILDING_SPRITE: Partial<Record<BuildingId, string>> = {
 }
 const MONSTER_SPRITE = { goblins: 'f_goblins', orcs: 'f_orcs', trolls: 'f_troll', dragon: 'f_dragon' } as const
 
+/** 3x5 pixel digits, for the road planner's priority numbers. */
+const DIGITS: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'], '1': ['010', '110', '010', '010', '111'], '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'], '4': ['101', '101', '111', '001', '001'], '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'], '7': ['111', '001', '010', '010', '010'], '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+}
+/** A little brown badge with a priority number, centred on (cx, cy). */
+function badge(g: Graphics, cx: number, cy: number, n: number) {
+  const txt = String(n)
+  const w = txt.length * 4 - 1
+  const x0 = Math.round(cx - w / 2), y0 = Math.round(cy - 3)
+  g.rect(x0 - 2, y0 - 2, w + 4, 9).fill({ color: 0x141424 })
+  g.rect(x0 - 1, y0 - 1, w + 2, 7).fill({ color: 0xe8b860 })
+  ;[...txt].forEach((ch, k) => {
+    DIGITS[ch].forEach((row, ry) => {
+      for (let c = 0; c < 3; c++) if (row[c] === '1') g.rect(x0 + k * 4 + c, y0 + ry, 1, 1).fill({ color: 0x141424 })
+    })
+  })
+}
+
 export class MapView {
   app = new Application()
   root = new Container()
@@ -714,6 +735,16 @@ export class MapView {
       g.poly(cs, true).stroke({ width: 2, color: rim })
     }
     this.drawSelection(input)
+    // the road planner: the viewer's own dirt-road plan, numbered in the order the team will dig it
+    const mine = Object.values(state.villages).find((v) => v.playerId === viewer)
+    mine?.roadPlan?.forEach((i, k) => {
+      const cell = world.cells[i]
+      if (!cell || !revealed.has(i)) return
+      const p = hexToPixel(cell.col, cell.row, W)
+      const cs = hexCorners(p.x, p.y - cell.tier * TP, W).flat()
+      g.poly(cs, true).stroke({ width: 1, color: 0xe8b860, alpha: 0.9 })
+      badge(g, p.x, p.y - cell.tier * TP, k + 1)
+    })
     // caravans on the road
     const now = Date.now()
     for (const cv of state.caravans) {

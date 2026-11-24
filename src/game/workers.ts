@@ -35,6 +35,8 @@ export function needOf(b: { type: BuildingId; herd?: number[] }, season?: WeekSe
 /** People at home to work: the village's people, less those away on a neighbour's walls
  *  (who still count as the village's, and still have a house to come back to). */
 export const people = (v: Village) => Math.max(0, Math.floor(v.population) - (v.away ?? 0))
+/** People free for the buildings' work: those at home, less the road team. */
+export const hands = (v: Village) => Math.max(0, people(v) - (v.roadCrew ?? 0))
 
 const foodOf = (g: Goods | undefined, k = 1) => Object.entries(g ?? {}).reduce((a, [x, n]) => a + (n ?? 0) * k * (FOOD[x as Good]?.value ?? 0), 0)
 /** Food a building adds a night with all its hands (made, less any food it uses up), roughly. */
@@ -61,7 +63,7 @@ export function storesFull(v: Village): boolean {
  *  over), and puts the rest to other work, until the stores run down again. */
 export function autoJobs(v: Village, season: WeekSeason): Record<string, number> {
   const out: Record<string, number> = {}
-  let left = people(v)
+  let left = hands(v)
   const working = v.buildings.filter((b) => b.progress >= 1 && needOf(b, season) > 0)
   const food = working.filter((b) => feeds(b, season)), rest = working.filter((b) => !feeds(b, season))
   const give = (b: Building, cap = needOf(b, season)) => {
@@ -91,7 +93,7 @@ export function autoJobs(v: Village, season: WeekSeason): Record<string, number>
 export function jobs(v: Village, season: WeekSeason): Record<string, number> {
   if (v.autoJobs !== false || !v.jobs) return autoJobs(v, season)
   const out: Record<string, number> = {}
-  let left = people(v)
+  let left = hands(v)
   const ids = new Set(v.buildings.filter((b) => b.progress >= 1).map((b) => b.id))
   for (const [id, n] of Object.entries(v.jobs)) {
     if (!ids.has(id)) continue
@@ -112,7 +114,7 @@ export function staffing(v: Village, b: Building, season: WeekSeason): number {
 
 /** People at home not working in a building: free to go with a caravan, or as troops. */
 export function spare(v: Village, season: WeekSeason): number {
-  return people(v) - Object.values(jobs(v, season)).reduce((a, n) => a + n, 0)
+  return hands(v) - Object.values(jobs(v, season)).reduce((a, n) => a + n, 0)
 }
 
 /** Step sizes for moving people about: small villages count in ones, fives and tens; towns add fifties;
