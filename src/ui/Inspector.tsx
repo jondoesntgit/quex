@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, HEADS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
-import { CARRY, actionSize, buildCost, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
+import { CARRY, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
@@ -146,9 +146,12 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     // homes go in the city now; the old House only for a village with no open land beside it for a city
     const stuck = (v.city?.length ?? 0) < 2 && !neighbours(world.cells[cellIndex(world, v.col, v.row)].col, world.cells[cellIndex(world, v.col, v.row)].row).some(([c, r]) => c >= 0 && r >= 0 && c < world.width && r < world.height && paveable(world.cells[cellIndex(world, c, r)]))
     const defs = Object.values(BUILDINGS).filter((d) => !d.legacy || stuck)
-    // what this hex allows first, then the rest (each says why it can't go here)
+    // only what this hex could take: no silver mine without silver, no dock inland. What it's short of
+    // (materials, a building it needs first) still shows, greyed, with the reason on the button
+    const fits = defs.filter((d) => !buildSiteError(game.world, game.state, v, d, col, row) && !(here && here.building.type === d.id && here.building.progress >= 1))
     const ok = (d: (typeof defs)[number]) => !!tryAction(game, p, 'build', col, row, { building: d.id }, d.size).ev
-    const sorted = [...defs.filter(ok), ...defs.filter((d) => !ok(d))]
+    const sorted = [...fits.filter(ok), ...fits.filter((d) => !ok(d))]
+    const hidden = defs.length - fits.length
     const ownHere = !!here && here.village.id === v.id
     const bldgs = mine && !village && (!here || ownHere) && !inCity
     return (
@@ -180,7 +183,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
             <div className="actions">
               {sorted.map((d) => <BuildButton key={d.id} game={game} p={p} def={d} col={col} row={row} onRun={() => ask('build', { building: d.id }, d.size)} />)}
             </div>
-            <p className="muted">Any village can build anything. Neighbours who each specialise and trade get further than going it alone.</p>
+            {sorted.length === 0 && <p className="muted">Nothing can be built on this hex.</p>}
+            <p className="muted">{hidden > 0 ? `${hidden} other buildings need different ground (a deposit, the shore, a river, open land). ` : ''}Any village can build anything it has the ground for. Neighbours who each specialise and trade get further than going it alone.</p>
           </>
         ) : <p className="muted">{village ? 'The village square: homes go on the cobblestone around it.' : inCity ? 'Workshops need open ground; homes go here.' : here ? 'There is a building here already.' : 'Buildings can only go up inside your territory.'}</p>}
         {dialog}

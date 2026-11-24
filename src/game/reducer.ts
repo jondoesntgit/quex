@@ -327,6 +327,40 @@ export function foodStock(v: Village, keepsOnly = false) {
 export const ROLELESS_FROM = '2026-11-22T14:30:00.000Z'
 const onRole = (v: Village, def: BuildingDef, at: string) => at < ROLELESS_FROM && def.role === v.role
 
+/** Can this building stand on this hex at all (the ground, the water, the deposit, the shore)? Says why not.
+ *  Leaves out what is already built here, what it needs first and what it costs: the build list uses this
+ *  to show only what the hex could take. */
+export function buildSiteError(world: World, s: GameState, v: Village, def: BuildingDef, col: number, row: number): string | null {
+  const i = cellIndex(world, col, row)
+  const cell = world.cells[i]
+  const land = landAt(world, s, i)
+  const terr = land.terrain
+  if (!inTerritory(v, col, row)) return 'Only inside your territory'
+  if (def.shallows) {
+    // docks and shipyards stand out in the shallows, reached from your own shore
+    if (cell.tier > 0) return `${def.name} is built out over the shallows, not on land`
+    if (terr !== 'shallow') return `${def.name} needs the shallows: the water is too deep out here`
+    const shore = neighbours(col, row).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].tier > 0 && inTerritory(v, nc, nr))
+    if (!shore) return `${def.name} has to reach out from your own shore`
+  } else if (cell.tier === 0) return 'Not on water'
+  if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
+  if (col === v.col && row === v.row) return 'That is your village square'
+  const woodland = def.terrain?.includes('forest')
+  if (hasTrees(land) && !woodland) return 'Fell the trees here first'
+  if (MOUNTAIN_TERRAIN.includes(terr) && !def.mountain) return 'Too steep: only mines and quarries go on a mountain'
+  if (terr === 'swamp' && !def.terrain?.includes('swamp')) return 'Too boggy to build on'
+  if (def.terrain && !def.terrain.includes(terr)) return `${def.name} needs ${def.terrain.join('/')}`
+  if (def.resource && !(land.resource && def.resource.includes(land.resource))) return `${def.name} needs a ${def.resource.join('/')} deposit`
+  if (def.nearTerrain && !spiral({ col, row }, 1).some((o) => {
+    if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
+    const j = cellIndex(world, o.col, o.row)
+    // a river will do as well as the sea, for a fishery
+    if (def.river && world.cells[j]?.riverTo !== -1 && world.cells[j]?.tier !== 0) return true
+    return def.nearTerrain!.includes(effectiveTerrain(world, s, j))
+  })) return `${def.name} must be next to ${def.nearTerrain.join('/')}${def.river ? ' or a river' : ''}`
+  return null
+}
+
 export function buildCost(v: Village, def: BuildingDef, at: string): Goods {
   const k = at >= ROLELESS_FROM || def.role === 'any' || def.role === v.role ? 1 : 2
   const out: Goods = {}
@@ -609,38 +643,17 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     }
     case 'build': {
       const def = BUILDINGS[ev.building!]
-      if (!inTerritory(v, ev.col, ev.row)) return 'Only inside your territory'
-      if (def.shallows) {
-        // docks and shipyards stand out in the shallows, reached from your own shore
-        if (cell.tier > 0) return `${def.name} is built out over the shallows, not on land`
-        if (terr !== 'shallow') return `${def.name} needs the shallows: the water is too deep out here`
-        const shore = neighbours(ev.col, ev.row).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].tier > 0 && inTerritory(v, nc, nr))
-        if (!shore) return `${def.name} has to reach out from your own shore`
-      } else if (cell.tier === 0) return 'Not on water'
-      if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
-      if (ev.col === v.col && ev.row === v.row) return 'That is your village square'
       const existing = buildingAt(s, ev.col, ev.row)
       // building over one of your own pulls it down: no action needed, and its materials come back
       const replaced = existing && existing.village.id === v.id && !(existing.building.type === def.id && existing.building.progress < 1) ? existing.building : null
+      if (existing && existing.building.type === def.id && existing.building.progress < 1 && existing.village.id === v.id) return null // finishing
+      const site = buildSiteError(world, s, v, def, ev.col, ev.row)
+      if (site) return site
       if (existing) {
-        if (existing.building.type === def.id && existing.building.progress < 1 && existing.village.id === v.id) return null // finishing
         if (!replaced) return 'Something is already built here'
         if (existing.building.type === def.id) return `You already have a ${def.name} here`
       }
-      const woodland = def.terrain?.includes('forest')
-      if (hasTrees(land) && !woodland) return 'Fell the trees here first'
-      if (MOUNTAIN_TERRAIN.includes(terr) && !def.mountain) return 'Too steep: only mines and quarries go on a mountain'
-      if (terr === 'swamp' && !def.terrain?.includes('swamp')) return 'Too boggy to build on'
-      if (def.terrain && !def.terrain.includes(terr)) return `${def.name} needs ${def.terrain.join('/')}`
-      if (def.resource && !(land.resource && def.resource.includes(land.resource))) return `${def.name} needs a ${def.resource.join('/')} deposit`
       if (def.needs && !done(v).some((b) => b.type === def.needs)) return `Build a ${BUILDINGS[def.needs].name} first`
-      if (def.nearTerrain && !spiral(ev, 1).some((o) => {
-        if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
-        const j = cellIndex(world, o.col, o.row)
-        // a river will do as well as the sea, for a fishery
-        if (def.river && world.cells[j]?.riverTo !== -1 && world.cells[j]?.tier !== 0) return true
-        return def.nearTerrain!.includes(effectiveTerrain(world, s, j))
-      })) return `${def.name} must be next to ${def.nearTerrain.join('/')}${def.river ? ' or a river' : ''}`
       const cost = buildCost(v, def, ev.at)
       // the old building's materials come back first, so they can pay for the new one
       const purse: Village = replaced ? { ...v, goods: { ...v.goods } } : v

@@ -217,3 +217,28 @@ describe('docks and shipyards', () => {
     expect(run(s, { t: 'act', id: 'g1', at: AT, playerId: 'ann', tokenId: tok(s, 'medium'), action: 'build', building: 'granary', col: sh.col, row: sh.row } as GameEvent)).toMatch(/Not on water/)
   })
 })
+
+describe('what a hex could take', () => {
+  it('rules out mines without their ore and docks inland, and keeps what only lacks materials', async () => {
+    const { buildSiteError, territoryCells, landAt } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const mines = Object.values(BUILDINGS).filter((d) => d.resource?.length)
+    expect(mines.length).toBeGreaterThan(0)
+    const cells = territoryCells(world, v).filter((i) => world.cells[i].tier > 0 && !(world.cells[i].col === v.col && world.cells[i].row === v.row))
+    for (const d of mines) {
+      for (const i of cells) {
+        const c = world.cells[i]
+        const has = d.resource!.includes(landAt(world, s, i).resource as never)
+        if (!has) expect(buildSiteError(world, s, v, d, c.col, c.row)).not.toBeNull()
+      }
+    }
+    const docks = BUILDINGS.docks
+    const inland = world.cells[cells.find((i) => world.cells[i].tier > 0)!]
+    expect(buildSiteError(world, s, v, docks, inland.col, inland.row)).toMatch(/shallows/)
+    // short of planks is not a reason to hide a building
+    v.goods = {}
+    const open = cells.map((i) => world.cells[i]).find((c) => !landAt(world, s, world.cells.indexOf(c)).resource && buildSiteError(world, s, v, BUILDINGS.granary, c.col, c.row) === null)
+    expect(open).toBeDefined()
+  })
+})
