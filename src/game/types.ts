@@ -55,6 +55,8 @@ export interface Player {
   lastTick: ISODate | null
   /** the player's first day (missing for players who joined before it was kept) */
   joined?: ISODate
+  /** their own colours (#rrggbb) for the border round their land and their villagers' shirts; unset = the default */
+  colors?: { border?: string; meeple?: string }
 }
 
 export interface Building {
@@ -268,6 +270,8 @@ export type GameEvent =
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */
   | (Base & { t: 'rename'; name: string })
+  /** pick the colours of the player's borders and villagers (null puts the default back; a missing key is left alone) */
+  | (Base & { t: 'colors'; border?: string | null; meeple?: string | null })
   /** barter with a merchant calling at the village today (game/market) */
   | (Base & { t: 'barter'; merchant: 'ship' | 'barge' | 'caravan' | 'pedlar'; give: Goods; take: Goods })
   /** give up this village entirely; the player can found a new one */

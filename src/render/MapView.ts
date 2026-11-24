@@ -653,7 +653,8 @@ export class MapView {
     // shows on a visible cliff face and hides behind a taller hex in front.
     // (not while choosing where to settle: the shaded land says where neighbours are)
     for (const v of blocked.size ? [] : Object.values(state.villages)) {
-      const color = v.playerId === viewer ? 0xfff070 : 0xff90c0
+      const own = state.players[v.playerId]?.colors?.border
+      const color = own ? parseInt(own.slice(1), 16) : v.playerId === viewer ? 0xfff070 : 0xff90c0
       const terr = new Set(territoryCells(world, v))
       const ends = new Map<string, { x: number; y: number; cell: number }[]>() // ground-plane corner -> drawn ends
       for (const i of terr) {

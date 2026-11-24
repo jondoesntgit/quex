@@ -181,3 +181,16 @@ describe('sawmills', () => {
     expect(planks(wet)).toBeCloseTo(base * 3, 5)
   })
 })
+
+describe('colours', () => {
+  it('lets a player pick border and villager colours, and put the defaults back', () => {
+    const s = setup()
+    const c = (rest: object) => ({ t: 'colors', id: `c${++n}`, at: AT, playerId: 'ann', ...rest }) as GameEvent
+    expect(run(s, c({ border: 'red' }))).toMatch(/#aabbcc/)
+    expect(run(s, c({}))).toMatch(/Pick/)
+    expect(run(s, c({ border: '#FF8800', meeple: '#00AA55' }))).toBeNull()
+    expect(s.players.ann.colors).toEqual({ border: '#ff8800', meeple: '#00aa55' })
+    expect(run(s, c({ border: null }))).toBeNull()
+    expect(s.players.ann.colors).toEqual({ meeple: '#00aa55' })
+  })
+})

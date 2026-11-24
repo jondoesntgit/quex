@@ -34,6 +34,11 @@ import { hexAt, SQ, townOf, type Town } from '../game/city'
 /** Each village dresses in its own colour (once by role; now by village). */
 const SHIRTS = [0xe8c040, 0x4878d8, 0x9a9ab0, 0x3c8c3c, 0xe0e0d0, 0xc04878, 0xd87838, 0x70b0b8]
 const shirtFor = (vid: string) => SHIRTS[hashString(`shirt-${vid}`) % SHIRTS.length]
+/** a player's own pick (settings), else their village's colour */
+const shirtOf = (s: GameState | null, vid: string) => {
+  const own = s?.players[s.villages[vid]?.playerId ?? '']?.colors?.meeple
+  return own ? parseInt(own.slice(1), 16) : shirtFor(vid)
+}
 const SKIN = [0xf0c8a0, 0xd8a070, 0xa06840, 0x704828]
 const STAND = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'ooSSoo', '.oLLo.', '.oLLo.', '.oooo.']
 const WALK = ['.oooo.', '.oHHo.', '.oHHo.', 'ooSSoo', 'oSSSSo', 'ooSSoo', 'oLooLo', 'oLooLo', 'oooooo']
@@ -242,6 +247,7 @@ export class People {
   sync(world: World, state: GameState, revealed: Set<number>) {
     this.world = world
     this.state = state
+    for (const w of [...this.walkers, ...this.folk]) w.shirt = shirtOf(state, w.vid)
     const vs = Object.values(state.villages)
     const roads = new Set(vs.flatMap((v) => v.roads))
     const fresh = this.roadsSeen ? [...roads].filter((r) => !this.roads.has(r)) : []
@@ -325,7 +331,7 @@ export class People {
         g: new Graphics(), vid: v.id, route: [], t: 0, end: 0, wait: r() * 3, working: false, idle: 0, react: null, chat: null, chatAgain: r() * 10, pose: null,
         rest: null, resting: false, phase: r(),
         at: { cell: home, p: this.spot(home, blocked.has(home), r) }, rng: r,
-        shirt: shirtFor(v.id), skin: SKIN[Math.floor(r() * SKIN.length)],
+        shirt: shirtOf(this.state, v.id), skin: SKIN[Math.floor(r() * SKIN.length)],
       }
       this.walkers.push(w)
       this.plan(w)
@@ -346,7 +352,7 @@ export class People {
   private spawnFolk(v: Village, town: Town, k: number) {
     const r = mulberry32(hashString(`${v.id}-town-${k}`))
     const at = Math.floor(r() * town.stops.length)
-    this.folk.push({ g: new Graphics(), vid: v.id, shirt: shirtFor(v.id), skin: SKIN[Math.floor(r() * SKIN.length)], rng: r, town, at, path: [town.stops[at]], seg: 0, t: 0, wait: r() * 6 })
+    this.folk.push({ g: new Graphics(), vid: v.id, shirt: shirtOf(this.state, v.id), skin: SKIN[Math.floor(r() * SKIN.length)], rng: r, town, at, path: [town.stops[at]], seg: 0, t: 0, wait: r() * 6 })
     const f = this.folk[this.folk.length - 1]
     if (this.parent) this.parent.addChild(f.g)
   }

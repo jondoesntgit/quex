@@ -461,6 +461,10 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       if (n.length > 20) return 'Names are at most 20 letters'
       return n === p.name ? 'That is already the name' : null
     }
+    case 'colors': {
+      for (const c of [ev.border, ev.meeple]) if (c != null && !/^#[0-9a-f]{6}$/i.test(c)) return 'Colours look like #aabbcc'
+      return ev.border === undefined && ev.meeple === undefined ? 'Pick a colour' : null
+    }
     case 'resetHour':
       if (p.resetChangedAt && daysBetween(p.resetChangedAt.slice(0, 10), ev.at.slice(0, 10)) < 7)
         return 'Bedtime can only change once a week'
@@ -802,6 +806,13 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       ensureDay(p, ev.date).frozen = true
       p.freezes--
       log(s, ev.at, p.id, `${P(p)} used a freeze for ${ev.date}.`, 'info')
+      return s
+    }
+    case 'colors': {
+      const c = { ...p.colors }
+      if (ev.border !== undefined) { if (ev.border) c.border = ev.border.toLowerCase(); else delete c.border }
+      if (ev.meeple !== undefined) { if (ev.meeple) c.meeple = ev.meeple.toLowerCase(); else delete c.meeple }
+      p.colors = c
       return s
     }
     case 'resetHour':

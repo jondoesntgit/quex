@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { account, SupabaseStore, type AccountInfo, type AssistantLink } from '../app/supabase'
 import { clearMeta, eventId, type Game } from '../app/store'
 import { validate } from '../game/reducer'
+import type { Player } from '../game/types'
 import { TodayPanel } from './Panels'
 import { Help } from './Help'
 import { awayAccount, forgetAccount, reloadAsAccount, rememberAccount, rememberedAccounts, setSignInAs, takeSignInAs } from '../app/accounts'
@@ -222,6 +223,8 @@ export function Account({ game, onClose, notify }: { game: Game; onClose: () => 
             </div>
           </form>
         )}
+
+        {p && <ColourPicks game={game} p={p} notify={notify} />}
 
         {p && remote && (
           <>
@@ -445,5 +448,35 @@ function AccountPicker({ current, onCancel }: { current: string; onCancel: () =>
         </div>
       </div>
     </div>
+  )
+}
+
+const DEFAULT_BORDER = '#fff070'
+const DEFAULT_MEEPLE = '#4878d8'
+
+/** Colour wheels for the border round your land and your villagers' shirts. */
+function ColourPicks({ game, p, notify }: { game: Game; p: Player; notify: (s: string) => void }) {
+  const [border, setBorder] = useState(p.colors?.border ?? DEFAULT_BORDER)
+  const [meeple, setMeeple] = useState(p.colors?.meeple ?? DEFAULT_MEEPLE)
+  const save = async (ev: { border?: string | null; meeple?: string | null }) => {
+    const e = { t: 'colors' as const, id: eventId(), at: game.now().toISOString(), playerId: p.id, ...ev }
+    const err = validate(game.state, game.world, e)
+    if (err) return notify(err)
+    await game.dispatch(e)
+  }
+  const row = (label: string, value: string, set: (c: string) => void, key: 'border' | 'meeple', def: string, current?: string) => (
+    <div className="row" style={{ gap: 8, alignItems: 'center', margin: '4px 0' }}>
+      <input type="color" aria-label={`${label} colour`} value={value} onChange={(e) => set(e.target.value)} style={{ width: 44, height: 32, padding: 0 }} />
+      <span style={{ flex: 1 }}>{label}</span>
+      <button className="btn" disabled={value.toLowerCase() === (current ?? '').toLowerCase()} onClick={() => save({ [key]: value })}>Save</button>
+      <button className="btn ghost" disabled={!current} onClick={() => { set(def); save({ [key]: null }) }}>Reset</button>
+    </div>
+  )
+  return (
+    <>
+      <label>Your colours</label>
+      {row('Borders', border, setBorder, 'border', DEFAULT_BORDER, p.colors?.border)}
+      {row('Villagers', meeple, setMeeple, 'meeple', DEFAULT_MEEPLE, p.colors?.meeple)}
+    </>
   )
 }
