@@ -127,9 +127,11 @@ export function hasRiver(world: World, col: number, row: number) {
   return !!c && c.riverTo !== -1 && c.tier > 0
 }
 
-/** The task size an action needs here: a road over a river is a bridge (medium). */
-export function actionSize(world: World, action: ActionKind, col: number, row: number, at: string): TaskSize {
+/** The task size an action needs here: a road over a river is a bridge (medium), and so is a paved
+ *  road laid over a river where the village has no road (bridge) yet. */
+export function actionSize(world: World, action: ActionKind, col: number, row: number, at: string, v?: Village): TaskSize {
   if (action === 'road' && at >= BRIDGES_FROM && hasRiver(world, col, row)) return 'medium'
+  if (action === 'pave' && v && hasRiver(world, col, row) && !v.roads.includes(cellIndex(world, col, row))) return 'medium'
   return ACTIONS[action].size
 }
 
@@ -561,7 +563,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     if (!done(v).some((b) => b.type === 'cart_shed') || !done(v).some((b) => b.type === 'stable')) return 'A caravan without a task needs ox carts (a Mule stable and a Cart shed)'
     if (v.oxenBack && ev.at < v.oxenBack) return 'Your oxen are still on the road home'
   }
-  const need = tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(world, ev.action, ev.col, ev.row, ev.at)
+  const need = tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(world, ev.action, ev.col, ev.row, ev.at, v)
   if (ev.action === 'build') {
     const def = ev.building && BUILDINGS[ev.building]
     if (!def) return 'Unknown building'
@@ -653,7 +655,9 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       return homeFits(world, without, h) ? null : 'No room for a town house there: it would cover a door, hide a home or block the way'
     }
     case 'pave':
-      if (!v.roads.includes(i)) return 'Only one of your roads'
+      // a stone road on one of your roads, or straight onto open land (it is a road too)
+      if (cell.tier === 0) return 'Roads need land'
+      if (!v.roads.includes(i) && !territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Roads must start from your territory'
       if (v.paved?.includes(i)) return 'Already paved'
       if (!hasGoods(v, PAVE_COST)) return `Paving takes ${fmtGoods(PAVE_COST)}`
       return null
@@ -1312,8 +1316,12 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
     }
     case 'pave':
       addGoods(v, PAVE_COST, -1)
+      const fresh = !v.roads.includes(i)
+      if (fresh) v.roads.push(i)
       ;(v.paved ??= []).push(i)
-      log(s, ev.at, p.id, 'A stretch of road was paved with stone.', 'good')
+      // the road team has nothing left to dig here
+      if (v.roadPlan?.includes(i)) v.roadPlan = v.roadPlan.filter((j) => j !== i)
+      log(s, ev.at, p.id, fresh ? (world.cells[i].riverTo !== -1 ? 'A stone bridge was built over the river.' : 'A paved road was laid.') : 'A stretch of road was paved with stone.', 'good')
       break
     case 'well':
       addGoods(v, WELL_COST, -1)

@@ -103,7 +103,7 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
     }
     case 'pave':
       out.spends.push(fmtGoods(PAVE_COST))
-      out.gets.push('Stone paving: caravans along it go 9x faster than cross-country, and carry more')
+      out.gets.push(world.cells[i].riverTo !== -1 && !s.villages[p.villageId]?.roads.includes(i) ? 'A stone bridge carries a paved road over the river' : 'Stone paving: caravans along it go 9x faster than cross-country, and carry more')
       break
     case 'well':
       out.spends.push(fmtGoods(WELL_COST))

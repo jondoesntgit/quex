@@ -69,18 +69,43 @@ describe('caravans carry by weight', () => {
   })
 })
 
+/** a dry land hex beside Ann's village (no river: that would be a bridge) */
+function landBeside(s: GameState) {
+  const ann = s.villages.v_ann
+  for (const [dc, dr] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    const c = world.cells[cellIndex(world, ann.col + dc, ann.row + dr)]
+    if (c && c.tier > 0 && c.riverTo === -1) return c
+  }
+  throw new Error('no dry land beside Ann')
+}
+
 describe('paving', () => {
   it('lays stone on your own road', () => {
     const s = setup()
     const ann = s.villages.v_ann
-    const i = cellIndex(world, ann.col, ann.row + 1)
+    const h = landBeside(s)
+    const i = cellIndex(world, h.col, h.row)
     ann.goods = { stone: 3 }
-    expect(act(s, 'pave', ann.col, ann.row + 1)).toMatch(/your roads/)
     ann.roads.push(i)
-    expect(act(s, 'pave', ann.col, ann.row + 1)).toBeNull()
+    expect(act(s, 'pave', h.col, h.row)).toBeNull()
     expect(ann.paved).toEqual([i])
     expect(ann.goods.stone).toBe(1)
-    expect(act(s, 'pave', ann.col, ann.row + 1)).toMatch(/Already paved/)
+    expect(act(s, 'pave', h.col, h.row)).toMatch(/Already paved/)
+  })
+
+  it('lays a paved road straight onto open land, and takes it off the road plan', () => {
+    const s = setup()
+    const ann = s.villages.v_ann
+    const h = landBeside(s)
+    const i = cellIndex(world, h.col, h.row)
+    ann.goods = { stone: 2 }
+    ann.roadPlan = [i]
+    expect(ann.roads).not.toContain(i)
+    expect(act(s, 'pave', h.col, h.row)).toBeNull()
+    expect(ann.roads).toContain(i)
+    expect(ann.paved).toEqual([i])
+    expect(ann.roadPlan).toEqual([])
+    expect(ann.goods.stone ?? 0).toBe(0)
   })
 })
 

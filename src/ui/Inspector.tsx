@@ -135,7 +135,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     if (mine && clayLeft(world, state, i) !== null) gatherActs.push('dig_clay')
     if (mine && !here && !village && !trees) workActs.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
-    if (cell.tier > 0) workActs.push(v.roads.includes(i) ? 'pave' : 'road')
+    // dirt roads are dug by the road team (the plan above); by hand, only stone
+    if (cell.tier > 0 && !v.paved?.includes(i)) workActs.push('pave')
     if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) workActs.push('well')
     if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
     if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
@@ -420,7 +421,7 @@ function ActionButton({ game, p, action, col, row, onRun }: { game: Game; p: Pla
   const r = tryAction(game, p, action, col, row)
   const a = ACTIONS[action]
   // a road across a river is a bridge: a medium task
-  const bridge = action === 'road' && actionSize(game.world, action, col, row, game.now().toISOString()) === 'medium'
+  const bridge = (action === 'road' || action === 'pave') && actionSize(game.world, action, col, row, game.now().toISOString(), game.state.villages[p.villageId]) === 'medium'
   const name = bridge ? 'Bridge' : a.name
   const blurb = bridge ? 'A wood and stone bridge carries the road over the river.' : a.blurb
   return (
@@ -482,12 +483,12 @@ function UpgradeButton({ game, p, hex, col, row, onPick }: { game: Game; p: Play
 /** A thing you can lay or dig (road, paving, well, trees): what it does, until you pick it. */
 function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onPick: () => void }) {
   const r = tryAction(game, p, action, col, row)
-  const bridge = action === 'road' && actionSize(game.world, action, col, row, game.now().toISOString()) === 'medium'
+  const bridge = (action === 'road' || action === 'pave') && actionSize(game.world, action, col, row, game.now().toISOString(), game.state.villages[p.villageId]) === 'medium'
   const a = ACTIONS[action]
   return (
     <button className={`btn ${r.ev ? (bridge ? 'medium' : a.size) : ''} action`} disabled={!r.ev} onClick={onPick} title={r.error ?? a.blurb}>
-      {bridge ? 'Bridge' : a.name}
-      <small>{r.error ?? (bridge ? 'A wood and stone bridge carries the road over the river.' : a.blurb)}</small>
+      {bridge ? (action === 'pave' ? 'Stone bridge' : 'Bridge') : action === 'pave' && game.state.villages[p.villageId]?.roads.includes(cellIndex(game.world, col, row)) ? 'Pave the road' : a.name}
+      <small>{r.error ?? (bridge ? `A ${action === 'pave' ? 'stone' : 'wood and stone'} bridge carries the road over the river${action === 'pave' ? ' (2 stone, a medium task)' : ''}.` : a.blurb)}</small>
     </button>
   )
 }
@@ -495,7 +496,7 @@ function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Play
 const GATHER_NAME: Partial<Record<ActionKind, string>> = { pick: 'Pick up loose stone', chop: 'Gather wood', rice: 'Gather wild rice', peat: 'Cut peat', clear: 'Clear the forest', dig_clay: 'Dig clay' }
 /** The question each confirmation asks. */
 const ASK_TITLE: Partial<Record<ActionKind, string>> = {
-  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', rice: 'Gather wild rice here?', peat: 'Cut peat here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Pave the road with stone?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
+  pick: 'Pick up the loose stone?', chop: 'Cut wood here?', rice: 'Gather wild rice here?', peat: 'Cut peat here?', clear: 'Clear every tree here?', dig_clay: 'Dig clay?', road: 'Lay a dirt road?', pave: 'Lay a paved road?', cobble: 'Lay cobblestone here?', upgrade: 'Rebuild the cottage as a town house?',
   well: 'Dig a well?', plant: 'Plant trees?',
 }
 

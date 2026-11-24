@@ -62,7 +62,7 @@ export function tryAction(game: Game, p: Player, action: ActionKind, col: number
     // no carts, or oxen still out: fall back to a small task
     if (!error) return { ev, error, tok: free }
   }
-  const size = needOverride ?? (tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(game.world, action, col, row, game.now().toISOString()))
+  const size = needOverride ?? (tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(game.world, action, col, row, game.now().toISOString(), v))
   const tok = bestToken(p, size)
   if (!tok) {
     const need = size
