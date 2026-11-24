@@ -284,6 +284,12 @@ export class People {
     for (const [vid, d] of this.diggers) {
       if (want.get(vid) !== d.cell) { d.g.destroy(); this.diggers.delete(vid) } else d.shirt = shirtOf(state, vid)
     }
+    // the digger is one of the village's own villagers, taken from the crowd while he digs (never an extra one)
+    for (const w of [...this.walkers, ...this.folk]) w.g.visible = true
+    for (const vid of want.keys()) {
+      const mine = [...this.walkers, ...this.folk].filter((w) => w.vid === vid)
+      if (mine.length) mine[mine.length - 1].g.visible = false
+    }
     for (const [vid, cell] of want) {
       if (this.diggers.has(vid)) continue
       const g = new Graphics()
@@ -731,8 +737,9 @@ export class People {
       d.g.zIndex = (this.rank[d.cell] ?? -1) * 4 + 3.5
       this.draw(d, Math.round(h.cx), Math.round(h.cy - h.tier * this.TP + this.W * 0.1), 'work', Math.floor(this.clock * 2.2) & 1)
     }
-    for (const f of this.folk) this.stepFolk(f, dt)
+    for (const f of this.folk) if (f.g.visible) this.stepFolk(f, dt)
     for (const w of this.walkers) {
+      if (!w.g.visible) continue
       let pose: Pose
       // react only with both feet on the ground (not mid-climb or mid-hop)
       if (w.react !== null) {
