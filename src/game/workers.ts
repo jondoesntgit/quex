@@ -8,7 +8,9 @@
  *
  *  More people come when there's room in the houses, morale is reasonable, and
  *  the village makes at least as much food as it eats (see tick, growth). */
-import { BUILDINGS, EAT, FOOD, FOOD_SCALE, HEADS, type BuildingId, type Good, type Goods } from './data'
+import { BUILDINGS, EAT, FOOD, FOOD_SCALE, HEADS, producesIn, type BuildingId, type Good, type Goods } from './data'
+import type { WeekSeason } from './calendar'
+import { penCrew } from './herds'
 import type { Building, Village } from './types'
 
 /** Hands each building needs to run at full strength (none: houses, walls, halls...). */
@@ -23,19 +25,27 @@ export const WORKERS: Partial<Record<BuildingId, number>> = {
 /** Weight each person carries on a caravan. */
 export const CARRY_EACH = 40
 
-export const needOf = (b: { type: BuildingId }) => (WORKERS[b.type] ?? 0) * HEADS
+/** People a building needs to run at full strength: all year if no season is given, otherwise in that
+ *  season (a field takes half a crew to sow in spring, none in summer, a full crew to reap in autumn). */
+export function needOf(b: { type: BuildingId; herd?: number[] }, season?: WeekSeason): number {
+  const base = b.type === 'pen' ? penCrew(b as Building) : (WORKERS[b.type] ?? 0) * HEADS
+  if (!season) return base
+  return Math.ceil(base * (BUILDINGS[b.type].labor?.[season] ?? 1) - 1e-9) || 0
+}
 /** People at home to work: the village's people, less those away on a neighbour's walls
  *  (who still count as the village's, and still have a house to come back to). */
 export const people = (v: Village) => Math.max(0, Math.floor(v.population) - (v.away ?? 0))
 
 const foodOf = (g: Goods | undefined, k = 1) => Object.entries(g ?? {}).reduce((a, [x, n]) => a + (n ?? 0) * k * (FOOD[x as Good]?.value ?? 0), 0)
 /** Food a building adds a night with all its hands (made, less any food it uses up), roughly. */
-const netFood = (b: Building) => {
+const netFood = (b: Building, season: WeekSeason) => {
   const def = BUILDINGS[b.type]
-  return foodOf(def.produces) - foodOf(def.consumes)
+  if (def.harvest && season !== 'autumn') return 0
+  if (def.herd) return season === 'winter' ? 0 : 1
+  return foodOf(producesIn(def, season)) - foodOf(def.consumes)
 }
 /** What makes food, first in line for hands. */
-const feeds = (b: Building) => netFood(b) > 0.01
+const feeds = (b: Building, season: WeekSeason) => netFood(b, season) > 0.01
 
 /** Food in store, and what the stores hold (more rots). */
 const stock = (v: Village) => foodOf(v.goods)
@@ -49,12 +59,12 @@ export function storesFull(v: Village): boolean {
 /** The village's own choice: food first, then everything else in the order it was built.
  *  With the stores full, it keeps only enough hands on food to feed itself (and a little
  *  over), and puts the rest to other work, until the stores run down again. */
-export function autoJobs(v: Village): Record<string, number> {
+export function autoJobs(v: Village, season: WeekSeason): Record<string, number> {
   const out: Record<string, number> = {}
   let left = people(v)
-  const working = v.buildings.filter((b) => b.progress >= 1 && needOf(b) > 0)
-  const food = working.filter(feeds), rest = working.filter((b) => !feeds(b))
-  const give = (b: Building, cap = needOf(b)) => {
+  const working = v.buildings.filter((b) => b.progress >= 1 && needOf(b, season) > 0)
+  const food = working.filter((b) => feeds(b, season)), rest = working.filter((b) => !feeds(b, season))
+  const give = (b: Building, cap = needOf(b, season)) => {
     const n = Math.min(left, cap - (out[b.id] ?? 0))
     if (n > 0) out[b.id] = (out[b.id] ?? 0) + n
     left -= Math.max(0, n)
@@ -64,8 +74,8 @@ export function autoJobs(v: Village): Record<string, number> {
     let want = people(v) * EAT * 1.2
     for (const b of food) {
       if (want <= 0) break
-      const each = netFood(b) / needOf(b)
-      const n = Math.min(needOf(b), Math.ceil(want / each))
+      const each = Math.max(0.01, netFood(b, season)) / needOf(b, season)
+      const n = Math.min(needOf(b, season), Math.ceil(want / each))
       give(b, n)
       want -= n * each
     }
@@ -78,14 +88,14 @@ export function autoJobs(v: Village): Record<string, number> {
 }
 
 /** Who does what now: by the village's own choice, or as the player set it (trimmed to the people at home). */
-export function jobs(v: Village): Record<string, number> {
-  if (v.autoJobs !== false || !v.jobs) return autoJobs(v)
+export function jobs(v: Village, season: WeekSeason): Record<string, number> {
+  if (v.autoJobs !== false || !v.jobs) return autoJobs(v, season)
   const out: Record<string, number> = {}
   let left = people(v)
   const ids = new Set(v.buildings.filter((b) => b.progress >= 1).map((b) => b.id))
   for (const [id, n] of Object.entries(v.jobs)) {
     if (!ids.has(id)) continue
-    const cap = Math.min(n, needOf(v.buildings.find((b) => b.id === id)!))
+    const cap = Math.min(n, needOf(v.buildings.find((b) => b.id === id)!, season))
     const k = Math.max(0, Math.min(left, Math.floor(cap)))
     if (k > 0) out[id] = k
     left -= k
@@ -94,15 +104,15 @@ export function jobs(v: Village): Record<string, number> {
 }
 
 /** How well staffed a building is (0..1); buildings that need no hands always run. */
-export function staffing(v: Village, b: Building): number {
-  const need = needOf(b)
-  if (!need) return 1
-  return Math.min(1, (jobs(v)[b.id] ?? 0) / need)
+export function staffing(v: Village, b: Building, season: WeekSeason): number {
+  const need = needOf(b, season)
+  if (!need) return needOf(b) ? 0 : 1
+  return Math.min(1, (jobs(v, season)[b.id] ?? 0) / need)
 }
 
 /** People at home not working in a building: free to go with a caravan, or as troops. */
-export function spare(v: Village): number {
-  return people(v) - Object.values(jobs(v)).reduce((a, n) => a + n, 0)
+export function spare(v: Village, season: WeekSeason): number {
+  return people(v) - Object.values(jobs(v, season)).reduce((a, n) => a + n, 0)
 }
 
 /** Step sizes for moving people about: small villages count in ones, fives and tens; towns add fifties;

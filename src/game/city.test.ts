@@ -46,7 +46,7 @@ describe('people are counted one by one', () => {
     expect(BASE_CAP).toBe(6 * HEADS)
     expect(popCap(v)).toBe(BASE_CAP)
     expect(people(v)).toBe(5 * HEADS)
-    expect(spare(v)).toBe(5 * HEADS) // nothing to staff yet
+    expect(spare(v, 'autumn')).toBe(5 * HEADS) // nothing to staff yet
   })
 
   it('eats what five households did, and grows by the same share', () => {

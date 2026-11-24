@@ -1,7 +1,7 @@
 /** Winter prep: what a village needs before Saturday's winter, what's still
  *  missing, and what finishing real-life tasks would do about it. Pure, read
  *  only: it mirrors the nightly tick's rules (see tick() in reducer.ts). */
-import { BUILDINGS, EAT, FOOD, FOOD_SCALE, type BuildingId, type Good, type TaskSize } from './data'
+import { BUILDINGS, producesIn, EAT, FOOD, FOOD_SCALE, type BuildingId, type Good, type TaskSize } from './data'
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
 import { defence, foodStock, storageCap } from './reducer'
 import { people } from './workers'
@@ -39,8 +39,8 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 
 /** Buildings that make food that keeps through winter. */
 const KEEPERS: BuildingId[] = (Object.keys(BUILDINGS) as BuildingId[]).filter((id) => {
-  const p = BUILDINGS[id].produces
-  return !!p && Object.keys(p).some((g) => KEEPS.includes(g as Good))
+  const d = BUILDINGS[id]
+  return [d.produces, ...Object.values(d.seasonal ?? {})].some((p) => !!p && Object.keys(p).some((g) => KEEPS.includes(g as Good)))
 })
 
 /** Keeping food made tonight at a given score (0-100), following the tick's production rules. */
@@ -53,10 +53,13 @@ function keepsMade(v: Village, date: ISODate, score: number): number {
   for (const b of v.buildings) {
     if (b.progress < 1) continue
     const def = BUILDINGS[b.type]
-    if (!def.produces) continue
+    const yields = producesIn(def, season)
+    if (!yields) continue
+    if (def.harvest && season !== 'autumn') continue
     let k = prod * moraleK
-    if (def.crop) k *= CROP_SEASON[season]
-    for (const [g, n] of Object.entries(def.produces)) {
+    if (def.harvest) k *= 0.25 + 0.75 * (b.sown ?? 1)
+    else if (def.crop) k *= CROP_SEASON[season]
+    for (const [g, n] of Object.entries(yields)) {
       const f = FOOD[g as Good]
       if (f?.keeps) t += (n ?? 0) * k * f.value
     }

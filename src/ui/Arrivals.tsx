@@ -28,6 +28,28 @@ export function Arrivals({ game, p }: { game: Game; p: Player }) {
   if (!a) return null
   const goods = (Object.entries(a.goods) as [Good, number][]).filter(([, n]) => n > 0)
   const done = () => { remember(v.id, a.id); bump((x) => x + 1) }
+  if (a.kind === 'food') {
+    return (
+      <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="The food rules have changed">
+        <div className="card confirm arrival">
+          <h2>How your village eats has changed</h2>
+          <p style={{ margin: '4px 0 8px' }}>
+            We have rebalanced food so that a village should need <b>no more than about 40% of its people</b> working on food, leaving the
+            rest for building, mining, trading and fighting. Efficiency grows as the game goes on: <b>scythes</b> for the grain harvest,
+            <b> spears, boats and bows</b> for fishing and hunting, and bigger pastures for flocks. Make them under <b>Tools</b> on the Village tab.
+          </p>
+          <ul>
+            <li>🌾 <b>Fields</b> are sown in spring (about a quarter of the village), left alone in summer, and reaped in autumn (about half the village for two days, if grain is all you eat). Unsown ground still gives a quarter. The village does this for you unless you take over its workers.</li>
+            <li>🥬 <b>Gardens</b> give grain and a vegetable each season: worts (kale and leeks) in spring, dried peas in summer, turnips in autumn. About 3 rations a worker.</li>
+            <li>🐟 <b>Fishing</b> works on rivers as well as the shore, and hunters range over the forest around their lodge, never taking the last of the game.</li>
+            <li>🐑 <b>Sheep pens</b> keep a flock that grows by half each spring, as far as the pasture around a well or pen allows. Cheese and wool all year, mutton at the autumn cull, and grain to feed them in winter.</li>
+          </ul>
+          {goods.length > 0 && <p style={{ margin: '8px 0 4px' }}>To ease the change, your stores were topped up with <b>{goods.map(([g, n]) => `${amount(n)} ${GOOD_LABEL[g].toLowerCase()}`).join(', ')}</b> (as much as they hold). If you had no field, one has been laid out for you.</p>}
+          <div className="confirm-buttons"><button className="btn primary" onClick={done} autoFocus>Got it</button></div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="Newcomers">
       <div className="card confirm arrival">

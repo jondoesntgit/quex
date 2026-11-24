@@ -109,7 +109,7 @@ const PASTURE = ['hills', 'meadow', 'savannah', 'grass']
 export const INDUSTRIES: Industry[] = [
   { id: 'bakery', name: 'Bakery', chain: ['field', 'mill'], makes: ['bread', 'grain'], meets: ['food', 'larder', 'winter'], from: 'your fields', possible: (l) => l.terr.has('grass') || l.terr.has('meadow') },
   { id: 'fishery', name: 'Smoked fish', chain: ['shore_fishery', 'smokehouse'], makes: ['smoked_fish'], meets: ['food', 'larder', 'winter'], from: 'the shore', possible: (l) => l.coast },
-  { id: 'dairy', name: 'Cheese', chain: ['pen', 'dairy'], makes: ['cheese'], meets: ['food', 'larder', 'winter'], from: 'your pasture (and a little salt)', possible: (l) => PASTURE.some((t) => l.terr.has(t)) },
+  { id: 'dairy', name: 'Cheese', chain: ['pen'], makes: ['cheese', 'wool'], meets: ['food', 'larder', 'winter'], from: 'your pasture (and a little salt)', possible: (l) => PASTURE.some((t) => l.terr.has(t)) },
   { id: 'weaving', name: 'Weaving', chain: ['pen', 'weaver'], makes: ['cloth'], meets: ['textiles'], from: 'your pasture', possible: (l) => PASTURE.some((t) => l.terr.has(t)) },
   { id: 'hunting', name: 'Hides and game', chain: ['hunting_lodge'], makes: ['leather', 'game'], meets: ['textiles', 'larder'], from: 'your wild country', possible: (l) => ['forest', 'tundra', 'savannah'].some((t) => l.terr.has(t)) },
   { id: 'orchard', name: 'Orchard', chain: ['orchard'], makes: ['berries'], meets: ['larder'], from: 'open ground', possible: (l) => ['grass', 'meadow', 'hills'].some((t) => l.terr.has(t)) },

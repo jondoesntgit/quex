@@ -57,7 +57,7 @@ export function GettingStarted({ game, p }: { game: Game; p: Player }) {
   const steps = [
     { ok: wrote, text: "Write today's 1-2-3: one big task, two medium and three small, on the Today tab." },
     { ok: earned, text: 'Tick a task off when it\'s done: each one earns an action (big, medium or small) to spend on the map.' },
-    { ok: done(v).some((b) => FOODS.includes(b.type)), text: 'Tap your land and Build something that makes food: Garden plots, a Wheat field or a Shore fishery.' },
+    { ok: done(v).some((b) => FOODS.includes(b.type)), text: 'Tap your land and Build something that makes food. A Wheat field is the best start (sown in spring, reaped in autumn: half the village for two days feeds it all week), or Garden plots, a Shore fishery on the coast or a river.' },
     { ok: done(v).some((b) => b.type === 'granary') || v.winterForecast === 'stocked', text: "Saturday is winter: store food that keeps (grain, smoked fish, cheese), or build a Granary." },
     { ok: v.roads.length > 0, text: 'Lay a road out from your village: caravans travel faster, and more merchants come.' },
     { ok: !!v.trade || (s.arrived ?? []).some((c) => c.from === v.id) || s.caravans.some((c) => c.from === v.id), text: "Trade: barter with today's merchants (Caravans, top right), or send a neighbour a caravan." },

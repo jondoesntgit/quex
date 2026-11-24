@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import { apply, caravanCarry, newGame, produce, validate } from './reducer'
+import { weekSeason } from './calendar'
 import { HEADS } from './data'
 import { CARRY_EACH, autoJobs, jobs, spare, staffing, stepsFor } from './workers'
 import { strongholdsOf, wallsAfter, WALLS } from './strongholds'
@@ -27,11 +28,11 @@ describe('workers', () => {
     const v = s.villages.v_ann
     v.population = 4 * HEADS
     v.buildings.push({ id: 'k', type: 'kiln', col: 0, row: 0, progress: 1 }, { id: 'f', type: 'field', col: 0, row: 1, progress: 1 }, { id: 'h', type: 'house', col: 0, row: 2, progress: 1 })
-    expect(autoJobs(v)).toEqual({ f: 2 * HEADS, k: HEADS })
-    expect(spare(v)).toBe(HEADS)
+    expect(autoJobs(v, 'autumn')).toEqual({ f: 2 * HEADS, k: HEADS })
+    expect(spare(v, 'autumn')).toBe(HEADS)
     v.population = 2 * HEADS
-    expect(autoJobs(v)).toEqual({ f: 2 * HEADS }) // the field first; the kiln stands idle
-    expect(staffing(v, v.buildings[0])).toBe(0)
+    expect(autoJobs(v, 'autumn')).toEqual({ f: 2 * HEADS }) // the field first; the kiln stands idle
+    expect(staffing(v, v.buildings[0], 'autumn')).toBe(0)
   })
 
   it('a building with half its workers makes half as much', () => {
@@ -54,8 +55,8 @@ describe('workers', () => {
     const set = (j: Record<string, number>, auto = false) => run(s, { t: 'jobs', id: `j${++n}`, at: AT, playerId: 'ann', auto, jobs: j })
     expect(set({ l: 3 * HEADS })).toMatch(new RegExp(`at most ${2 * HEADS}`))
     expect(set({ l: 1 })).toBeNull()
-    expect(jobs(v)).toEqual({ l: 1 })
-    expect(spare(v)).toBe(5 * HEADS - 1)
+    expect(jobs(v, 'autumn')).toEqual({ l: 1 })
+    expect(spare(v, 'autumn')).toBe(5 * HEADS - 1)
     expect(set({}, true)).toBeNull()
     expect(v.autoJobs).toBe(true)
   })
@@ -64,18 +65,20 @@ describe('workers', () => {
     const s = setup()
     const v = s.villages.v_ann
     v.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 })
-    expect(spare(v)).toBe(HEADS) // four of five work the fields
+    const SEASON = weekSeason(DAY) // spring: a field takes half a crew to sow
+    expect(spare(v, SEASON)).toBe(3 * HEADS)
+    expect(spare(v, 'autumn')).toBe(HEADS) // in autumn four of five work the fields
     v.goods = { grain: 30 }
     const send = (crew: number, food: Record<string, number>) => {
       s.players.ann.tokens.push({ id: `m${++n}`, size: 'medium', strength: 1, date: DAY, slot: 1 })
       return run(s, { t: 'act', id: `c${n}`, at: AT, playerId: 'ann', tokenId: `m${n}`, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { grain: 1 }, crew, food } as GameEvent)
     }
     expect(send(0, { grain: 3 })).toMatch(/Someone has to go/)
-    expect(send(2 * HEADS, { grain: 3 })).toMatch(new RegExp(`Only ${HEADS} people are free`))
+    expect(send(4 * HEADS, { grain: 3 })).toMatch(new RegExp(`Only ${3 * HEADS} people are free`))
     expect(send(HEADS, {})).toMatch(/Pack food for the road/)
     expect(send(HEADS, { grain: 3 })).toBeNull()
     expect(v.away).toBe(HEADS)
-    expect(spare(v)).toBe(0)
+    expect(spare(v, SEASON)).toBe(2 * HEADS)
     expect(caravanCarry(world, s, v, s.villages.v_bob, HEADS).cap).toBe(HEADS * CARRY_EACH)
   })
 })
@@ -88,15 +91,15 @@ describe('growth', () => {
     v.goods = { grain: 20 } // plenty in store, but nothing coming in
     v.morale = 70
     const pop = v.population
-    tick(s, '2026-11-16')
+    tick(s, '2026-11-19') // a Thursday: autumn
     expect(v.population).toBe(pop)
     const t = setup()
     const w = t.villages.v_ann
     w.goods = { grain: 20 } // within what the stores hold
     w.morale = 70
     w.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 })
-    t.players.ann.days['2026-11-16'] = { slots: ['big', 'medium', 'medium', 'small', 'small', 'small'].map((size) => ({ size, status: 'full' })), habitsDone: [] } as never
-    tick(t, '2026-11-16')
+    t.players.ann.days['2026-11-19'] = { slots: ['big', 'medium', 'medium', 'small', 'small', 'small'].map((size) => ({ size, status: 'full' })), habitsDone: [] } as never
+    tick(t, '2026-11-19')
     expect(w.population).toBeGreaterThan(pop)
   })
 })
@@ -197,9 +200,9 @@ describe('full stores', () => {
       { id: 'q', type: 'quarry', col: 0, row: 2, progress: 1 },
     )
     v.goods = { grain: 5 }
-    expect(autoJobs(v)).toEqual({ f1: 2 * HEADS, f2: 2 * HEADS, q: 2 * HEADS })
+    expect(autoJobs(v, 'autumn')).toEqual({ f1: 2 * HEADS, f2: 2 * HEADS, q: 2 * HEADS })
     v.goods = { grain: 29 } // the stores hold 30
-    const j = autoJobs(v)
+    const j = autoJobs(v, 'autumn')
     expect(j.q).toBe(2 * HEADS)
     expect((j.f1 ?? 0) + (j.f2 ?? 0)).toBeGreaterThan(0) // still enough to eat
   })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, weekSeason } from './calendar'
-import { actionSize, apply, BRIDGES_FROM, ROLELESS_FROM, buildCost, SABBATH_FROM, TREES_FROM, cellIndex, dayScore, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
+import { actionSize, apply, BRIDGES_FROM, ROLELESS_FROM, buildCost, SABBATH_FROM, TREES_FROM, cellIndex, dayScore, foodStock, inTerritory, landAt, newGame, pendingTicks, validate } from './reducer'
 import { spiral } from '../world/hex'
 import { hasTrees, isOpen, isVillageSite, cellLand } from '../world/land'
 import type { GameEvent, GameState } from './types'
@@ -318,11 +318,12 @@ describe('nightly tick', () => {
       const date = addDays(SUN, 3) // Wednesday, summer
       for (let i = 0; i < 6; i++) if (full) apply(s, world, ev('progress', 'bob', `${date}T12:00:00Z`, { date, slot: i, status: 'full' }))
       v.goods = {}
+      v.population = 5 // few mouths, so the garden's food isn't all eaten tonight
       apply(s, world, ev('tick', 'bob', `${addDays(date, 1)}T00:05:00Z`, { date }))
       return s.villages.v_bob
     }
     const good = play(true), bad = play(false)
-    expect(good.goods.grain ?? 0).toBeGreaterThan((bad.goods.grain ?? 0) * 3)
+    expect(foodStock(good)).toBeGreaterThan(foodStock(bad) * 3)
   })
   it('Saturday is winter: no production, and empty stores hurt', () => {
     const s = setup()

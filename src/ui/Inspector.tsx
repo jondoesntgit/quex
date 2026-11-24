@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { ACTIONS, BUILDINGS, HEADS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
 import { CARRY, actionSize, buildCost, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
@@ -11,6 +11,8 @@ import { WEIGHT, weightOf } from '../game/market'
 import { WALLS, strongholdAt, wallsAfter } from '../game/strongholds'
 import { refineTips } from '../game/advisor'
 import { CARRY_EACH, jobs, needOf, people, spare, staffing } from '../game/workers'
+import { SEASON_ICON, weekSeason } from '../game/calendar'
+import { PEN_PER_SLOT, heads, pastureCap } from '../game/herds'
 import { THIRSTY, WATER_NAME, hasWater, waterAt } from '../game/water'
 import { eventId, type Game } from '../app/store'
 import { outcome } from '../game/preview'
@@ -50,6 +52,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
   // the yes/no window shown before anything is spent
   const [confirm, setConfirm] = useState<Omit<ConfirmProps, 'onNo'> | null>(null)
   const v = state.villages[p.villageId]
+  const season = weekSeason(game.today(p.id))
   const here = buildingAt(state, col, row)
   const village = villageAt(state, col, row)
   const lair = state.lairs.find((l) => l.col === col && l.row === row && !l.cleared)
@@ -235,8 +238,25 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}
       {here && here.village.id === v.id && here.building.progress >= 1 && needOf(here.building) > 0 && (
-        <p className={staffing(v, here.building) < 1 ? 'deal-no' : 'muted'} style={{ margin: '4px 0' }}>
-          👥 {jobs(v)[here.building.id] ?? 0} of {needOf(here.building)} workers{staffing(v, here.building) < 1 ? `: it makes ${Math.round(staffing(v, here.building) * 100)}% (Village tab: Workers)` : ''}.
+        needOf(here.building, season) === 0
+          ? <p className="muted" style={{ margin: '4px 0' }}>{SEASON_ICON[season]} Nothing to do here in {season}: its {needOf(here.building)} people are free for other work.</p>
+          : (
+            <p className={staffing(v, here.building, season) < 1 ? 'deal-no' : 'muted'} style={{ margin: '4px 0' }}>
+              👥 {jobs(v, season)[here.building.id] ?? 0} of {needOf(here.building, season)} workers {SEASON_ICON[season]}{staffing(v, here.building, season) < 1 ? `: it makes ${Math.round(staffing(v, here.building, season) * 100)}% (Village tab: Workers)` : ''}.
+            </p>
+          )
+      )}
+      {here && here.village.id === v.id && here.building.progress >= 1 && BUILDINGS[here.building.type].harvest && (
+        <p className="muted" style={{ margin: '4px 0' }}>
+          🌾 {season === 'spring' ? `Sowing now: ${Math.round((here.building.sown ?? 1) * 100)}% sown so far (half a crew sows over Sunday and Monday).`
+            : season === 'summer' ? `${Math.round((here.building.sown ?? 1) * 100)}% sown. Nothing to do until the harvest.`
+            : season === 'autumn' ? `Harvest: a full crew reaps it Thursday and Friday. It was ${Math.round((here.building.sown ?? 1) * 100)}% sown (unsown ground still gives a quarter).`
+            : 'Resting for the winter. It is sown again in spring.'}
+        </p>
+      )}
+      {here && here.village.id === v.id && here.building.progress >= 1 && BUILDINGS[here.building.type].herd && (
+        <p className="muted" style={{ margin: '4px 0' }}>
+          🐑 {heads(here.building)} sheep, {PEN_PER_SLOT} to each {HEADS} people tending them. Your pasture feeds {pastureCap(world, state, v, (c, r) => inTerritory(v, c, r))} in all (the hexes within a hex of a well or pen that have nothing built on them). The flock grows by half each spring, and the oldest tenth is culled each autumn.
         </p>
       )}
       {here && here.village.id === v.id && BUILDINGS[here.building.type].recipes && (
@@ -533,7 +553,7 @@ function TroopsForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to
 function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to: string; onBack: () => void; onSend: (g: Record<string, number>, crew: number, food: Record<string, number>) => void }) {
   const v = game.state.villages[p.villageId]
   const dest = game.state.villages[to]
-  const free = spare(v)
+  const free = spare(v, weekSeason(game.today(p.id)))
   const [crew, setCrew] = useState(Math.min(1, free))
   const [by, stepChips] = useStep(Math.floor(v.population))
   const [load, setLoad] = useState<Record<string, number>>({})

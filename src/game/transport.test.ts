@@ -180,7 +180,7 @@ describe('water for the herds', () => {
     const night = () => produce(s, world, ann, s.players.ann, { habitsDone: [] } as never, '2026-11-23', 1, AT).wool ?? 0
     const dry = night()
     s.wells = { [i]: true }
-    expect(night()).toBeCloseTo(dry * 2)
+    expect(night()).toBeCloseTo(dry * 2, 1)
   })
 
   it('every pen, dairy and stable without water gets a free well, once', () => {

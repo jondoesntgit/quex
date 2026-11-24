@@ -9,7 +9,7 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
 import {
-  ACTIONS, BUILDINGS, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
@@ -17,10 +17,11 @@ import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
 import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, hexAt, paveable, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
 import { CARRY_EACH, people, spare, staffing, needOf } from './workers'
+import { CULL_RATE, FEED_PER_HEAD, LEAN_CULL, LEAN_DAYS, age, dailyYield, heads, lamb, mutton, pastureCap, sheepOf, slaughter } from './herds'
 import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
 import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
-import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, dig, dungeonUnder, gameLeft, gameMax, hunt, leftAt, levels, mineDig, stonyness } from './deposits'
+import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, HUNT_SHARE, dig, dungeonUnder, gameLeft, hunt, huntRange, leftAt, levels, mineDig, stonyness } from './deposits'
 import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Stand, Token, Village } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
@@ -28,6 +29,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
     headsScaled: true,
     cheeseRations: true,
     startersPlaced: true,
+    foodUpdate: true,
     worldSeed: world.seed,
     seasonStart,
     players: {},
@@ -340,6 +342,8 @@ function addGoods(v: Village, g: Goods, k = 1) {
 }
 
 const round2 = (x: number) => Math.round(x * 100) / 100
+/** The weekday season on a player's calendar at a moment. */
+const seasonAt = (p: Player, at: string) => weekSeason(playerDate(at, p.resetHour, p.tz))
 
 // ------------------------------------------------------------------ validation
 
@@ -408,6 +412,15 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
         if (b && n > needOf(b)) return `${BUILDINGS[b.type].name} takes at most ${needOf(b)}`
       }
       if (Object.values(j).reduce((a, n) => a + n, 0) > people(v)) return `Only ${people(v)} people at home`
+      return null
+    }
+    case 'equip': {
+      const t = TOOLS[ev.tool]
+      if (!t) return 'No such tool'
+      if (v.tools?.includes(t.id)) return `You already have ${t.name.toLowerCase()}`
+      if (t.needs && !done(v).some((b) => b.type === t.needs)) return `Build a ${BUILDINGS[t.needs].name} first`
+      if (t.after && !v.tools?.includes(t.after)) return `Make ${TOOLS[t.after].name.toLowerCase()} first`
+      if (!hasGoods(v, t.cost, 1)) return `Needs ${fmtGoods(t.cost, 1)}`
       return null
     }
     case 'order': {
@@ -597,8 +610,11 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (def.needs && !done(v).some((b) => b.type === def.needs)) return `Build a ${BUILDINGS[def.needs].name} first`
       if (def.nearTerrain && !spiral(ev, 1).some((o) => {
         if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) return false
-        return def.nearTerrain!.includes(effectiveTerrain(world, s, cellIndex(world, o.col, o.row)))
-      })) return `${def.name} must be next to ${def.nearTerrain.join('/')}`
+        const j = cellIndex(world, o.col, o.row)
+        // a river will do as well as the sea, for a fishery
+        if (def.river && world.cells[j]?.riverTo !== -1 && world.cells[j]?.tier !== 0) return true
+        return def.nearTerrain!.includes(effectiveTerrain(world, s, j))
+      })) return `${def.name} must be next to ${def.nearTerrain.join('/')}${def.river ? ' or a river' : ''}`
       const cost = buildCost(v, def, ev.at)
       if (!hasGoods(v, cost, tok.strength)) return `Needs ${fmtGoods(cost, tok.strength)}`
       return null
@@ -610,7 +626,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (total <= 0) return 'Load some goods'
       const crew = ev.crew ?? 0
       if (!Number.isInteger(crew) || crew < 1) return 'Someone has to go with it: pick its people'
-      if (crew > spare(v)) return `Only ${spare(v)} people are free (the rest are working)`
+      if (crew > spare(v, seasonAt(p, ev.at))) return `Only ${spare(v, seasonAt(p, ev.at))} people are free (the rest are working)`
       const food = ev.food ?? {}
       if (Object.keys(food).some((g) => !FOOD[g as Good])) return 'Provisions are food'
       const need = provisionsFor(crew, caravanMinutes(p, v, to, ev.at, world, s))
@@ -654,7 +670,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (here.building.progress < 1) return 'Finish building it first'
       const def = BUILDINGS[here.building.type]
       if (!workable(here.building)) return def.crop ? 'Crops grow in their own time' : 'Nothing to work here'
-      if (staffing(v, here.building) <= 0) return 'Nobody works there: give it workers (Village tab)'
+      if (staffing(v, here.building, seasonAt(p, ev.at)) <= 0) return 'Nobody works there: give it workers (Village tab)'
       // a dry run: does it have what it needs?
       const test = structuredClone(s)
       const tv = test.villages[v.id]
@@ -724,6 +740,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   convertToCities(s, world, ev.at)
   convertCheese(s, ev.at)
   placeStarters(s, world, ev.at)
+  foodUpdate(s, world, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
   if (err) {
@@ -784,6 +801,14 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'order': {
       const b = s.villages[p.villageId].buildings.find((x) => x.id === ev.building)!
       b.order = ev.recipe
+      return s
+    }
+    case 'equip': {
+      const v = s.villages[p.villageId]
+      const t = TOOLS[ev.tool]
+      addGoods(v, t.cost, -1)
+      v.tools = [...(v.tools ?? []), t.id]
+      log(s, ev.at, p.id, `${V(v)} made ${t.name.toLowerCase()}: ${t.blurb}`, 'good')
       return s
     }
     case 'split': {
@@ -1008,7 +1033,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   const v: Village = {
     id: vid, playerId: p.id, name: `${ev.name}'s ${ev.role ? ROLE_TOWN[ev.role] : 'Village'}`, ...(ev.role ? { role: ev.role } : {}),
     col: ev.site.col, row: ev.site.row, population: 5 * HEADS, morale: 60,
-    goods: { grain: 12, timber: 8, stone: 3, berries: 4, ...(ev.at >= PURSE_FROM ? PURSE : {}) }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
+    goods: { grain: ev.at >= FOOD_FROM ? 18 : 12, timber: 8, stone: 3, berries: 4, ...(ev.at >= PURSE_FROM ? PURSE : {}) }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',
   }
   s.players[p.id] = p
@@ -1019,6 +1044,8 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
     const st = starterFor(world, v)
     if (st) { v.starter = st.starter; v.homes = st.homes }
   }
+  const field = ev.at >= FOOD_FROM ? starterField(world, s, v) : null
+  if (field) v.buildings.push(field)
   reveal(world, s, ev.site, 4)
   log(s, ev.at, p.id, `{p:${ev.playerId}|${ev.name}} founded a ${ev.role ? `${ev.role} ` : ''}village.`, 'good')
   return s
@@ -1470,7 +1497,7 @@ export function route(world: World, s: GameState, from: Village, to: Village) {
 export const CARRY = { mules: 2000, carts: 4000 } as const
 export function caravanCarry(world: World, s: GameState, from: Village, to: Village, crew = 1) {
   // animals need a stable hand to keep them
-  const has = (t: string) => done(from).some((b) => b.type === t && staffing(from, b) > 0)
+  const has = (t: string) => done(from).some((b) => b.type === t && staffing(from, b, 'summer') > 0)
   const animals: keyof typeof CARRY | 'foot' = has('cart_shed') && has('stable') ? 'carts' : has('stable') ? 'mules' : 'foot'
   const r = route(world, s, from, to)
   // off the road, carts bog down to what the mules could carry
@@ -1651,7 +1678,15 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   const recipe = def0.recipes ? def0.recipes.find((r) => r.id === b.order) ?? def0.recipes[0] : null
   const def = recipe ? { ...def0, consumes: recipe.consumes, produces: recipe.produces } : def0
   // it makes as much as it has hands for
-  k *= staffing(v, b)
+  const season = weekSeason(date)
+  const st = staffing(v, b, season)
+  if (def.harvest) {
+    // a field is sown in spring (the share of the crew it has makes the share of the crop that goes in), is
+    // left in summer, and is all reaped in autumn: the rest of the year it makes nothing
+    if (season === 'spring') b.sown = Math.min(1, (b.sown ?? 1) + 0.5 * st)
+    if (season !== 'autumn') return {}
+  }
+  k *= st * toolMult(v.tools, b.type)
   if (k <= 0) return {}
   const made: Goods = {}
   const note = (g: Goods, m = 1) => { for (const [x, n] of Object.entries(g)) if (n) made[x as Good] = round2((made[x as Good] ?? 0) + n * m) }
@@ -1686,8 +1721,20 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     }
     return made
   }
-  if (!def.produces) return made
-  if (def.crop) k *= CROP_SEASON[weekSeason(date)] * (opts.rain ? 1.2 : 1)
+  if (def.herd) {
+    // a flock: cheese (a pinch of salt a ration) and wool, from every sheep, all year
+    const y = dailyYield(heads(b), season)
+    const cheese = Math.min(y.cheese * k, v.goods.salt ?? 0)
+    const out: Goods = { wool: round2(y.wool * k) }
+    if (cheese > 0.005) { out.cheese = round2(cheese); addGoods(v, { salt: -round2(cheese) }) }
+    addGoods(v, out)
+    note(out)
+    return made
+  }
+  const yields = producesIn(def, season)
+  if (!yields) return made
+  if (def.harvest) k *= (0.25 + 0.75 * (b.sown ?? 1)) * (opts.rain ? 1.2 : 1) // unsown ground still gives volunteer grain
+  if (def.crop && !def.harvest) k *= CROP_SEASON[weekSeason(date)] * (opts.rain ? 1.2 : 1)
   // ground picked clean of stone grows more
   if (def.crop && at >= DEPLETION_FROM) k *= 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, i))
   if (k <= 0) return made
@@ -1699,13 +1746,13 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     if (k <= 0) return made
     addGoods(v, def.consumes, -k)
   }
-  let out: Goods = def.produces
-  if (at >= DEPLETION_FROM && HUNTS.has(b.type) && def.produces.game) {
-    // the animals on this hex limit the game (and the hides with it)
-    const want = def.produces.game * k
-    const got = gameMax(world, i) ? hunt(world, s, i, date, want) : 0
+  let out: Goods = yields
+  if (HUNTS.has(b.type) && yields.game) {
+    // the game within two hexes limits what the crew brings back (and the hides with it), but is never all taken
+    const want = yields.game * k
+    const got = huntRange(world, s, b, date, want, HUNT_SHARE * toolMult(v.tools, b.type) * st)
     const r = want > 0 ? got / want : 0
-    out = { ...def.produces, game: def.produces.game * r, ...(def.produces.leather ? { leather: def.produces.leather * r } : {}) }
+    out = { ...yields, game: yields.game * r, ...(yields.leather ? { leather: yields.leather * r } : {}) }
   }
   addGoods(v, out, k)
   note(out, k)
@@ -1726,6 +1773,100 @@ export function produce(s: GameState, world: World, v: Village, p: Player, d: Da
   return made
 }
 
+/** A field for a village's first harvest, on the nearest open grass or meadow in its land (already sown). */
+function starterField(world: World, s: GameState, v: Village): Building | null {
+  const taken = new Set<number>([cellIndex(world, v.col, v.row)])
+  for (const o of Object.values(s.villages)) for (const b of o.buildings) taken.add(cellIndex(world, b.col, b.row))
+  const spot = territoryCells(world, v)
+    .filter((i) => {
+      const land = landAt(world, s, i)
+      return world.cells[i].tier > 0 && !taken.has(i) && !v.city?.includes(i) && !hasTrees(land) && !!BUILDINGS.field.terrain?.includes(land.terrain)
+    })
+    .sort((a, b) => distance(world.cells[a], v) - distance(world.cells[b], v) || a - b)[0]
+  if (spot === undefined) return null
+  return { id: `starter-field-${v.id}`, type: 'field', col: world.cells[spot].col, row: world.cells[spot].row, progress: 1 }
+}
+
+/** The food update: fields are sown and reaped, gardens, fisheries and hunting crews make about what a worker needs,
+ *  and every village already standing is handed up to FOOD_UPDATE_GRAIN loads of grain (as far as its stores hold,
+ *  so none of it rots) and, if it has no field, one ready to reap. Said once, in a note. */
+export const FOOD_UPDATE_GRAIN = 100
+/** Villages founded from this moment start with a field and a week's grain. */
+export const FOOD_FROM = '2026-11-24T00:00:00.000Z'
+function foodUpdate(s: GameState, world: World, at: string) {
+  if (s.foodUpdate || at < FOOD_FROM) return
+  s.foodUpdate = true
+  try {
+    for (const v of Object.values(s.villages)) {
+      const room = Math.max(0, (storageCap(v) - foodStock(v)) / FOOD.grain!.value)
+      const grain = Math.floor(Math.min(FOOD_UPDATE_GRAIN, room) * 10) / 10
+      if (grain > 0) addGoods(v, { grain })
+      let field: Building | null = null
+      if (!v.buildings.some((b) => BUILDINGS[b.type].harvest)) {
+        field = starterField(world, s, v)
+        if (field) v.buildings.push(field)
+      }
+      const a: Arrival = { id: `food-${at.slice(0, 10)}`, at, kind: 'food', people: 0, from: '', goods: grain > 0 ? { grain } : {} }
+      v.arrivals = [...(v.arrivals ?? []), a].slice(-6)
+      log(s, at, v.playerId, `The food rules have changed: fields are sown in spring and reaped in autumn, gardens, fisheries, hunters and flocks make about what a worker needs, and no more than about 40% of a village's people should have to work on food. ${V(v)} was given ${grain} loads of grain${field ? ' and a field' : ''} to ease the change.`, 'good')
+    }
+  } catch (e) {
+    console.error('the food update could not run yet:', e)
+  }
+}
+
+/** The flock's year, one night at a time: lambs on the first night of spring, the autumn cull on the last night of
+ *  autumn, winter feed on the winter night, and a slaughter (oldest first) whenever the stores run low. */
+function herdsNight(s: GameState, world: World, v: Village, date: ISODate, notes: string[]) {
+  const pens = done(v).filter((b) => b.type === 'pen')
+  // fields start the new year unsown
+  if (weekSeason(date) === 'winter') for (const b of v.buildings) if (BUILDINGS[b.type].harvest) b.sown = 0
+  if (!pens.length) return
+  const season = weekSeason(date)
+  const day = weekday(date)
+  const cap = pastureCap(world, s, v, (c, r) => inTerritory(v, c, r))
+  const kill = (b: Building, n: number, why: string) => {
+    n = Math.min(Math.floor(n), Math.max(0, heads(b) - 2))
+    const took = n > 0 ? slaughter(b, n) : 0
+    if (!took) return 0
+    const m = mutton(took, v.goods.salt ?? 0)
+    if (m.salted > 0) addGoods(v, { salt: -m.salted })
+    addGoods(v, m.goods)
+    notes.push(`${took} sheep ${why}: ${fmtGoods(m.goods)}`)
+    return took
+  }
+  if (day === 0 && season === 'spring') {
+    let room = cap - sheepOf(v)
+    let born = 0
+    for (const b of pens) { const n = lamb(b, room); room -= n; born += n }
+    if (born) notes.push(`${born} lambs born`)
+  }
+  if (day === 5 && season === 'autumn') {
+    // the oldest tenth, and whatever the pasture can't carry through the winter
+    let extra = Math.max(0, sheepOf(v) - cap)
+    for (const b of pens) {
+      const h = heads(b)
+      const over = Math.min(h, Math.round(extra * h / Math.max(1, sheepOf(v))))
+      extra -= over
+      kill(b, Math.round(h * CULL_RATE) + over, 'culled for the winter')
+    }
+  } else if (season !== 'winter' && foodStock(v) < LEAN_DAYS * people(v) * EAT) {
+    // the stores are low: slaughter, oldest first
+    for (const b of pens) kill(b, Math.ceil(heads(b) * LEAN_CULL), 'slaughtered, the stores were low')
+  }
+  if (season === 'winter') {
+    // the flock eats grain; sheep there is no grain for are slaughtered
+    for (const b of pens) {
+      const need = heads(b) * FEED_PER_HEAD
+      const have = (v.goods.grain ?? 0) * FOOD.grain!.value
+      const fed = Math.min(need, have)
+      if (fed > 0) addGoods(v, { grain: -fed / FOOD.grain!.value })
+      if (need - fed > 1e-6) kill(b, Math.ceil((need - fed) / FEED_PER_HEAD), 'slaughtered, there was no grain to feed them')
+      age(b)
+    }
+  }
+}
+
 function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
   const v = s.villages[p.villageId]
   const d = ensureDay(p, ev.date)
@@ -1742,6 +1883,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   const prod = winter ? 0 : 0.15 + 0.85 * (score / 100)
   const made = produce(s, world, v, p, d, ev.date, prod, ev.at)
   if (Object.keys(made).length) notes.push(`made ${fmtGoods(made)}`)
+  herdsNight(s, world, v, ev.date, notes)
 
   // 2. eating (fresh food first, it spoils anyway)
   const pop = people(v)

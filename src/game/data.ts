@@ -1,10 +1,13 @@
 /** Static game data: goods, buildings, actions, habits.
  *  Mirrors the Bookstacks "Economy, Roles and Resources" build ladders. */
+import type { WeekSeason } from './calendar'
 import type { Resource, Role, Terrain } from '../world/types'
 
 export const GOODS = [
   // raw (also world resources)
   'grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'herbs', 'salt', 'game',
+  // garden produce, one for each growing season
+  'worts', 'turnips',
   // ores (copper_ore is malachite, iron_ore hematite, silver_ore galena: the ids predate the minerals)
   'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore',
   // processed
@@ -22,7 +25,7 @@ export type Goods = Partial<Record<Good, number>>
 
 export const GOOD_LABEL: Record<Good, string> = {
   grain: 'Grain', fish: 'Fish', timber: 'Timber', stone: 'Stone', clay: 'Clay', tin: 'Tin',
-  wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game',
+  wool: 'Wool', berries: 'Berries', herbs: 'Herbs', salt: 'Salt', game: 'Game', worts: 'Worts', turnips: 'Turnips',
   copper_ore: 'Malachite', chalcopyrite: 'Chalcopyrite', limonite: 'Limonite', iron_ore: 'Hematite', magnetite: 'Magnetite', silver_ore: 'Galena', silver: 'Silver', bread: 'Bread', smoked_fish: 'Smoked fish',
   cured_meat: 'Cured meat', biscuit: 'Biscuit', dried_peas: 'Dried peas', honey: 'Honey',
   cheese: 'Cheese', bricks: 'Bricks', charcoal: 'Charcoal', planks: 'Planks', leather: 'Leather',
@@ -47,6 +50,8 @@ export const FOOD: Partial<Record<Good, { value: number; keeps: boolean }>> = {
   dried_peas: { value: 1 * FOOD_SCALE, keeps: true },
   honey: { value: 2 * FOOD_SCALE, keeps: true },
   berries: { value: 0.8 * FOOD_SCALE, keeps: false },
+  worts: { value: 0.6 * FOOD_SCALE, keeps: false },
+  turnips: { value: 1.1 * FOOD_SCALE, keeps: true },
   game: { value: 1 * FOOD_SCALE, keeps: false },
 }
 
@@ -63,7 +68,7 @@ export const foodUnit = (g: Good) => FOOD_UNIT[g] ?? 1
 
 /** Goods counted in wagon loads (what one wagon carries), so the numbers mean something. Metals, cloth and
  *  the like are counted in pieces. */
-export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
+export const BULK: readonly Good[] = ['grain', 'fish', 'timber', 'stone', 'clay', 'tin', 'wool', 'berries', 'worts', 'turnips', 'game', 'copper_ore', 'chalcopyrite', 'limonite', 'iron_ore', 'magnetite', 'silver_ore', 'bricks', 'charcoal', 'planks', 'salt', 'bread', 'cheese', 'smoked_fish', 'biscuit', 'dried_peas']
 export const isBulk = (g: Good) => BULK.includes(g)
 export const BULK_UNIT = 'wagon loads'
 
@@ -161,6 +166,17 @@ export interface BuildingDef {
   mine?: boolean
   /** seasonal crop: affected by weekday seasons + rain habit */
   crop?: boolean
+  /** what a crop building makes instead of (or besides) `produces` in a given weekday season */
+  seasonal?: Partial<Record<WeekSeason, Goods>>
+  /** share of its crew a building needs in each weekday season (1 if not listed): fields are sown in spring,
+   *  idle in summer and reaped in autumn */
+  labor?: Partial<Record<WeekSeason, number>>
+  /** a grain crop: sown in spring, all of its food comes at the autumn harvest (see shift) */
+  harvest?: boolean
+  /** keeps a flock (see herds.ts) */
+  herd?: boolean
+  /** may be built beside a river as well as the sea */
+  river?: boolean
   popCap?: number
   /** no longer built (replaced); existing ones carry on */
   legacy?: boolean
@@ -175,6 +191,12 @@ export interface BuildingDef {
 export interface Recipe { id: string; name: string; consumes: Goods; produces: Goods }
 
 const B = (d: BuildingDef) => d
+
+/** What a building makes in a weekday season: its steady produce plus any seasonal vegetable. */
+export function producesIn(def: BuildingDef, season: WeekSeason): Goods | undefined {
+  const extra = def.seasonal?.[season]
+  return extra ? { ...def.produces, ...extra } : def.produces
+}
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // any village
   house: B({ id: 'house', name: 'House', role: 'any', size: 'medium', cost: { timber: 4 }, popCap: 4 * HEADS, legacy: true, blurb: `A row of cottages: room for ${4 * HEADS} more villagers. (New homes go up in the city, on cobblestone.)` }),
@@ -184,20 +206,20 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   library: B({ id: 'library', name: 'Library', role: 'any', size: 'big', cost: { timber: 8, stone: 4 }, blurb: 'Powered by the reading habit: +5% output when you read.' }),
   market: B({ id: 'market', name: 'Market', role: 'any', size: 'big', cost: { timber: 6, stone: 6, copper: 2 }, morale: 2, blurb: 'Cheaper caravans and better NPC rates.' }),
   // farming
-  garden: B({ id: 'garden', name: 'Garden plots', role: 'farm', size: 'medium', cost: { timber: 1 }, terrain: ['grass', 'meadow', 'savannah'], produces: { grain: 1.5, berries: 0.5 }, crop: true, blurb: 'Wild grain and vegetables.' }),
-  field: B({ id: 'field', name: 'Wheat field', role: 'farm', size: 'medium', cost: { timber: 2 }, terrain: ['grass', 'meadow'], produces: { grain: 3 }, crop: true, blurb: 'Planted wheat and barley.' }),
+  garden: B({ id: 'garden', name: 'Garden plots', role: 'farm', size: 'medium', cost: { timber: 1 }, terrain: ['grass', 'meadow', 'savannah'], produces: { grain: 0.8 }, seasonal: { spring: { worts: 1.2 }, summer: { dried_peas: 0.7 }, autumn: { turnips: 0.65 } }, crop: true, blurb: 'Tended all season, about 3 rations a worker. Grain, plus worts (kale and leeks) in spring, dried peas in summer, turnips in autumn. Peas and turnips keep through winter.' }),
+  field: B({ id: 'field', name: 'Wheat field', role: 'farm', size: 'medium', cost: { timber: 2 }, terrain: ['grass', 'meadow'], produces: { grain: 7 }, harvest: true, labor: { spring: 0.5, summer: 0, autumn: 1 }, crop: true, blurb: 'Wheat and barley: sow it in spring (half a crew), leave it in summer, reap it in autumn (a full crew). Reaped well, 7 rations a worker, and half the village on the harvest feeds all of it. Unsown, it still gives a quarter in volunteer grain.' }),
   mill: B({ id: 'mill', name: 'Mill & bakery', role: 'farm', size: 'big', cost: { stone: 6, timber: 6 }, consumes: { grain: 3 }, produces: { bread: 2 }, blurb: 'Grain to flour to bread: 3 grain bake 2 loaves. No more food than the grain, but bread lifts morale and weighs half as much to carry.' }),
-  orchard: B({ id: 'orchard', name: 'Orchard', role: 'farm', size: 'medium', cost: { timber: 3 }, terrain: ['grass', 'meadow', 'hills'], produces: { berries: 2 }, crop: true, blurb: 'Fruit for a varied diet.' }),
-  irrigation: B({ id: 'irrigation', name: 'Irrigation', role: 'farm', size: 'big', cost: { stone: 4, copper: 1 }, terrain: ['grass', 'meadow'], produces: { grain: 4 }, crop: true, blurb: 'Ditches from the river: a big yield jump.' }),
+  orchard: B({ id: 'orchard', name: 'Orchard', role: 'farm', size: 'medium', cost: { timber: 3 }, terrain: ['grass', 'meadow', 'hills'], produces: { berries: 1.25 }, labor: { spring: 0.5 }, crop: true, blurb: 'Fruit for a varied diet.' }),
+  irrigation: B({ id: 'irrigation', name: 'Irrigation', role: 'farm', size: 'big', cost: { stone: 4, copper: 1 }, terrain: ['grass', 'meadow'], produces: { grain: 5 }, harvest: true, labor: { spring: 0.5, summer: 0, autumn: 1 }, crop: true, blurb: 'Ditches from the river: a big yield jump, 10 rations a worker. Sown and reaped like a field.' }),
   // port
-  shore_fishery: B({ id: 'shore_fishery', name: 'Shore fishery', role: 'port', size: 'medium', cost: { timber: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 2.5 }, blurb: 'Spears, lines and shellfish.' }),
+  shore_fishery: B({ id: 'shore_fishery', name: 'Shore fishery', role: 'port', size: 'medium', cost: { timber: 2 }, nearTerrain: ['shallow', 'ocean'], river: true, produces: { fish: 3 }, blurb: 'Lines and shellfish, about 3 rations a worker; on the shore or a river. Fishing spears make it 5, boats 10.' }),
   smokehouse: B({ id: 'smokehouse', name: 'Smokehouse', role: 'port', size: 'medium', cost: { timber: 4, stone: 2 }, consumes: { fish: 2, timber: 0.5 }, produces: { smoked_fish: 1.6 }, blurb: 'Smoking dries fish out (2 fish make 1.6), but smoked fish keeps through winter. Put in an order to cure game with salt instead: cured meat keeps too, a pinch of salt to each ration.',
     recipes: [
       { id: 'smoke', name: 'Smoked fish', consumes: { fish: 2, timber: 0.5 }, produces: { smoked_fish: 1.6 } },
       { id: 'cure', name: 'Cured meat', consumes: { game: 2, salt: 18, timber: 0.5 }, produces: { cured_meat: 18 } },
     ] }),
   salt_pans: B({ id: 'salt_pans', name: 'Salt pans', role: 'port', size: 'medium', cost: { stone: 3 }, terrain: ['beach', 'desert'], produces: { salt: 1.5 * SALT_PER_OLD }, blurb: 'Salt preserves food (one pinch to a ration) and trades well.' }),
-  docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 4 }, blurb: 'Boats reach deeper water.' }),
+  docks: B({ id: 'docks', name: 'Docks', role: 'port', size: 'big', cost: { planks: 6, stone: 2 }, nearTerrain: ['shallow', 'ocean'], produces: { fish: 4.5 }, blurb: 'A big crew on the water. Spears and boats raise its catch like the shore fishery\'s.' }),
   shipyard: B({ id: 'shipyard', name: 'Shipyard', role: 'port', size: 'big', cost: { planks: 10, iron: 3, cloth: 2 }, nearTerrain: ['shallow', 'ocean'], blurb: 'NPC trade at the best rates; ships for explorers.' }),
   // mining
   quarry: B({ id: 'quarry', name: 'Quarry', role: 'mining', size: 'medium', cost: { timber: 2 }, nearTerrain: ['rock', 'hills'], mountain: true, mine: true, blurb: 'Building stone from the hillside. Cut it deeper, level by level, to reach more rock.' }),
@@ -213,12 +235,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // forestry
   forager_camp: B({ id: 'forager_camp', name: 'Foraging camp', role: 'forestry', size: 'medium', cost: { timber: 1 }, terrain: ['forest', 'swamp', 'tundra'], produces: { berries: 1.5, game: 1 }, blurb: 'Berries, deadwood, game.' }),
   lumber_camp: B({ id: 'lumber_camp', name: 'Lumber camp', role: 'forestry', size: 'medium', cost: { stone: 1 }, terrain: ['forest'], produces: { timber: 3 }, blurb: 'Logs for everyone.' }),
-  hunting_lodge: B({ id: 'hunting_lodge', name: 'Hunting lodge', role: 'forestry', size: 'medium', cost: { timber: 4 }, terrain: ['forest', 'tundra', 'savannah'], produces: { game: 2, leather: 0.5 }, blurb: 'Furs and leather for explorers.' }),
+  hunting_lodge: B({ id: 'hunting_lodge', name: 'Hunting lodge', role: 'forestry', size: 'medium', cost: { timber: 4 }, terrain: ['forest', 'tundra', 'savannah'], produces: { game: 4, leather: 1 }, blurb: 'A small crew in a rich forest brings in about 4 rations a worker, taken from the game within two hexes (never the last of it). Bows make it 6, muskets 8.' }),
   charcoal_kiln: B({ id: 'charcoal_kiln', name: 'Charcoal kiln', role: 'forestry', size: 'medium', cost: { stone: 3, clay: 2 }, consumes: { timber: 2 }, produces: { charcoal: 2 }, blurb: 'Charcoal for the miners.' }),
   sawmill: B({ id: 'sawmill', name: 'Sawmill', role: 'forestry', size: 'big', cost: { timber: 6, copper: 2 }, consumes: { timber: 2 }, produces: { planks: 2 }, blurb: 'Any metal blade works; better metal, more planks.' }),
   // herding
-  pen: B({ id: 'pen', name: 'Sheep pen', role: 'herding', size: 'medium', cost: { timber: 3 }, terrain: ['hills', 'meadow', 'savannah', 'grass'], produces: { wool: 2, game: 0.5 }, blurb: 'Goats and sheep: milk, meat, wool.' }),
-  dairy: B({ id: 'dairy', name: 'Dairy', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, produces: { cheese: 22.5 }, consumes: { salt: 22.5 }, blurb: 'Cheese keeps, so it trades well. Each ration takes a pinch of salt.' }),
+  pen: B({ id: 'pen', name: 'Sheep pen', role: 'herding', size: 'medium', cost: { timber: 3 }, terrain: ['hills', 'meadow', 'savannah', 'grass'], produces: { wool: 2 }, herd: true, blurb: 'A flock of sheep: wool and cheese all year, mutton at the autumn cull. 5 rations a worker, net of winter feed. The flock grows by half a year but only as far as the pasture within a hex of a well or pen allows.' }),
+  dairy: B({ id: 'dairy', name: 'Dairy', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, produces: { cheese: 22.5 }, consumes: { salt: 22.5 }, legacy: true, blurb: 'Cheese keeps, so it trades well. Each ration takes a pinch of salt. (The sheep pen makes cheese now.)' }),
   stable: B({ id: 'stable', name: 'Mule stable', role: 'herding', size: 'medium', cost: { timber: 4, stone: 2 }, blurb: 'Pack mules: caravans carry twice the weight.' }),
   cart_shed: B({ id: 'cart_shed', name: 'Cart shed', role: 'herding', size: 'medium', cost: { planks: 4, timber: 2 }, needs: 'stable', blurb: 'Ox carts: caravans carry far more, where there are roads to roll on.' }),
   // powder and siege: the end of the ladder
@@ -239,6 +261,36 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // explorer
   scout_camp: B({ id: 'scout_camp', name: 'Scout camp', role: 'explorer', size: 'medium', cost: { timber: 2 }, blurb: 'Scouting reveals one ring further.' }),
   outfitter: B({ id: 'outfitter', name: 'Outfitter', role: 'explorer', size: 'big', cost: { timber: 4, leather: 2 }, defence: 2, blurb: 'Packs and gear: stronger expeditions.' }),
+}
+
+// ------------------------------------------------------------------ tools
+
+/** Kit that makes a village's food work go further. A tool multiplies what the buildings it names make for each
+ *  worker (the best tool for a building counts, they don't stack), and is made once with goods from the stores. */
+export interface ToolDef {
+  id: string
+  name: string
+  blurb: string
+  cost: Goods
+  /** a building the village must have */
+  needs?: BuildingId
+  /** a tool it builds on */
+  after?: string
+  /** by how much it multiplies what each building makes */
+  boosts: Partial<Record<BuildingId, number>>
+}
+export const TOOLS: Record<string, ToolDef> = {
+  scythes: { id: 'scythes', name: 'Scythes', blurb: 'Long blades for the harvest: a third more grain from every field.', cost: { iron: 1, timber: 2 }, needs: 'field', boosts: { field: 1.3, irrigation: 1.3 } },
+  fishing_spears: { id: 'fishing_spears', name: 'Fishing spears', blurb: 'Barbed spears: a fishery brings in about 5 rations a worker, up from 3.', cost: { timber: 2, copper: 1 }, boosts: { shore_fishery: 5 / 3, docks: 5 / 3 } },
+  boats: { id: 'boats', name: 'Boats', blurb: 'Sailing boats and nets: about 10 rations a worker, enough to feed other villages.', cost: { planks: 6, cloth: 2 }, needs: 'docks', after: 'fishing_spears', boosts: { shore_fishery: 10 / 3, docks: 10 / 3 } },
+  bows: { id: 'bows', name: 'Bows and spears', blurb: 'Hunters bring in about 6 rations a worker, up from 4, so fewer are needed (the game runs down faster).', cost: { leather: 2, timber: 2 }, needs: 'hunting_lodge', boosts: { hunting_lodge: 1.5 } },
+  muskets: { id: 'muskets', name: 'Hunting muskets', blurb: 'About 8 rations a worker, and a much bigger bite out of the forest.', cost: { musket: 2, gunpowder: 1 }, needs: 'hunting_lodge', after: 'bows', boosts: { hunting_lodge: 2 } },
+}
+/** What a village's tools do for a building: the best of them (1 with none). */
+export function toolMult(tools: readonly string[] | undefined, type: BuildingId): number {
+  let m = 1
+  for (const t of tools ?? []) m = Math.max(m, TOOLS[t]?.boosts[type] ?? 1)
+  return m
 }
 
 // ------------------------------------------------------------------ actions

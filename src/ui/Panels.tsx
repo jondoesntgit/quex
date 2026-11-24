@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { rationsOf } from '../game/units'
-import { BUILDINGS, FOOD, GOOD_LABEL, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
-import { GROW_MORALE, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
+import { BUILDINGS, FOOD, GOOD_LABEL, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
+import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight } from '../game/reducer'
 import { jobs, needOf, people, spare, storesFull } from '../game/workers'
 import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
 import type { Habit, Player, TaskStatus, Village } from '../game/types'
-import { addDays, isSabbath, weekday } from '../game/calendar'
+import { SEASON_ICON, addDays, isSabbath, weekSeason, weekday } from '../game/calendar'
 import { eventId, type Game } from '../app/store'
 import { oreHint, shareSpot, SIZE_LABEL } from './helpers'
 import { supabaseEnabled } from '../app/supabase'
@@ -339,6 +339,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
       <Garrison game={game} p={p} />
       <Growth game={game} p={p} />
       <Workers game={game} p={p} />
+      <Tools game={game} p={p} />
       <h3>Start over</h3>
       {!confirm ? (
         <>
@@ -646,8 +647,11 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
 /** Who works where: the village can decide, or the player assigns people by hand. */
 function Workers({ game, p }: { game: Game; p: Player }) {
   const v = game.state.villages[p.villageId]
-  const j = jobs(v)
+  const season = weekSeason(game.today(p.id))
+  const j = jobs(v, season)
   const auto = v.autoJobs !== false
+  // taking the work over by hand: a reminder of what the year asks of the fields first
+  const [asking, setAsking] = useState(false)
   const home = people(v)
   const busy = Object.values(j).reduce((a, n) => a + n, 0)
   const [step, stepChips] = useStep(Math.floor(v.population))
@@ -655,8 +659,10 @@ function Workers({ game, p }: { game: Game; p: Player }) {
     const next = { ...j, [id]: Math.max(0, (j[id] ?? 0) + d) }
     void game.dispatch({ t: 'jobs', id: eventId(), at: game.now().toISOString(), playerId: p.id, auto: false, jobs: next })
   }
-  const toggle = () => void game.dispatch({ t: 'jobs', id: eventId(), at: game.now().toISOString(), playerId: p.id, auto: !auto, ...(auto ? { jobs: j } : {}) })
-  const staffed = v.buildings.filter((b) => b.progress >= 1 && needOf(b) > 0)
+  const switchTo = (manual: boolean) => void game.dispatch({ t: 'jobs', id: eventId(), at: game.now().toISOString(), playerId: p.id, auto: !manual, ...(manual ? { jobs: j } : {}) })
+  const toggle = () => { if (auto) setAsking(true); else switchTo(false) }
+  const staffed = v.buildings.filter((b) => b.progress >= 1 && needOf(b, season) > 0)
+  const idle = v.buildings.filter((b) => b.progress >= 1 && needOf(b) > 0 && needOf(b, season) === 0)
   const other = v.buildings.filter((b) => b.progress < 1 || needOf(b) === 0)
   const row = (id: string, name: string, n: number, max: number, note?: string) => (
     <div key={id} className="row worker-row">
@@ -672,20 +678,65 @@ function Workers({ game, p }: { game: Game; p: Player }) {
     <>
       <h3 style={{ marginBottom: 2 }}>Workers</h3>
       <p className="muted" style={{ margin: '0 0 4px' }}>
-        {home} people at home{v.away ? ` (and ${v.away} away, with a caravan or on a neighbour's walls)` : ''}: {busy} working, {spare(v)} free. A building with half its workers makes half as much.
+        {home} people at home{v.away ? ` (and ${v.away} away, with a caravan or on a neighbour's walls)` : ''}: {busy} working, {spare(v, season)} free. A building with half its workers makes half as much. {SEASON_ICON[season]} It is {season}.
       </p>
       <label className="row" style={{ gap: 6, margin: '4px 0' }}>
         <input type="checkbox" checked={auto} onChange={toggle} /> Let the village manage its workers <span className="muted">(food buildings first, then the rest; with the stores full, only enough on food to feed everyone)</span>
       </label>
       {!auto && <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>}
       {auto && storesFull(v) && <p className="muted" style={{ margin: '2px 0' }}>🌾 The stores are full, so the village has moved hands off food (more would only rot) onto other work.</p>}
-      {staffed.map((b) => row(b.id, BUILDINGS[b.type].name, j[b.id] ?? 0, needOf(b)))}
+      {staffed.map((b) => row(b.id, BUILDINGS[b.type].name, j[b.id] ?? 0, needOf(b, season), BUILDINGS[b.type].harvest ? (season === 'spring' ? 'sowing' : 'harvest') : undefined))}
+      {idle.length > 0 && (
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Nothing to do this {season}: {idle.map((b) => BUILDINGS[b.type].name).join(', ')}.
+        </p>
+      )}
+      {asking && (
+        <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="Assigning workers by hand">
+          <div className="card confirm">
+            <h2>Assigning workers by hand</h2>
+            <p style={{ margin: '4px 0' }}>With the village managing its workers, the fields are sown and reaped for you. By hand, it is on you:</p>
+            <ul>
+              <li>🌱 <b>Spring (Sunday, Monday):</b> put people on the fields to <b>sow</b>. Half a crew does it: about a quarter of the village if grain is your main food.</li>
+              <li>🍂 <b>Autumn (Thursday, Friday):</b> put a full crew on the fields to <b>reap</b>: about half the village if grain is your only food. A field that wasn't sown still gives a quarter.</li>
+              <li>☀️ <b>Summer:</b> the fields need no one, so move people to other work.</li>
+            </ul>
+            <p className="muted" style={{ margin: '4px 0' }}>The Workers list shows what each building needs this season. Anyone away with a caravan or on a neighbour's walls can't sow or reap.</p>
+            <div className="confirm-buttons">
+              <button className="btn" onClick={() => setAsking(false)} autoFocus>Keep it automatic</button>
+              <button className="btn primary" onClick={() => { setAsking(false); switchTo(true) }}>Assign by hand</button>
+            </div>
+          </div>
+        </div>
+      )}
       {other.length > 0 && (
         <p className="muted" style={{ margin: '4px 0 0' }}>
           Also: {other.map((b) => `${BUILDINGS[b.type].name}${b.progress < 1 ? ` (${Math.round(b.progress * 100)}% built)` : ''}`).join(', ')}.
         </p>
       )}
       {!v.buildings.length && <p className="muted">Tap a hex in your territory (yellow border) and finish a medium task to build.</p>}
+    </>
+  )
+}
+
+/** Kit that makes the work go further: made once, from the stores. */
+function Tools({ game, p }: { game: Game; p: Player }) {
+  const v = game.state.villages[p.villageId]
+  const mine = new Set(v.tools ?? [])
+  const make = (tool: string) => void game.dispatch({ t: 'equip', id: eventId(), at: game.now().toISOString(), playerId: p.id, tool })
+  return (
+    <>
+      <h3 style={{ margin: '10px 0 2px' }}>Tools</h3>
+      <p className="muted" style={{ margin: '0 0 4px' }}>Better kit means fewer people on food, and more for everything else.</p>
+      {Object.values(TOOLS).map((t) => {
+        const why = mine.has(t.id) ? null : validate(game.state, game.world, { t: 'equip', id: 'check', at: game.now().toISOString(), playerId: p.id, tool: t.id })
+        return (
+          <div key={t.id} className="row worker-row">
+            <span><Icon name={t.id} size={32} /> <b>{t.name}</b> <span className="muted">· {t.blurb} {!mine.has(t.id) && `(${fmtGoods(t.cost, 1)})`}</span>{why && !mine.has(t.id) && <small className="deal-no"> {why}</small>}</span>
+            {mine.has(t.id) ? <span className="deal-yes">✓ made</span> : <button className="btn" disabled={!!why} onClick={() => make(t.id)}>Make</button>}
+          </div>
+        )
+      })}
     </>
   )
 }

@@ -18,6 +18,7 @@
  *  All amounts are a pure function of the world seed, so every client agrees.
  *  Nothing was counted before DEPLETION_FROM, so older events replay as they
  *  always did. */
+import { spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
 import { MOUNTAIN_TERRAIN } from '../world/land'
 import type { World } from '../world/types'
@@ -114,6 +115,28 @@ export function hunt(world: World, s: GameState, i: number, date: ISODate, want:
   const left = gameLeft(world, s, i, date)
   const got = Math.round(Math.min(want, left) * 100) / 100
   ;(s.hunted ??= {})[i] = { left: Math.round((left - got) * 100) / 100, date }
+  return got
+}
+
+/** How far from its lodge a hunting crew ranges, and the most of the game in that country it can take in a day
+ *  (a crew of a full strength with plain gear: bows and muskets raise it). The share is of what is left, so
+ *  the animals thin out but are never all gone. */
+export const HUNT_RANGE = 2
+export const HUNT_SHARE = 0.25
+
+/** A crew takes up to `want` animals, but no more than `share` of the game within HUNT_RANGE hexes of the lodge,
+ *  from every hex in proportion to what it holds. Returns how many it got. */
+export function huntRange(world: World, s: GameState, centre: { col: number; row: number }, date: ISODate, want: number, share: number): number {
+  const spots: { i: number; left: number }[] = []
+  for (const o of spiral(centre, HUNT_RANGE)) {
+    if (o.col < 0 || o.row < 0 || o.col >= world.width || o.row >= world.height) continue
+    const i = o.row * world.width + o.col
+    if (gameMax(world, i) > 0) spots.push({ i, left: gameLeft(world, s, i, date) })
+  }
+  const total = spots.reduce((a, x) => a + x.left, 0)
+  if (total <= 0) return 0
+  const got = Math.round(Math.min(want, total * share) * 100) / 100
+  for (const x of spots) (s.hunted ??= {})[x.i] = { left: Math.round((x.left - got * (x.left / total)) * 100) / 100, date }
   return got
 }
 

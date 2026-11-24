@@ -68,6 +68,10 @@ export interface Building {
   depth?: number
   /** workshops with several recipes: what it's been ordered to make */
   order?: string
+  /** fields: how much of this year's crop was sown (0..1; unset counts as sown, see shift) */
+  sown?: number
+  /** pens: the flock, head by age (index 0 = this year's lambs); unset is the starting flock (see herds.ts) */
+  herd?: number[]
 }
 
 export interface Village {
@@ -108,6 +112,8 @@ export interface Village {
   arrivals?: Arrival[]
   /** the winter whose newcomers have already come */
   welcomed?: ISODate
+  /** tools the village has made: better kit for fishing, hunting and the harvest (see TOOLS) */
+  tools?: string[]
 
   planted: { cell: number; date: ISODate }[]
   /** hexes whose trees were felled */
@@ -122,7 +128,7 @@ export interface Arrival {
   id: string
   at: string
   /** 'update': the one-time update counting people one by one; 'winter': the spring influx */
-  kind: 'update' | 'winter'
+  kind: 'update' | 'winter' | 'food'
   people: number
   /** where they came from ("a farming valley") */
   from: string
@@ -181,6 +187,8 @@ export interface GameState {
   cheeseRations?: boolean
   /** every village that could has had its square laid out in its city (see placeStarters) */
   startersPlaced?: boolean
+  /** the food update's gift of grain has been handed out (see FOOD_UPDATE_FROM) */
+  foodUpdate?: boolean
   worldSeed: string
   seasonStart: ISODate
   players: Record<string, Player>
@@ -268,6 +276,8 @@ export type GameEvent =
   | (Base & { t: 'jobs'; auto: boolean; jobs?: Record<string, number> })
   /** tell a workshop with several recipes which to make */
   | (Base & { t: 'order'; building: string; recipe: string })
+  /** make a tool (see TOOLS): the goods are spent, the village is better at its work from then on */
+  | (Base & { t: 'equip'; tool: string })
   /** split a whole action into smaller ones: big → medium + small, medium → two small (never the other way) */
   | (Base & { t: 'split'; tokenId: string })
   /** a palisade's host takes in troops waiting at the gate, or sends them home */
