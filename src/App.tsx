@@ -210,11 +210,12 @@ function Main({ game }: { game: Game }) {
     if (centred.current === key) return
     const first = centred.current === null
     centred.current = key
-    if (first && linked) {
-      view.centreOn(linked.col, linked.row, game.world.cells[linked.row * game.world.width + linked.col].tier)
-    } else if (p) {
+    if (p) {
+      // a signed-in player always lands on their own village, even when they followed a link to a hex
       const v = game.state.villages[p.villageId]
       view.centreOn(v.col, v.row, game.world.cells[v.row * game.world.width + v.col].tier)
+    } else if (first && linked) {
+      view.centreOn(linked.col, linked.row, game.world.cells[linked.row * game.world.width + linked.col].tier)
     } else {
       // visitors and newcomers: where the villages are, or the starter region in an empty world
       const vs = Object.values(game.state.villages)

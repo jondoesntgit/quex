@@ -662,13 +662,19 @@ export class MapView {
         const p = hexToPixel(cell.col, cell.row, W)
         const lift = cell.tier * TP
         const corners = hexCorners(p.x, p.y - lift, W)
-        let bg: Graphics | null = null
+        // each edge is its own Graphics, sorted just above the ground of both hexes it lies between:
+        // a neighbour drawn later (in front) that is no taller than this hex must not paint over the line.
+        // A taller neighbour in front does hide it, as a hill would.
         neighbours(cell.col, cell.row).forEach(([nc, nr], k) => {
+          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
           const ni = nr * world.width + nc
           if (terr.has(ni)) return
           const [a, b] = EDGE_CORNERS[k]
-          bg ??= new Graphics()
-          dashed(bg, corners[a][0], corners[a][1], corners[b][0], corners[b][1], color)
+          const low = rank[ni] >= 0 && world.cells[ni].tier <= cell.tier && revealed.has(ni)
+          const eg = new Graphics()
+          dashed(eg, corners[a][0], corners[a][1], corners[b][0], corners[b][1], color)
+          eg.zIndex = z(low && rank[ni] > rank[i] ? ni : i, 0.5)
+          this.cells.addChild(eg)
           for (const c of [corners[a], corners[b]]) {
             const key = `${Math.round(c[0])},${Math.round(c[1] + lift)}`
             const list = ends.get(key)
@@ -677,7 +683,6 @@ export class MapView {
             else ends.set(key, [e])
           }
         })
-        if (bg) { (bg as Graphics).zIndex = z(i, 0.5); this.cells.addChild(bg) }
       }
       for (const list of ends.values()) {
         if (list.length < 2) continue
