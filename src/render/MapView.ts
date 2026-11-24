@@ -13,6 +13,7 @@
 import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } from 'pixi.js'
 import { Ambient } from './ambient'
 import { Mountains } from './mountains'
+import { Flock } from './flock'
 import { mulberry32 } from '../world/rng'
 import { extend, riverLayout, roadLayout } from './waterways'
 import { drawBridge } from './bridge'
@@ -95,6 +96,8 @@ export class MapView {
   private revealedNow: Set<number> = new Set()
   people!: People
   traders!: Traders
+  /** sheep and shepherds at the pens */
+  flock!: Flock
   /** surf, glints, swaying trees, shimmering fields */
   ambient!: Ambient
   /** mountain ranges drawn from one height map (cached per world) */
@@ -120,6 +123,7 @@ export class MapView {
     this.houses = houses
     this.people = new People(atlas.meta.size, atlas.meta.tier)
     this.traders = new Traders(atlas)
+    this.flock = new Flock(atlas.meta.size, atlas.meta.tier)
   }
 
   get W() { return this.atlas.meta.size }
@@ -198,11 +202,9 @@ export class MapView {
       }
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
-      if (this.ambient && this.host) {
-        const z = this.zoom
-        this.ambient.view(this.cells, this.camX, this.camY, this.camX + this.host.clientWidth / z, this.camY + this.host.clientHeight / z, this.sceneScale)
-        this.ambient.update(performance.now() / 1000, this.sceneScale)
-      }
+      this.flock.update(Math.min(0.1, t.deltaMS / 1000))
+      // new animated pieces came into view: draw them once now (see settle)
+      if (this.stepAmbient()) this.app.render()
     })
     this.app.stage.addChild(this.root)
     this.resize()
@@ -233,6 +235,26 @@ export class MapView {
       console.warn('texture check failed', e)
       return true // can't tell: keep the renderer we have
     }
+  }
+
+  /** Keep the animated pieces around the camera and move them; true if it had to build new ones. */
+  private stepAmbient(): boolean {
+    if (!this.ambient || !this.host) return false
+    const z = this.zoom
+    const built = this.ambient.view(this.cells, this.camX, this.camY, this.camX + this.host.clientWidth / z, this.camY + this.host.clientHeight / z, this.sceneScale)
+    this.ambient.update(performance.now() / 1000, this.sceneScale)
+    return built
+  }
+
+  /** Draw a freshly rebuilt scene before the browser shows it. Pixi leaves Graphics made since the
+   *  last frame out of the first frame that meets them (cobbles, borders, rocks, roads), so a
+   *  rebuild flashed for one frame without them. Rendering twice here means only the second,
+   *  complete picture ever reaches the screen. */
+  private settle() {
+    if (!this.app?.renderer) return
+    this.stepAmbient()
+    this.app.render()
+    this.app.render()
   }
 
   private lostTimer?: ReturnType<typeof setTimeout>
@@ -343,7 +365,7 @@ export class MapView {
     const { world, state, viewer } = input
     const { tier: TP } = this.atlas.meta
     const W = this.W
-    const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes()])
+    const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes(), ...this.flock.nodes()])
     for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy({ children: true })
     this.ambient ??= new Ambient(W)
     if (!this.mountains || (this.mountains as unknown as { world: World }).world !== world) this.mountains = new Mountains(world, W, TP)
@@ -765,6 +787,9 @@ export class MapView {
     this.people.attach(this.cells, rank)
     this.traders.sync(world, state, revealed)
     this.traders.attach(this.cells, rank)
+    this.flock.sync(world, state, revealed, (vid) => this.people.shirt(vid))
+    this.flock.attach(this.cells, rank)
+    this.settle()
   }
 
   /** Dirt track across the hex top toward neighbouring roads/buildings; where it

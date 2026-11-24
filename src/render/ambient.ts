@@ -105,15 +105,15 @@ export class Ambient {
   /** Record an animated spot at (x, y); `build` makes its nodes with their zIndex when it comes into view. */
   add(x: number, y: number, build: () => [Container, number][]) { this.specs.push({ x, y, build }) }
 
-  /** Keep the animated objects for the area on screen (x0..x1, y0..y1 in world px) in `parent`. */
-  view(parent: Container, x0: number, y0: number, x1: number, y1: number, scale: number) {
+  /** Keep the animated objects for the area on screen (x0..x1, y0..y1 in world px) in `parent`; true if it built new ones. */
+  view(parent: Container, x0: number, y0: number, x1: number, y1: number, scale: number): boolean {
     if (this.reduced || scale < 0.5) {
       if (this.live.length) this.clearLive(parent)
       this.win = null
-      return
+      return false
     }
     const w = this.win
-    if (w && x0 >= w[0] && y0 >= w[1] && x1 <= w[2] && y1 <= w[3]) return
+    if (w && x0 >= w[0] && y0 >= w[1] && x1 <= w[2] && y1 <= w[3]) return false
     this.clearLive(parent)
     const mx = (x1 - x0) * 0.25 + this.W, my = (y1 - y0) * 0.25 + this.W
     const nw: [number, number, number, number] = [x0 - mx, y0 - my, x1 + mx, y1 + my]
@@ -125,6 +125,7 @@ export class Ambient {
     for (const sp of near.slice(0, MAX_LIVE)) {
       for (const [n, z] of sp.build()) { n.zIndex = z; parent.addChild(n); this.live.push(n) }
     }
+    return true
   }
 
   private clearLive(parent: Container) {

@@ -30,6 +30,7 @@ import { hasTrees, MOUNTAIN_TERRAIN } from '../world/land'
 import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
 import { bridgeVia } from './waterways'
 import { hexAt, SQ, townOf, type Town } from '../game/city'
+import { shepherdPens } from './flock'
 
 /** Each village dresses in its own colour (once by role; now by village). */
 const SHIRTS = [0xe8c040, 0x4878d8, 0x9a9ab0, 0x3c8c3c, 0xe0e0d0, 0xc04878, 0xd87838, 0x70b0b8]
@@ -233,6 +234,9 @@ export class People {
     this.TP = TP
   }
 
+  /** A village's shirt colour (the shepherds wear it too). */
+  shirt(vid: string) { return shirtOf(this.state, vid) }
+
   /** Graphics owned by the crowd (MapView keeps these when it redraws). */
   nodes() { return [...this.walkers.map((w) => w.g), ...this.folk.map((f) => f.g), ...this.puffs.map((p) => p.g), ...[...this.diggers.values()].map((d) => d.g)] }
 
@@ -284,11 +288,14 @@ export class People {
     for (const [vid, d] of this.diggers) {
       if (want.get(vid) !== d.cell) { d.g.destroy(); this.diggers.delete(vid) } else d.shirt = shirtOf(state, vid)
     }
-    // the digger is one of the village's own villagers, taken from the crowd while he digs (never an extra one)
+    // the digger and the shepherds are the village's own villagers, taken from the crowd while they work
+    // (never extra ones): one for a road team, one for each pen someone is set to work
     for (const w of [...this.walkers, ...this.folk]) w.g.visible = true
-    for (const vid of want.keys()) {
-      const mine = [...this.walkers, ...this.folk].filter((w) => w.vid === vid)
-      if (mine.length) mine[mine.length - 1].g.visible = false
+    for (const v of Object.values(state.villages)) {
+      const away = (want.has(v.id) ? 1 : 0) + shepherdPens(v).length
+      if (!away) continue
+      const mine = [...this.walkers, ...this.folk].filter((w) => w.vid === v.id)
+      for (const w of mine.slice(Math.max(0, mine.length - away))) w.g.visible = false
     }
     for (const [vid, cell] of want) {
       if (this.diggers.has(vid)) continue
