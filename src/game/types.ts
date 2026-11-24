@@ -1,7 +1,7 @@
 import type { Role } from '../world/types'
 import type { DungeonKind } from './deposits'
 import type { Detachment } from './garrison'
-import type { ActionKind, BuildingId, Goods, HabitEffect, TaskSize } from './data'
+import type { ActionKind, BuildingId, Good, Goods, HabitEffect, TaskSize } from './data'
 
 export type TaskStatus = 'none' | 'half' | 'full'
 export type ISODate = string // YYYY-MM-DD in the player's own day (shifted by resetHour)
@@ -120,6 +120,10 @@ export interface Village {
   arrivals?: Arrival[]
   /** the winter whose newcomers have already come */
   welcomed?: ISODate
+  /** the last winter night the village went hungry (no newcomers the Sunday after) */
+  hungryWinter?: ISODate
+  /** last night's work, step by step, shown to the player in the morning (see tick) */
+  lastNight?: NightReport
   /** tools the village has made: better kit for fishing, hunting and the harvest (see TOOLS) */
   tools?: string[]
 
@@ -130,6 +134,13 @@ export interface Village {
   /** today's barters with the merchants: what was bought from each (see game/market) */
   trade?: { date: ISODate; took: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>>; got?: Partial<Record<'ship' | 'barge' | 'caravan' | 'pedlar', Goods>> }
 }
+
+/** One line of a night's breakdown: a building's shift (or the village eating, or food spoiling), what it
+ *  changed, and the steps that got there. */
+export interface Factor { label: string; value: string }
+export interface Source { label: string; delta: Goods; factors: Factor[]; makes?: Good[]; type?: BuildingId }
+/** What a night did, kept for the morning report. */
+export interface NightReport { date: ISODate; at: string; score: number; prod: number; sources: Source[] }
 
 /** A group of newcomers, kept as a note: who came, from where, and what they brought. */
 export interface Arrival {

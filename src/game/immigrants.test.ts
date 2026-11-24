@@ -5,7 +5,7 @@ import { EAT, FOOD, GOOD_LABEL, HEADS, type Good } from './data'
 import { CARRY_EACH } from './workers'
 import { ORIGINS, TRAVEL_DAYS, influx, originFor, travelFood } from './immigrants'
 import { weightOf } from './market'
-import { GROW_MORALE, apply, newGame, popCap } from './reducer'
+import { GROW_MORALE, apply, newGame, popCap, winterOutlook } from './reducer'
 import type { GameState } from './types'
 
 const world = generateWorld('test-seed')
@@ -123,5 +123,61 @@ describe('the one-time update', () => {
     expect(a.people).toBe(6 * HEADS - 6)
     const food = Object.fromEntries(Object.entries(a.goods).filter(([k]) => FOOD[k as Good]))
     expect(Math.abs(worth(food) - a.people * EAT * TRAVEL_DAYS)).toBeLessThan(0.5) // goods are kept to 2 places, a load is 10 rations
+  })
+})
+
+describe('a hungry winter', () => {
+  it('keeps newcomers away the Sunday after', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = {} // nothing to eat on the winter night
+    v.morale = 80
+    tick(s, addDays(sunday, -1))
+    expect(v.hungryWinter).toBe(addDays(sunday, -1))
+    v.goods = { grain: 60 }
+    v.morale = 80
+    const pop = v.population
+    tick(s, sunday)
+    expect(v.arrivals ?? []).toHaveLength(0)
+    expect(v.population).toBe(pop)
+    expect(s.log.some((l) => /went hungry in winter/.test(l.text))).toBe(true)
+  })
+})
+
+describe('the winter outlook', () => {
+  const at = (date: string) => new Date(`${date}T12:00:00.000Z`)
+  it('runs each day to Saturday, and counts the harvest still in the fields', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = { grain: 5 }
+    v.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 })
+    const o = winterOutlook(s, world, s.players.ann, at(addDays(sunday, 2))) // Tuesday
+    expect(o.days.map((d) => d.season)).toEqual(['summer', 'summer', 'autumn', 'autumn', 'winter'])
+    expect(o.harvest).toBeGreaterThan(0)
+    expect(o.days.filter((d) => d.season !== 'autumn').every((d) => d.harvest === 0)).toBe(true)
+    expect(o.need).toBe(v.population)
+    // nothing in the real village changed
+    expect(v.goods).toEqual({ grain: 5 })
+  })
+
+  it('with workers set by hand, sends everyone not on food to the harvest', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = { grain: 5, timber: 10 }
+    v.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'l', type: 'lumber_camp', col: 0, row: 1, progress: 1 })
+    v.autoJobs = false
+    v.jobs = { l: 2 * HEADS } // all hands on timber, none on the field
+    const o = winterOutlook(s, world, s.players.ann, at(addDays(sunday, 4))) // Thursday
+    expect(o.manual).toBe(true)
+    expect(o.harvest).toBeGreaterThan(0)
+  })
+
+  it('says whether the stores see the village through winter', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = {}
+    expect(winterOutlook(s, world, s.players.ann, at(addDays(sunday, 5))).fed).toBe(false)
+    v.goods = { grain: 100 }
+    expect(winterOutlook(s, world, s.players.ann, at(addDays(sunday, 5))).fed).toBe(true)
   })
 })

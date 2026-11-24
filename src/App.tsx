@@ -10,6 +10,7 @@ import { loadAtlas } from './render/atlas'
 import { loadHouseArt } from './render/houseart'
 import { Confirm } from './ui/Confirm'
 import { Arrivals } from './ui/Arrivals'
+import { MorningReport } from './ui/NightReport'
 import { MapView } from './render/MapView'
 import { SEASON_ICON, SEASON_WEEKS, seasonWeek, weekSeason } from './game/calendar'
 import { dayScore, foundingBlockedCells } from './game/reducer'
@@ -309,6 +310,7 @@ function Main({ game }: { game: Game }) {
       )}
 
       {p && !placing && <Arrivals game={game} p={p} />}
+      {p && !placing && <MorningReport game={game} p={p} />}
 
       {p && splitting && (() => {
         const t = p.tokens.find((x) => x.id === splitting)

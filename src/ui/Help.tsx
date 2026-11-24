@@ -68,7 +68,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <p>
             You found your village by tapping a spot on the map. Your land is the hexes within two of the village
             (yellow border); outposts add more. Villagers eat one ration of food each a day, homes to live in,
-            and good morale to grow. The <b>Village</b> tab shows people, defence, food in store and goods.
+            and good morale to grow (newcomers come each spring, the Sunday after winter). The <b>Village</b> tab shows people, defence, food in store and goods.
           </p>
           <ul>
             <li><b>Units:</b> a <b>wagon load</b> is 1,000 lb, and timber, stone, clay, bricks and ore are counted in them. Food is counted in <b>rations</b>, one person's food for a day (2 to 4 lb: a wagon holds about 500 of grain). Salt is counted in pinches, one to a ration of cheese or cured meat. Metals are counted in ingots (50 lb each, silver 12); caravans and merchants carry by real weight.</li>
@@ -77,7 +77,9 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>Eating a variety of foods lifts morale. Running short hurts morale, and families may leave.</li>
             <li><b>Food:</b> a village should need no more than about 40% of its people on food. A <b>field</b> is sown in spring (half a crew, Sunday and Monday), idle in summer, and reaped in autumn (a full crew, Thursday and Friday): about half the village for those two days feeds it all week on grain alone, and ground left unsown still gives a quarter. <b>Gardens</b> make about 3 rations a worker with a vegetable each season (worts in spring, dried peas in summer, turnips in autumn), <b>fishing</b> about 3 (on the sea or a river), <b>hunters</b> about 4 from the game around the lodge (they never take the last of it), and a <b>sheep pen</b> about 5, net of winter feed. <b>Tools</b> (Village tab) raise these: scythes, fishing spears, boats, bows, muskets.</li>
             <li><b>Workers:</b> your people at home do the work. Each building needs a good few hands (a field 10 at harvest, a mine 15, a kiln 5), and one with half its workers makes half as much. The village manages its workers for you (food buildings first; once the stores are full, only enough on food to feed everyone, the rest on other work), or switch that off in the Village tab and assign them yourself. People not working are free to go with a caravan or as troops; while they're away they're still yours (their houses kept), but they can't work until they're home.</li>
-            <li><b>More people</b> settle when three things hold: room in the homes (the village square holds 30; each cottage you build in the city holds 12 more, each town house 24; lay cobblestone next to the city first), morale of at least 45, and the village making at least as much food as it eats (spoiling and rotting count). The Village tab ticks them off for tonight.</li>
+            <li><b>More people</b> come once a year: on <b>Sunday night</b>, the first night of spring after the Saturday winter. A fifth of the village again arrives, with three days of food, if three things hold: room in the homes (the village square holds 30; each cottage you build in the city holds 12 more, each town house 24; lay cobblestone next to the city first), morale of at least 45, and <b>enough food to get through winter</b>: nobody went hungry on Saturday night. No one joins on the other nights of the week.</li>
+            <li><b>Food for winter:</b> the Village tab forecasts it all week. It runs the days to Saturday as the nights will run them, at your usual score: the grain still in your fields (reaped Thursday and Friday), what everything else makes, what the village eats and what spoils, and says whether the stores will see you through the winter night. If you assign workers yourself, it assumes everyone not on food goes to the fields when they need sowing or reaping.</li>
+            <li><b>The morning report:</b> the first time you open Quex after a night, it shows what the night made and used, building by building, and why: your score, morale, workers, tools, water and the season. Read it again from <b>Last night</b> on the Village tab.</li>
           </ul>
           <p>Wrong spot? The Village tab lets you abandon your village and start again somewhere new. That resets your progress, but the map you explored stays known.</p>
         </details>
@@ -101,9 +103,9 @@ export function Help({ onClose }: { onClose: () => void }) {
             <li>☀️ <b>Summer</b> (Tuesday, Wednesday): crops at 110%.</li>
             <li>🍂 <b>Autumn</b> (Thursday, Friday): crops at 140%, so harvest and stock up.</li>
             <li>❄️ <b>Winter</b> (Saturday): the Sabbath, a day of rest. There are no tasks, just your habits. Nothing grows,
-              the village lives off its stores, and the day counts like a frozen one.</li>
+              the village lives off its stores, and the day counts like a frozen one. The Sunday after, newcomers arrive if nobody went hungry.</li>
           </ul>
-          <p>On Thursday and Friday the Village tab forecasts winter as <i>stocked</i>, <i>tight</i> or <i>hungry</i>. A season lasts {SEASON_WEEKS} weeks.</p>
+          <p>Get through the winter night without going hungry, and on Sunday night newcomers settle (if you have room and morale). The Village tab forecasts your food for winter all week. A season lasts {SEASON_WEEKS} weeks.</p>
           <p>
             The <b>Winter prep</b> checklist in the Village tab shows what's still missing: food that keeps (grain,
             smoked fish, cheese), room to store it, a palisade if your stores look thin, and a varied larder. It

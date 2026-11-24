@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { rationsOf } from '../game/units'
 import { BUILDINGS, FOOD, GOOD_LABEL, ROAD_TEAM, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
-import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight, type Source } from '../game/reducer'
+import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight, winterOutlook, type Source } from '../game/reducer'
+import { influx } from '../game/immigrants'
+import { LastNightButton, dayName } from './NightReport'
 import { hands, jobs, needOf, people, spare, storesFull } from '../game/workers'
 import { away, garrison, nightsOf, troopsAt } from '../game/garrison'
 import type { Habit, Player, TaskStatus, Village } from '../game/types'
@@ -316,6 +318,7 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
   const v = game.state.villages[p.villageId]
   const [confirm, setConfirm] = useState(false)
   const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) > 0.05) as [Good, number][]
+  const outlook = winterOutlook(game.state, game.world, p, game.now())
   return (
     <div>
       <h3 style={{ marginTop: 0 }}>{v.name}</h3>
@@ -323,22 +326,23 @@ export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Pl
         <span><Icon name="people" title="Villagers" /> {Math.floor(v.population)}/{popCap(v)}{v.away ? ` (${v.away} away)` : ''}</span>
         <span><Icon name="defence" title="Defence" /> {defence(v)}{troopsAt(game.state, v) ? ` +${troopsAt(game.state, v)} troops` : ''}</span>
         <span><Icon name="bread" title="Food stored, in rations (one a person a day)" /> {Math.round(foodStock(v))}/{storageCap(v)}</span>
-        <span>Winter: <b>{winterPrep(v, game.today(p.id), dayScore(p.days[game.today(p.id)])).forecast}</b></span>
+        <span>Winter: <b>{outlook.fed ? 'fed' : 'hungry'}</b> <small className="muted">(forecast)</small></span>
       </div>
       <div style={{ margin: '8px 0' }}>
         <span className="muted">Morale {v.morale}</span>
         <div className="bar"><i style={{ width: `${v.morale}%`, background: v.morale < 35 ? 'var(--danger)' : undefined }} /></div>
       </div>
-      <WinterPrepCard game={game} p={p} />
+      <WinterPrepCard game={game} p={p} o={outlook} />
       <Focus game={game} p={p} />
       <button className="btn" style={{ marginBottom: 4 }} onClick={async () => {
         const msg = await shareSpot(game, v, `Come settle near ${v.name} in Quex!`)
         if (msg) notify(msg)
       }}>🔗 Invite someone to settle nearby</button>
+      <LastNightButton v={v} />
       <Stores game={game} p={p} goods={goods} />
       <OreHints v={v} />
       <Garrison game={game} p={p} />
-      <Growth game={game} p={p} />
+      <Growth game={game} p={p} o={outlook} />
       <Workers game={game} p={p} />
       <RoadPlanner game={game} p={p} />
       <Tools game={game} p={p} />
@@ -525,7 +529,16 @@ function WinterNudge({ game, p }: { game: Game; p: Player }) {
 }
 
 /** The winter prep checklist: what's ready, what isn't, and which tasks fix it. */
-function WinterPrepCard({ game, p }: { game: Game; p: Player }) {
+type Outlook = ReturnType<typeof winterOutlook>
+
+/** The winter outlook in a line: what the stores should hold going into Saturday, with the harvest still to reap. */
+function outlookLine(o: Outlook) {
+  if (o.days.length < 2) return null
+  const into = o.days[o.days.length - 2]
+  return <> If you keep on as you are, about <b>{Math.round(into.store)} rations</b> ({Math.round(into.keeps)} that keep) going into Saturday{o.harvest > 0 ? `, ${Math.round(o.harvest)} of them still to reap from the fields` : ''}: {o.fed ? <span className="deal-yes">enough for the winter night ({o.need})</span> : <span className="deal-no">short of the {o.need} the winter night needs</span>}.</>
+}
+
+function WinterPrepCard({ game, p, o }: { game: Game; p: Player; o: Outlook }) {
   const v = game.state.villages[p.villageId]
   const date = game.today(p.id)
   const w = winterPrep(v, date, dayScore(p.days[date]))
@@ -534,7 +547,7 @@ function WinterPrepCard({ game, p }: { game: Game; p: Player }) {
   return (
     <details className="winter" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary>❄️ Winter prep {ready ? '· ready' : `· ${w.items.filter((x) => !x.ok).length} to do`}</summary>
-      <p className="muted" style={{ marginTop: 4 }}>{whenWinter(w.days)} Forecast: <b>{w.forecast}</b>.</p>
+      <p className="muted" style={{ marginTop: 4 }}>{whenWinter(w.days)}{outlookLine(o)}</p>
       <ul className="checklist">
         {w.items.map((it) => (
           <li key={it.id} className={it.ok ? 'ok' : ''}>
@@ -828,22 +841,68 @@ function Tools({ game, p }: { game: Game; p: Player }) {
   )
 }
 
-/** How a village gains people, and which of the three conditions it meets tonight. */
-function Growth({ game, p }: { game: Game; p: Player }) {
+/** How a village gains people: once a year, the Sunday after winter, if three things hold. The food check is the
+ *  winter outlook: the days to Saturday as the nights will run them, and whether the stores see the village through. */
+function Growth({ game, p, o }: { game: Game; p: Player; o: Outlook }) {
   const v = game.state.villages[p.villageId]
-  const t = tonight(game.state, game.world, p, game.now())
+  const today = game.today(p.id)
   const room = popCap(v) - v.population
+  // Sunday is the night they come: tonight's check is whether Saturday went hungry, not next winter's forecast
+  const sunday = weekday(today) === 0
+  const welcomedToday = v.welcomed === today
+  const hungry = sunday && v.hungryWinter === addDays(today, -1)
+  const winterDay = o.days[o.days.length - 1]
+  const into = o.days.length > 1 ? o.days[o.days.length - 2] : null
+  const store = Math.round(into ? into.store : foodStock(v))
+  const fedText = sunday
+    ? hungry ? 'Food: the village went hungry last night, in winter, so no one comes this spring' : 'Food: nobody went hungry in winter'
+    : o.fed
+      ? `Food for winter: about ${store} rations in store going into Saturday, and the winter night needs ${o.need}`
+      : `Food for winter: about ${store} rations in store going into Saturday, short of the ${o.need} the winter night needs${winterDay.short ? ` (${Math.round(winterDay.short)} short)` : ''}: more fields, fishing, herds, or food that keeps`
   const checks = [
-    { ok: room > 0.05, text: room > 0.05 ? `Room in the homes: ${Math.floor(v.population)} of ${popCap(v)} places` : `The homes are full (${popCap(v)} places): lay cobblestone, then build a cottage (12 more) or town house (24 more) in the city` },
+    { ok: room >= 1, text: room >= 1 ? `Room in the homes: ${Math.floor(v.population)} of ${popCap(v)} places` : `The homes are full (${popCap(v)} places): lay cobblestone, then build a cottage (12 more) or town house (24 more) in the city` },
     { ok: v.morale >= GROW_MORALE, text: `Morale at least ${GROW_MORALE}: it's ${v.morale}${v.morale < GROW_MORALE ? ' (a varied larder, a good day, a chapel or devotions lift it)' : ''}` },
-    { ok: t.food >= 0 && !t.hungry, text: t.food >= 0 && !t.hungry ? `Food: tonight the village makes at least what it eats (${t.food >= 0 ? '+' : ''}${t.food})` : `Food: tonight the village eats more than it makes (${t.food}): more fields, fishing, herds, or fewer spoiling stores` },
+    { ok: sunday ? !hungry : o.fed, text: fedText },
   ]
   const all = checks.every((c) => c.ok)
+  const come = influx(v.population, room, v.morale, GROW_MORALE)
+  const when = sunday ? 'tonight' : 'Sunday night'
+  const rows = sunday ? [] : o.days
   return (
     <div className="growth">
-      <h4 style={{ margin: '8px 0 2px' }}>More people {all ? <span className="deal-yes">· newcomers settle tonight</span> : <span className="muted">· not tonight</span>}</h4>
+      <h4 style={{ margin: '8px 0 2px' }}>
+        More people <span className="muted">· once a year, the Sunday after winter</span>
+        {welcomedToday ? null : all ? <span className="deal-yes"> · about {come} will settle {when}</span> : <span className="muted"> · none {when} as things stand</span>}
+      </h4>
       {checks.map((c, k) => <p key={k} className={c.ok ? 'muted' : 'deal-no'} style={{ margin: '1px 0' }}>{c.ok ? '✓' : '✗'} {c.text}</p>)}
-      <p className="muted" style={{ margin: '2px 0 0' }}>When all three hold, people arrive each night (more on a good day), but not in winter. More people means more hands for buildings, caravans and troops.</p>
+      <p className="muted" style={{ margin: '2px 0 0' }}>
+        On Sunday night, the first night of spring, newcomers arrive with three days of food: a fifth of the village again, as many as the homes have room for.
+        They come only if the village got through the Saturday winter without going hungry. More people means more hands for buildings, caravans and troops.
+      </p>
+      {rows.length > 0 && (
+        <details className="outlook" style={{ marginTop: 4 }}>
+          <summary>Food to winter, day by day{o.harvest > 0 ? ` (about ${Math.round(o.harvest)} rations still to reap)` : ''}</summary>
+          <p className="muted" style={{ margin: '2px 0 4px' }}>
+            If you keep on as you are: your usual score ({o.usual}/100, the average of the last week; today counts at its own score if that's higher),{' '}
+            {o.manual ? 'your workers as you have set them, with everyone not on food sent to the fields when they need sowing or reaping' : 'the village choosing its own workers (food first)'}.
+            {o.harvest > 0 && ' The fields are reaped on Thursday and Friday.'} In rations.
+          </p>
+          <table>
+            <thead><tr><th>Night</th><th>Made</th><th>Eaten</th><th>Spoiled</th><th>In store</th></tr></thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={d.date} className={d.season === 'winter' ? 'winter' : undefined}>
+                  <td>{SEASON_ICON[d.season]} {dayName(d.date)}{d.date === today ? ' (tonight)' : ''}</td>
+                  <td>{d.made ? `${d.made > 0 ? '+' : '−'}${Math.abs(Math.round(d.made))}` : '0'}{d.harvest > 0 && <small className="muted"> ({Math.round(d.harvest)} reaped)</small>}</td>
+                  <td>−{Math.round(d.eaten)}</td>
+                  <td>{d.lost ? `−${Math.round(d.lost)}` : '0'}</td>
+                  <td className={d.short > 0 ? 'deal-no' : undefined}>{d.short > 0 ? `${Math.round(d.short)} short` : Math.round(d.store)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </div>
   )
 }

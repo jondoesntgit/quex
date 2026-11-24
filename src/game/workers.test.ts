@@ -84,23 +84,32 @@ describe('workers', () => {
 })
 
 describe('growth', () => {
-  it('needs the village to make at least as much food as it eats', () => {
+  it('comes only after winter: a good night with food to spare adds no one', () => {
     const tick = (s: GameState, date: string) => apply(s, world, { t: 'tick', id: `t${++n}`, at: `${date}T23:00:00.000Z`, playerId: 'ann', date })
-    const s = setup()
-    const v = s.villages.v_ann
-    v.goods = { grain: 20 } // plenty in store, but nothing coming in
-    v.morale = 70
-    const pop = v.population
-    tick(s, '2026-11-19') // a Thursday: autumn
-    expect(v.population).toBe(pop)
     const t = setup()
     const w = t.villages.v_ann
-    w.goods = { grain: 20 } // within what the stores hold
+    w.goods = { grain: 20 }
     w.morale = 70
     w.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 }, { id: 'f2', type: 'field', col: 0, row: 1, progress: 1 })
     t.players.ann.days['2026-11-19'] = { slots: ['big', 'medium', 'medium', 'small', 'small', 'small'].map((size) => ({ size, status: 'full' })), habitsDone: [] } as never
+    const pop = w.population
+    tick(t, '2026-11-19') // a Thursday: autumn, the harvest in
+    expect(w.population).toBe(pop)
+  })
+
+  it('the morning report says what each building made, and why', () => {
+    const tick = (s: GameState, date: string) => apply(s, world, { t: 'tick', id: `t${++n}`, at: `${date}T23:00:00.000Z`, playerId: 'ann', date })
+    const t = setup()
+    const w = t.villages.v_ann
+    w.goods = { grain: 20 }
+    w.buildings.push({ id: 'f1', type: 'field', col: 0, row: 0, progress: 1 })
     tick(t, '2026-11-19')
-    expect(w.population).toBeGreaterThan(pop)
+    const r = w.lastNight!
+    expect(r.date).toBe('2026-11-19')
+    const field = r.sources.find((x) => x.type === 'field')!
+    expect(field.delta.grain).toBeGreaterThan(0)
+    expect(field.factors.map((f) => f.label).join(' | ')).toMatch(/score \d+\/100.*Morale/)
+    expect(r.sources.some((x) => x.label === 'Eaten')).toBe(true)
   })
 })
 

@@ -6,8 +6,8 @@
  *  People not working are spare: they can go with a caravan (each carries
  *  CARRY_EACH) or as troops to a neighbour's palisade.
  *
- *  More people come when there's room in the houses, morale is reasonable, and
- *  the village makes at least as much food as it eats (see tick, growth). */
+ *  More people come once a year, the Sunday after the Saturday winter, when there's room
+ *  in the homes, morale is reasonable, and nobody went hungry on the winter night (see tick). */
 import { BUILDINGS, EAT, FOOD, FOOD_SCALE, HEADS, producesIn, type BuildingId, type Good, type Goods } from './data'
 import type { WeekSeason } from './calendar'
 import { penCrew } from './herds'

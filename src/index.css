@@ -340,6 +340,13 @@ button.good:hover { background: rgba(0, 0, 0, 0.06); }
 .breakdown .src-head, .breakdown .factor { justify-content: space-between; gap: 12px; }
 .breakdown .factor { font-size: 0.9em; color: var(--muted, #6a6258); padding-left: 12px; }
 .breakdown .total { border-top: 2px solid var(--ink); padding-top: 6px; margin: 10px 0; }
+.breakdown .deltas { display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end; }
+.breakdown .deltas > span { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.card.breakdown { max-height: 85vh; overflow-y: auto; }
+.outlook table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+.outlook th, .outlook td { padding: 1px 4px; text-align: right; }
+.outlook th:first-child, .outlook td:first-child { text-align: left; }
+.outlook tr.winter td { border-top: 1px solid var(--ink); }
 .breakdown .up { color: #287828; } .breakdown .down { color: var(--danger); }
 .token[role=button], .split-btn { cursor: pointer; pointer-events: auto; }
 .token.armed { outline: 2px solid var(--gold); }

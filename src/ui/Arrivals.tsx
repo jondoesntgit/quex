@@ -17,6 +17,12 @@ function remember(villageId: string, id: string) {
   try { localStorage.setItem(KEY(villageId), JSON.stringify([...readSeen(villageId), id].slice(-30))) } catch { /* private window: it just shows again */ }
 }
 
+/** A newcomers' note not yet read (the morning report waits for it). */
+export function arrivalPending(v: { id: string; arrivals?: Arrival[] }): boolean {
+  const seen = readSeen(v.id)
+  return (v.arrivals ?? []).some((x) => !seen.includes(x.id))
+}
+
 const amount = (n: number) => (Math.round(n * 10) / 10).toString()
 
 export function Arrivals({ game, p }: { game: Game; p: Player }) {

@@ -7,7 +7,7 @@ import { distance, line, neighbours, spiral } from '../world/hex'
 import { rngFor } from '../world/rng'
 import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land } from '../world/land'
 import type { Feature, Resource, Terrain, World } from '../world/types'
-import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday } from './calendar'
+import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday, type WeekSeason } from './calendar'
 import {
   ACTIONS, BUILDINGS, FUEL_PEOPLE, ROAD_TEAM, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
@@ -22,7 +22,8 @@ import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
 import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
 import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, HUNT_SHARE, dig, dungeonUnder, gameLeft, hunt, huntRange, leftAt, levels, mineDig, stonyness } from './deposits'
-import type { Arrival, Building, DayRecord, GameEvent, GameState, ISODate, LogEntry, Player, Token, Village } from './types'
+import type { Arrival, Building, DayRecord, Factor, GameEvent, GameState, ISODate, LogEntry, Player, Source, Token, Village } from './types'
+export type { Factor, Source } from './types'
 
 export function newGame(world: World, seasonStart: ISODate): GameState {
   return {
@@ -1812,6 +1813,88 @@ export function tonight(s: GameState, world: World, p: Player, now: Date) {
   return { score, rows, hungry: need > 1e-6, food: round2(foodStock(tv) - foodBefore), sources: sources.filter((x) => Object.keys(x.delta).length || x.makes?.length) }
 }
 
+/** One day of the winter outlook: the food the village makes (net of the flock's winter feed), the share of it
+ *  from the harvest, what it eats and loses to spoiling, and what's in store after (all of it, and what keeps). */
+export interface OutlookDay { date: ISODate; season: WeekSeason; score: number; made: number; harvest: number; eaten: number; lost: number; store: number; keeps: number; short: number }
+
+/** The score a player usually makes: the average of their last week's working days (not today, not the
+ *  Sabbath), or 50 with nothing to go on. */
+export function usualScore(p: Player, today: ISODate): number {
+  const past = [1, 2, 3, 4, 5, 6, 7].map((k) => addDays(today, -k)).filter((d) => !isSabbath(d) && p.days[d]?.ticked)
+  if (!past.length) return 50
+  return Math.round(past.reduce((a, d) => a + dayScore(p.days[d]), 0) / past.length)
+}
+
+/** Manual workers for a projected day: whoever is set to work, and then, while the fields want hands (sowing in
+ *  spring, reaping in autumn), the spare people and those on work that isn't food go to the fields. */
+function harvestCrew(v: Village, season: WeekSeason): Record<string, number> {
+  const out = { ...jobs(v, season) }
+  const fields = done(v).filter((b) => BUILDINGS[b.type].harvest && needOf(b, season) > 0)
+  if (!fields.length) return out
+  const food = (b: Building) => { const def = BUILDINGS[b.type]; return !!def.herd || Object.keys(producesIn(def, season) ?? {}).some((g) => FOOD[g as Good]) }
+  let free = spare(v, season)
+  const others = done(v).filter((b) => !food(b) && (out[b.id] ?? 0) > 0)
+  for (const f of fields) {
+    let want = needOf(f, season) - (out[f.id] ?? 0)
+    const n = Math.max(0, Math.min(want, free))
+    out[f.id] = (out[f.id] ?? 0) + n; free -= n; want -= n
+    for (const b of others) {
+      if (want <= 0) break
+      const m = Math.min(want, out[b.id] ?? 0)
+      out[b.id] -= m; out[f.id] += m; want -= m
+    }
+  }
+  return out
+}
+
+/** Food from today to the winter night (Saturday), if the village keeps on as it is: the buildings at the player's
+ *  usual score (today's, if it's better), the flock, eating and spoiling, night by night as the tick runs them.
+ *  Workers: the village's own choice, or the player's, with everyone not on food sent to the fields when they want
+ *  hands. The last day is the winter night: `fed` says whether the stores see the village through it. */
+export function winterOutlook(s: GameState, world: World, p: Player, now: Date) {
+  const today = playerDate(now, p.resetHour, p.tz)
+  const test = structuredClone(s)
+  const tp = test.players[p.id]
+  const tv = test.villages[p.villageId]
+  const usual = usualScore(p, today)
+  const manual = tv.autoJobs === false && !!tv.jobs
+  const days: OutlookDay[] = []
+  let date = today
+  for (let k = 0; k < 7; k++) {
+    const season = weekSeason(date)
+    const d = ensureDay(tp, date)
+    const score = season === 'winter' ? 0 : date === today ? Math.max(dayScore(d), usual) : usual
+    const prod = season === 'winter' ? 0 : 0.15 + 0.85 * (score / 100)
+    const at = new Date(now.getTime() + k * 86_400_000).toISOString()
+    if (manual) tv.jobs = harvestCrew(tv, season)
+    const trace: Source[] = []
+    const f0 = foodStock(tv)
+    produce(test, world, tv, tp, d, date, prod, at, { expected: {}, rolled: {} }, trace, score)
+    const harvest = trace.filter((x) => x.type && BUILDINGS[x.type].harvest).reduce((a, x) => a + foodOf(x.delta), 0)
+    herdsNight(test, world, tv, date, [])
+    const f1 = foodStock(tv)
+    const { need } = eatFood(tv)
+    const f2 = foodStock(tv)
+    spoil(tv)
+    const f3 = foodStock(tv)
+    days.push({ date, season, score, made: round2(f1 - f0), harvest: round2(harvest), eaten: round2(f1 - f2), lost: round2(f2 - f3), store: round2(f3), keeps: round2(foodStock(tv, true)), short: round2(need) })
+    if (season === 'winter') break
+    date = addDays(date, 1)
+  }
+  const winter = days[days.length - 1]
+  return {
+    usual, manual, days,
+    /** grain still to come from the fields before winter */
+    harvest: round2(days.reduce((a, x) => a + x.harvest, 0)),
+    /** what the winter night needs: a ration for everyone at home */
+    need: people(tv) * EAT,
+    fed: winter.season === 'winter' && winter.short <= 1e-6,
+  }
+}
+
+/** Rations in some goods (food only). */
+const foodOf = (g: Goods) => Object.entries(g).reduce((a, [x, n]) => a + Math.max(0, n ?? 0) * (FOOD[x as Good]?.value ?? 0), 0)
+
 /** What a building can be worked by hand for (a Work action): anything that makes goods, but not crops. */
 export const workable = (b: { type: BuildingId }) => {
   const def = BUILDINGS[b.type]
@@ -1964,23 +2047,19 @@ export function produce(s: GameState, world: World, v: Village, p: Player, d: Da
     if (trace && before) {
       // what it makes when it works, so a building making nothing tonight still says why
       const makes = Object.keys({ ...def.produces, ...Object.assign({}, ...(def.recipes ?? []).map((r) => r.produces)), ...(def.herd ? { cheese: 1, milk: 1 } : {}) }) as Good[]
-      trace.push({ label: def.name, delta: goodsDiff(before, v.goods), factors: why!, makes })
+      trace.push({ label: def.name, delta: goodsDiff(before, v.goods), factors: why!, makes, type: b.type })
     }
   }
   return made
 }
 
-/** One line of the stores' breakdown: a building's shift (or the village eating, or food spoiling), what it
- *  changed, and the steps that got there. */
-export interface Factor { label: string; value: string }
-export interface Source { label: string; delta: Goods; factors: Factor[]; makes?: Good[] }
 /** A multiplier, written short: ×0.15, ×1.25. */
 export const times = (x: number) => `×${Math.round(x * 100) / 100}`
 function goodsDiff(a: Goods, b: Goods): Goods {
   const out: Goods = {}
   for (const g of new Set([...Object.keys(a), ...Object.keys(b)]) as Set<Good>) {
     const n = (b[g] ?? 0) - (a[g] ?? 0)
-    if (Math.abs(n) > 1e-6) out[g] = n
+    if (Math.abs(n) > 1e-6) out[g] = Math.round(n * 1000) / 1000
   }
   return out
 }
@@ -2090,17 +2169,30 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   const score = rest ? REST_SCORE : d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
   const notes: string[] = []
 
-  // 1. production
-  const foodBefore = foodStock(v)
+  // 1. production, kept step by step for the morning report (v.lastNight)
   const prod = winter ? 0 : 0.15 + 0.85 * (score / 100)
-  const made = produce(s, world, v, p, d, ev.date, prod, ev.at)
+  const trace: Source[] = []
+  /** a line of the report: what `step` did to the stores, and why */
+  const traced = <T>(label: string, step: () => T, factors: (r: T) => Factor[] = () => []) => {
+    const before = { ...v.goods }
+    const r = step()
+    const delta = goodsDiff(before, v.goods)
+    if (Object.keys(delta).length) trace.push({ label, delta, factors: factors(r) })
+    return r
+  }
+  const made = produce(s, world, v, p, d, ev.date, prod, ev.at, undefined, trace, score)
   if (Object.keys(made).length) notes.push(`made ${fmtGoods(made)}`)
-  herdsNight(s, world, v, ev.date, notes)
+  const herdNotes = notes.length
+  traced('The flock', () => herdsNight(s, world, v, ev.date, notes), () => notes.slice(herdNotes).map((t) => ({ label: t, value: '' })))
 
   // 2. eating (fresh food first, it spoils anyway)
   const pop = people(v)
-  const { need, eaten } = eatFood(v)
+  const { need, eaten } = traced('Eaten', () => eatFood(v), (r) => [
+    { label: `${pop} people at home`, value: `${EAT} ration each` },
+    ...(r.need > 1e-6 ? [{ label: 'Ran short by', value: `${round2(r.need)} rations` }] : []),
+  ])
   const short = need > 1e-6
+  if (short && winter) v.hungryWinter = ev.date
   const variety = eaten.size
   let moraleTarget = 50 + (score - 50) / 5 + Math.max(-4, (variety - 2) * 3)
   moraleTarget += done(v).reduce((a, b) => a + (BUILDINGS[b.type].morale ?? 0), 0)
@@ -2122,10 +2214,12 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
     const want = round2(pop / FUEL_PEOPLE)
     let burn = want
     const burned: Goods = {}
-    for (const g of ['peat', 'timber'] as const) {
-      const n = round2(Math.min(burn, v.goods[g] ?? 0))
-      if (n > 0) { addGoods(v, { [g]: -n }); burned[g] = n; burn = round2(burn - n) }
-    }
+    traced('Kept warm', () => {
+      for (const g of ['peat', 'timber'] as const) {
+        const n = round2(Math.min(burn, v.goods[g] ?? 0))
+        if (n > 0) { addGoods(v, { [g]: -n }); burned[g] = n; burn = round2(burn - n) }
+      }
+    }, () => [{ label: `${pop} people`, value: `1 for each ${FUEL_PEOPLE}, peat first` }])
     if (burn > 0.005) {
       v.morale -= 6
       notes.push('no wood or peat to burn: a cold night')
@@ -2133,21 +2227,19 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   }
 
   // 3. spoilage + storage cap
-  if (spoil(v)) notes.push('food rotted for want of a granary')
+  if (traced('Spoiled', () => spoil(v), (rotted) => [{ label: 'Fresh food', value: 'loses 30% overnight' }, ...(rotted ? [{ label: 'Past what the stores hold', value: 'rots' }] : [])])) notes.push('food rotted for want of a granary')
 
-  // 4. growth: room in the houses, reasonable morale, and the village making at least as much food as it eats
-  const fed = foodStock(v) >= foodBefore - 1e-6
-  if (!short && fed && !winter && v.morale >= GROW_MORALE && v.population < popCap(v)) {
-    v.population = round2(Math.min(popCap(v), v.population + (0.15 + 0.35 * (score / 100)) * HEADS))
-  }
-
-  // 4a. after winter, newcomers arrive: as many as the village has room and morale for, with food for three days
+  // 4. newcomers come once a year, the Sunday after winter: as many as the village has room and morale for,
+  // with food for three days, if it got through the winter night without going hungry
   if (!winter && weekSeason(addDays(ev.date, -1)) === 'winter' && v.welcomed !== ev.date) {
     v.welcomed = ev.date
-    const n = influx(v.population, popCap(v) - v.population, v.morale, GROW_MORALE)
+    const hungry = v.hungryWinter === addDays(ev.date, -1)
+    const n = hungry ? 0 : influx(v.population, popCap(v) - v.population, v.morale, GROW_MORALE)
     if (n > 0) {
-      welcome(s, v, ev.at, 'winter', n)
+      traced('Newcomers', () => welcome(s, v, ev.at, 'winter', n), () => [{ label: `${n} people`, value: `${TRAVEL_DAYS} days of food each` }])
       notes.push(`${n} newcomers settled`)
+    } else {
+      notes.push(hungry ? 'no newcomers: the village went hungry in winter' : popCap(v) - v.population < 1 ? 'no newcomers: the homes are full' : `no newcomers: morale is under ${GROW_MORALE}`)
     }
   }
 
@@ -2172,7 +2264,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
       if (goods.length) {
         const [g, n] = goods[Math.floor(rng() * goods.length)]
         const lost = round2((n ?? 0) * 0.2)
-        addGoods(v, { [g]: -lost })
+        traced('Raided', () => addGoods(v, { [g]: -lost }), () => [{ label: `A ${lair.kind} band from a lair nearby`, value: 'took a fifth' }])
         log(s, ev.at, p.id, `${CHEEK.raid[lair.kind]} ${lost} ${g.replace('_', ' ')}.`, 'monster')
       }
     }
@@ -2207,6 +2299,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   else if (winter && ev.at < KEEP_TOKENS_FROM) p.tokens = []
   d.ticked = true
   p.lastTick = ev.date
+  v.lastNight = { date: ev.date, at: ev.at, score, prod: round2(prod), sources: trace }
 
   const head = winter ? `❄️ Winter rest (${ev.date})` : `Night falls on ${ev.date}: score ${score}`
   log(s, ev.at, p.id, `${head}${notes.length ? ' — ' + notes.join('; ') : ''}.`, short ? 'bad' : 'info')
