@@ -19,7 +19,7 @@ import { outcome } from '../game/preview'
 import { CITY_RADIUS, HOMES, centreOf, findHome, findUpgrade, groundOf, hexAt, paveable, type HomeKind } from '../game/city'
 import { Confirm, type ConfirmProps } from './Confirm'
 import { useStep } from './Advisor'
-import { mixText, oreHint, shareSpot, tryAction } from './helpers'
+import { canPay, mixText, oreHint, shareSpot, tryAction } from './helpers'
 import { Icon } from './Icon'
 import { clockTime, span } from './Caravans'
 
@@ -77,6 +77,9 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     const msg = await shareSpot(game, { col, row }, text)
     if (msg) notify(msg)
   }
+
+  /** greyed out when there's no action to pay for it: still opens, to look at what it would take */
+  const cant = (size: 'big' | 'medium' | 'small') => (canPay(p, size) ? '' : ' cant')
 
   const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
     const r = tryAction(game, p, action, col, row, extra, need)
@@ -306,14 +309,14 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       {lair && <p style={{ margin: '4px 0' }}>Strength {Math.round(lair.strength)}. Bring bronze, iron, leather and food to improve your odds.</p>}
       <div className="actions">
         {mine && !village && here && here.building.progress < 1
-          ? <button className="btn medium action" onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
+          ? <button className={`btn medium action${cant(BUILDINGS[here.building.type].size)}`} onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
           : (cell.tier > 0 || terr === 'shallow') && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
-            && <button className="btn medium action" onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
+            && <button className={`btn medium action${cant('medium')}`} onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {acts.map((a) => a === 'caravan'
-          ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
+          ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action${tierOf(village!) === 'free' ? '' : cant(tierOf(village!) === 'medium' ? 'medium' : 'small')}`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
           : a === 'troops'
-            ? <button key={a} className="btn medium action" disabled={!palisades(village!)} onClick={() => setMode('troops')}>Send troops…<small>{palisades(village!) ? `medium task · ${troopsAt(state, village!)} on their walls` : 'They have no palisade to hold them'}</small></button>
+            ? <button key={a} className={`btn medium action${cant('medium')}`} disabled={!palisades(village!)} onClick={() => setMode('troops')}>Send troops…<small>{palisades(village!) ? `medium task · ${troopsAt(state, village!)} on their walls` : 'They have no palisade to hold them'}</small></button>
             : <ActionButton key={a} game={game} p={p} action={a} col={col} row={row} onRun={() => run(a)} />)}
       </div>
       {dialog}

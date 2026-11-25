@@ -348,8 +348,9 @@ export function buildSiteError(world: World, s: GameState, v: Village, def: Buil
   } else if (cell.tier === 0) return 'Not on water'
   if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
   if (col === v.col && row === v.row) return 'That is your village square'
-  const woodland = def.terrain?.includes('forest')
-  if (hasTrees(land) && !woodland) return 'Fell the trees here first'
+  // a sawmill stands by its stream in the woods, where the logs and the water both are
+  const woodland = def.terrain?.includes('forest') || (def.riverWoods && cell.riverTo !== -1)
+  if (hasTrees(land) && !woodland) return def.riverWoods ? 'Fell the trees here first, or build it where a river runs through the woods' : 'Fell the trees here first'
   if (MOUNTAIN_TERRAIN.includes(terr) && !def.mountain) return 'Too steep: only mines and quarries go on a mountain'
   if (terr === 'swamp' && !def.terrain?.includes('swamp')) return 'Too boggy to build on'
   if (def.terrain && !def.terrain.includes(terr)) return `${def.name} needs ${def.terrain.join('/')}`
@@ -1901,7 +1902,7 @@ export const workable = (b: { type: BuildingId }) => {
   return !def.crop && !!(def.produces || def.mine || def.smelts || def.recipes)
 }
 
-/** A sawmill beside a river makes this many times the planks. */
+/** A sawmill beside a river saws this many times the timber in a shift (same planks per log). */
 export const RIVER_SAW = 3
 
 /** Is there a river on this hex or one next to it? */
@@ -1999,6 +2000,9 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   // ground picked clean of stone grows more
   if (def.crop && at >= DEPLETION_FROM) { const c = 1 + CLEARED_FIELD_BONUS * (1 - stonyness(world, s, i)); mul('Stone picked off the field', c); k *= c }
   if (k <= 0) return made
+  // a mill by running water has a wheel to turn its saw: the same crew saws three times the timber
+  // in a shift (each log still makes the same planks)
+  if (b.type === 'sawmill' && riverBeside(world, b.col, b.row)) { mul('Water wheel: saws faster', RIVER_SAW); k *= RIVER_SAW }
   if (def.consumes) {
     // limited by inputs on hand
     let avail = 1
@@ -2017,8 +2021,6 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
     mul('Game within two hexes', r)
     out = { ...yields, game: yields.game * r, ...(yields.leather ? { leather: yields.leather * r } : {}) }
   }
-  // a mill by running water has a wheel to turn its saw: three times the planks from the same timber
-  if (b.type === 'sawmill' && out.planks && riverBeside(world, b.col, b.row)) { out = { ...out, planks: out.planks * RIVER_SAW }; why('Water wheel', `planks ×${RIVER_SAW}`) }
   why('All together', times(k))
   addGoods(v, out, k)
   note(out, k)

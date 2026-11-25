@@ -5,6 +5,7 @@ import { FAMILY_WORLD, familyPreviewUrl, SANDBOX_WORLD, worldUrl } from './app/w
 import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
 import { Caravans } from './ui/Caravans'
+import { Season } from './ui/Season'
 import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { loadHouseArt } from './render/houseart'
@@ -136,6 +137,7 @@ function Main({ game }: { game: Game }) {
   const [showAccount, setShowAccount] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showCaravans, setShowCaravans] = useState(false)
+  const [showSeason, setShowSeason] = useState(false)
   const [splitting, setSplitting] = useState<string | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   // one-off messages: from startup (e.g. accepting a parent link), or an action the server refused
@@ -257,7 +259,7 @@ function Main({ game }: { game: Game }) {
 
       <div className="topbar">
         <span className="chip title">QUEX</span>
-        <span className="chip">{SEASON_ICON[season]} {season} · wk {Math.min(week, SEASON_WEEKS)}/{SEASON_WEEKS}</span>
+        <button className="chip" onClick={() => setShowSeason(true)} title="How long the world has left">{SEASON_ICON[season]} {season} · wk {Math.min(week, SEASON_WEEKS)}/{SEASON_WEEKS}</button>
         {p && <span className="chip score"><Icon name="star" size={16} /> <b>{score}</b>/100</span>}
         {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
         <span className="spacer" />
@@ -360,6 +362,7 @@ function Main({ game }: { game: Game }) {
       {showAccount && <Account game={game} onClose={() => setShowAccount(false)} notify={notify} />}
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {showCaravans && <Caravans game={game} onClose={() => setShowCaravans(false)} />}
+      {showSeason && <Season game={game} onClose={() => setShowSeason(false)} />}
       {mapError && (
         <div className="modal"><div className="card">
           <h2 style={{ marginTop: 0 }}>The map didn't load</h2>
@@ -386,6 +389,17 @@ function Main({ game }: { game: Game }) {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {game.alert && (
+        <div className="confirm-scrim" role="alertdialog" aria-modal="true" aria-label="Your last action didn't take">
+          <div className="card confirm">
+            <h2>Your last action didn't take</h2>
+            <p>{game.alert}</p>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn primary" onClick={() => { game.alert = null; game.poke() }}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

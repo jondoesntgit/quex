@@ -33,6 +33,8 @@ export interface EventStore {
   outbox?(): GameEvent[]
   keep?(snap: Snapshot): void
   onOnline?: () => void
+  /** the last send couldn't reach the server */
+  offline?: boolean
   /** private task names synced to the owner's account (online only) */
   loadLabels?(playerIds: string[]): Promise<{ player_id: string; date: string; slot: number; text: string }[]>
   saveLabel?(playerId: string, date: string, slot: number, text: string): Promise<void>
@@ -148,8 +150,10 @@ export class Game {
     const snap = await this.store.snapshot!()
     this.base = snap.state
     this.n = snap.n
-    const sent = new Set(this.store.outbox?.().map((e) => e.id))
-    this.pending = this.pending.filter((e) => sent.has(e.id))
+    // keep showing what's still to send (queued here, or offline); one already on
+    // its way may be in this state, so it waits for its answer
+    const keep = new Set([...(this.store.outbox?.() ?? []).map((e) => e.id), ...this.unsent])
+    this.pending = this.pending.filter((e) => keep.has(e.id))
     this.show()
   }
 
@@ -165,28 +169,48 @@ export class Game {
     this.show()
   }
 
+  /** Sends go one at a time, in the order they were made: the server checks each
+   *  against the state the ones before it left. */
+  private chain: Promise<void> = Promise.resolve()
+  private enqueue(job: () => Promise<void>): Promise<void> {
+    this.chain = this.chain.then(job).catch((e) => console.warn('send', e))
+    return this.chain
+  }
+  /** Resolves once everything dispatched so far has had the server's answer (or been queued). */
+  settled(): Promise<void> { return this.chain }
+
+  private retry: ReturnType<typeof setTimeout> | null = null
+  /** dispatched, waiting their turn to send */
+  private unsent = new Set<string>()
   private async send(ev: GameEvent) {
+    this.unsent.delete(ev.id)
+    const wasOffline = !!this.store.offline
     const r = await this.store.send!(ev)
     if (r.status === 'ok') this.confirmed(r.event, r.n)
     else if (r.status === 'refused') {
       this.pending = this.pending.filter((e) => e.id !== ev.id)
       // a nightly tick someone else already did is no news
-      if (ev.t !== 'tick') this.flash = `That didn't go through: ${r.error}`
+      if (ev.t !== 'tick') this.alert = `The server turned it down: ${r.error}. Your goods and actions are as they were.`
       this.show()
+    } else {
+      // kept on this device: say so once per spell offline, and keep trying
+      if (!wasOffline && ev.t !== 'tick') {
+        this.alert = "It couldn't reach the server: check your internet connection. It's kept on this device and will be sent when you're back online."
+        this.emit()
+      }
+      if (!this.retry) this.retry = setTimeout(() => { this.retry = null; void this.sendOutbox() }, 20_000)
     }
   }
 
   /** Send what was done offline, oldest first. */
-  private sending = false
-  async sendOutbox() {
-    if (this.sending || !this.store.outbox) return
-    this.sending = true
-    try {
+  sendOutbox(): Promise<void> {
+    return this.enqueue(async () => {
+      if (!this.store.outbox) return
       for (const ev of this.store.outbox()) {
         await this.send(ev)
         if (this.store.outbox().some((e) => e.id === ev.id)) break // still offline
       }
-    } finally { this.sending = false }
+    })
   }
 
   async init() {
@@ -246,10 +270,12 @@ export class Game {
   async dispatch(ev: GameEvent) {
     if (this.served) {
       // show it now; the server's answer replaces it
+      // show it now, and send it in the background (see settled); the server's answer replaces it
       this.pending.push(ev)
       apply(this.state, this.world, ev)
       this.emit()
-      await this.send(ev)
+      this.unsent.add(ev.id)
+      void this.enqueue(() => this.send(ev))
       return
     }
     this.events.push(ev)
@@ -323,6 +349,8 @@ export class Game {
   access: Access | null = null
   /** a message to show once the game opens */
   flash: string | null = null
+  /** an action that didn't reach the server or was refused: shown as a pop-up */
+  alert: string | null = null
   setAccess(a: Access | null) { this.access = a; this.emit() }
 
   /** Looking around without an account: read-only. */

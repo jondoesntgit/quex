@@ -147,9 +147,15 @@ describe('a world the server holds', async () => {
     await g.init()
     srv.hold = true
     const sending = g.dispatch(join('ann', 0))
+    expect(g.state.players.ann).toBeTruthy() // shown at once, before the server answers
+    let answered = false
+    void g.settled().then(() => { answered = true })
+    await sending
+    expect(answered).toBe(false) // dispatch doesn't wait for the server
     expect(g.state.players.ann).toBeTruthy() // shown while on its way
     release()
     await sending
+    await g.settled()
     expect(g.state.players.ann).toBeTruthy()
     expect(g.state).toEqual(srv.state)
   })
@@ -173,7 +179,8 @@ describe('a world the server holds', async () => {
     await g.init()
     await g.dispatch(join('ann', 0))
     await g.dispatch({ ...join('ann', 1), id: 'again' })
-    expect(g.flash).toMatch(/Already joined/)
+    await g.settled()
+    expect(g.alert).toMatch(/Already joined/)
     expect(g.state.villages.v_ann.col).toBe(site()[0].col)
   })
 
@@ -182,6 +189,8 @@ describe('a world the server holds', async () => {
     await g.init()
     srv.offline = true
     await g.dispatch(join('ann', 0))
+    await g.settled()
+    expect(g.alert).toMatch(/internet connection/)
     expect(g.state.players.ann).toBeTruthy()
     expect(srv.state.players.ann).toBeUndefined()
     srv.offline = false

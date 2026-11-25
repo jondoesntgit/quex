@@ -39,12 +39,13 @@ export const COPPER_PER_SILVER = 10
 /** What one unit of each good weighs, in pounds. Bulk goods (timber, stone, clay, bricks, ore) come in
  *  wagon loads of WAGON_LB. Food comes in units worth FOOD[g].value rations, at the weight a ration of it
  *  really has (grain 2 lb, bread 1.5, fresh fish 4, cheese 1.6, berries 5...). Metals are counted in
- *  ingots (copper, iron, bronze, steel 50 lb; tin 25; silver 12). Cheese and cured meat are counted in rations, and salt in pinches (one a ration). */
+ *  ingots (copper, iron, bronze, steel 50 lb; tin 25; silver 12). Planks are seasoned and squared, with no bark,
+ *  offcuts or sap: half the weight of the green logs they were sawn from, so they travel twice as far a wagon. Cheese and cured meat are counted in rations, and salt in pinches (one a ration). */
 export const WAGON_LB = 1000
 export const WEIGHT: Record<Good, number> = {
   grain: 20, fish: 40, timber: 1000, peat: 800, rice: 20, stone: 1000, clay: 1000, berries: 40, game: 30, wool: 400, herbs: 100, worts: 30, turnips: 50, salt: 0.05,
   copper_ore: 1000, chalcopyrite: 1000, limonite: 1000, iron_ore: 1000, magnetite: 1000, silver_ore: 1000, tin: 25,
-  bread: 22, smoked_fish: 18, cheese: 1.6, milk: 3, cured_meat: 1.2, biscuit: 12, dried_peas: 15, honey: 14, bricks: 1000, charcoal: 500, planks: 800, leather: 200, cloth: 200,
+  bread: 22, smoked_fish: 18, cheese: 1.6, milk: 3, cured_meat: 1.2, biscuit: 12, dried_peas: 15, honey: 14, bricks: 1000, charcoal: 500, planks: 500, leather: 200, cloth: 200,
   copper: 50, iron: 50, bronze: 50, steel: 50, silver: 12,
   relic: 10, dragon_scale: 50,
   saltpetre: 200, sulfur: 200, gunpowder: 200, cannonballs: 1000, musket: 20, cannon: 1500, ram: 800, siege_tower: 4000,

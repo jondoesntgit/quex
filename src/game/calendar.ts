@@ -46,3 +46,13 @@ export const SEASON_ICON: Record<WeekSeason, string> = { spring: '🌱', summer:
 
 /** Crop multiplier for the weekday season. */
 export const CROP_SEASON: Record<WeekSeason, number> = { spring: 0.7, summer: 1.1, autumn: 1.4, winter: 0 }
+
+/** The world's last day: the Saturday ending its SEASON_WEEKS-th week. */
+export function seasonLastDay(seasonStart: ISODate): ISODate {
+  return addDays(seasonStart, SEASON_WEEKS * 7 - 1)
+}
+
+/** Whole days of the world left after today (0 on its last day; negative once it's over). */
+export function seasonDaysLeft(seasonStart: ISODate, today: ISODate): number {
+  return daysBetween(today, seasonLastDay(seasonStart))
+}

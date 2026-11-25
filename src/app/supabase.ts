@@ -199,7 +199,9 @@ export class SupabaseStore implements EventStore {
       this.setOffline(true)
       return { status: 'queued' }
     }
-    if (!navigator.onLine) return wait()
+    // keep the order: nothing jumps ahead of actions still waiting to be sent
+    const q = this.outbox(), at = q.findIndex((x) => x.id === ev.id)
+    if (!navigator.onLine || (at < 0 ? q.length > 0 : at > 0)) return wait()
     try {
       const r = await this.call<{ n: number; event: GameEvent }>({ op: 'act', world: this.world, event: ev })
       drop()

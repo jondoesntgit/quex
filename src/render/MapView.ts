@@ -695,6 +695,39 @@ export class MapView {
     // cliff corner between them; it sorts with the hex further back, so it
     // shows on a visible cliff face and hides behind a taller hex in front.
     // (not while choosing where to settle: the shaded land says where neighbours are)
+    //
+    // Where higher land or a mountain in front hides part of a border, a faint copy of
+    // that part is drawn over everything, so you can still see where your land runs.
+    // (A guess that something hides an edge when it doesn't only lays the faint copy
+    // over the line itself, so the test is generous: hex columns plus the tallest peaks.)
+    const ghost = new Graphics()
+    ghost.alpha = 0.4
+    ghost.zIndex = order.length * 4 + 10
+    const PEAK = 1.7 * W
+    const hidden = (x: number, y: number, behind: number, tier: number) => {
+      const c0 = Math.floor((x - W / 2) / (W * 0.75)) - 1
+      for (let c = c0; c <= c0 + 3; c++) {
+        if (c < 0 || c >= world.width) continue
+        const cxj = c * W * 0.75 + W / 2
+        if (Math.abs(x - cxj) > W / 2) continue
+        // hexes whose ground lies below this point (nearer the viewer), close enough to rise over it
+        const r0 = Math.max(0, Math.floor(y / (W / 2)) - 1)
+        for (let r = r0; r < Math.min(world.height, r0 + 2 + Math.ceil((6 * TP + PEAK) / (W / 2))); r++) {
+          const j = r * world.width + c
+          if (rank[j] <= behind || !revealed.has(j)) continue
+          const cj = world.cells[j]
+          const mtn = cj.feature === 'mountain' || cj.feature === 'mountain_snow'
+          if (!mtn && cj.tier <= tier) continue
+          const pj = hexToPixel(c, r, W)
+          const top = pj.y - cj.tier * TP - W / 4 - (mtn ? PEAK : 0)
+          if (y > top && y < pj.y + W / 4) return true
+        }
+      }
+      return false
+    }
+    /** an edge at this height, sorted at draw rank `behind`: does anything taller in front cover it? */
+    const ghostly = (x0: number, y0: number, x1: number, y1: number, behind: number, tier: number) =>
+      hidden(x0, y0, behind, tier) || hidden(x1, y1, behind, tier) || hidden((x0 + x1) / 2, (y0 + y1) / 2, behind, tier)
     for (const v of blocked.size ? [] : Object.values(state.villages)) {
       const own = state.players[v.playerId]?.colors?.border
       const color = own ? parseInt(own.slice(1), 16) : v.playerId === viewer ? 0xfff070 : 0xff90c0
@@ -717,8 +750,12 @@ export class MapView {
           const low = rank[ni] >= 0 && world.cells[ni].tier <= cell.tier && revealed.has(ni)
           const eg = new Graphics()
           dashed(eg, corners[a][0], corners[a][1], corners[b][0], corners[b][1], color)
-          eg.zIndex = z(low && rank[ni] > rank[i] ? ni : i, 0.5)
+          const sortBy = low && rank[ni] > rank[i] ? ni : i
+          eg.zIndex = z(sortBy, 0.5)
           this.cells.addChild(eg)
+          if (ghostly(corners[a][0], corners[a][1], corners[b][0], corners[b][1], rank[sortBy], cell.tier)) {
+            dashed(ghost, corners[a][0], corners[a][1], corners[b][0], corners[b][1], color)
+          }
           for (const c of [corners[a], corners[b]]) {
             const key = `${Math.round(c[0])},${Math.round(c[1] + lift)}`
             const list = ends.get(key)
@@ -738,8 +775,10 @@ export class MapView {
         dashed(cg, list[0].x, top, list[0].x, bottom, color)
         cg.zIndex = z(back.cell, 0.5)
         this.cells.addChild(cg)
+        if (ghostly(list[0].x, top, list[0].x, bottom, rank[back.cell], Math.min(...list.map((e) => world.cells[e.cell].tier)))) dashed(ghost, list[0].x, top, list[0].x, bottom, color)
       }
     }
+    this.cells.addChild(ghost)
     // selection and highlights stay on top of everything
     const g = new Graphics()
     // highlighted hexes (e.g. the spot chosen for a new village): gold wash + bold outline;

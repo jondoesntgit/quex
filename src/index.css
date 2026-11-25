@@ -83,6 +83,8 @@ input { -webkit-user-select: text; user-select: text; }
 .btn.big { background: var(--big); color: white; }
 .btn.medium { background: var(--medium); color: white; }
 .btn.small { background: var(--small); color: white; }
+/* no action left to pay for it: greyed, but it still opens to look at */
+.btn.cant { filter: saturate(0.15) brightness(0.95); opacity: 0.75; }
 .btn.ghost { background: transparent; box-shadow: none; border-color: transparent; }
 .btn.icon { width: 38px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
 

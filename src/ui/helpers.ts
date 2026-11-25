@@ -21,6 +21,11 @@ export interface Spendable { id: string; size: TaskSize; strength: number; tok: 
 /** Everything in the tray: whole tokens, then half-done ones paired with a
  *  half of the same size into wholes, then the unpaired halves (at most one per
  *  size), which can't be spent until another half of their size joins them. */
+/** Has the player a whole action (or two halves that make one) big enough for a task of this size? */
+export function canPay(p: Player, size: 'big' | 'medium' | 'small'): boolean {
+  return spendables(p).some((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[size])
+}
+
 export function spendables(p: Player): Spendable[] {
   const one = (t: Token): Spendable => ({ id: t.id, size: t.size, strength: t.strength, tok: t })
   const pair = (a: Token, b: Token): Spendable => ({ id: `${a.id}+${b.id}`, size: a.size, strength: Math.min(1, a.strength + b.strength), tok: a, tok2: b })

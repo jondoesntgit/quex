@@ -162,23 +162,47 @@ describe('building over a building', () => {
 })
 
 describe('sawmills', () => {
-  it('make three times the planks beside a river', async () => {
+  it('saw three times the timber in a shift beside a river, for the same planks per log', async () => {
     const { shift, riverBeside } = await import('./reducer')
     const s = setup()
     const v = s.villages.v_ann
     const land = world.cells.filter((c) => c.tier > 0)
     const wet = land.find((c) => riverBeside(world, c.col, c.row))!
     const dry = land.find((c) => !riverBeside(world, c.col, c.row))!
-    const planks = (c: { col: number; row: number }) => {
-      v.goods = { timber: 50 }
+    const saw = (c: { col: number; row: number }, timber: number) => {
+      v.goods = { timber }
       const b = { id: `sw${c.col}_${c.row}`, type: 'sawmill' as const, col: c.col, row: c.row, progress: 1 }
       v.buildings = [b]
       v.jobs = { [b.id]: 1000 }
-      return shift(s, world, v, b, 1, DAY, AT).planks ?? 0
+      const planks = shift(s, world, v, b, 1, DAY, AT).planks ?? 0
+      return { planks, used: timber - (v.goods.timber ?? 0) }
     }
-    const base = planks(dry)
-    expect(base).toBeGreaterThan(0)
-    expect(planks(wet)).toBeCloseTo(base * 3, 5)
+    const d = saw(dry, 50), w = saw(wet, 50)
+    expect(d.planks).toBeGreaterThan(0)
+    expect(w.planks).toBeCloseTo(d.planks * 3, 5)
+    expect(w.used).toBeCloseTo(d.used * 3, 5)
+    expect(w.planks / w.used).toBeCloseTo(d.planks / d.used, 5)
+    // short of logs, the wheel can't make planks out of nothing
+    expect(saw(wet, d.used).planks).toBeCloseTo(d.planks, 5)
+  })
+  it('go up among the trees where a river runs through the woods, with no felling first', async () => {
+    const { buildSiteError, landAt } = await import('./reducer')
+    const { hasTrees } = await import('../world/land')
+    const { neighbours } = await import('../world/hex')
+    const s = setup()
+    const v = s.villages.v_ann
+    const woods = (river: boolean) => world.cells.find((c, i) => c.tier > 0 && (c.riverTo !== -1) === river && hasTrees(landAt(world, s, i))
+      && !['rock', 'snow', 'swamp'].includes(landAt(world, s, i).terrain))!
+    const at = (c: { col: number; row: number }, def = BUILDINGS.sawmill) => {
+      // move the village next door, so the hex is in its land
+      const [nc, nr] = neighbours(c.col, c.row).find(([a, b]) => a >= 0 && b >= 0 && a < world.width && b < world.height)!
+      v.col = nc; v.row = nr; v.city = []
+      return buildSiteError(world, s, v, def, c.col, c.row)
+    }
+    expect(at(woods(true))).toBeNull()
+    expect(at(woods(false))).toMatch(/Fell the trees/)
+    // nothing else gets to skip the felling
+    expect(at(woods(true), BUILDINGS.granary)).toMatch(/Fell the trees/)
   })
 })
 
