@@ -17,9 +17,11 @@ export interface ConfirmProps {
   no?: string
   onYes: () => void
   onNo: () => void
+  /** shown above the buttons (e.g. the actions the player has left) */
+  extra?: React.ReactNode
 }
 
-export function Confirm({ title, spends, gets, notes = [], warn, yes = 'Yes, do it', no = 'No', onYes, onNo }: ConfirmProps) {
+export function Confirm({ title, spends, gets, notes = [], warn, yes = 'Yes, do it', no = 'No', onYes, onNo, extra }: ConfirmProps) {
   // Escape is "no"; Enter is deliberately not "yes" (a held key shouldn't spend anything)
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onNo() }
@@ -46,6 +48,7 @@ export function Confirm({ title, spends, gets, notes = [], warn, yes = 'Yes, do 
         </div>
         {notes.map((n) => <p key={n} className="muted confirm-note">{n}</p>)}
         {warn && <p className="confirm-warn">{warn}</p>}
+        {extra}
         <div className="confirm-buttons">
           <button className="btn" onClick={onNo} autoFocus>{no}</button>
           <button className="btn primary" onClick={yesOnce}>{yes}</button>

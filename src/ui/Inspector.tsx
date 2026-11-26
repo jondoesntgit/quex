@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
-import { CARRY, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
+import { CARRY, fieldRain, WELCOME_DAYS, WELCOME_MORALE, welcomeOpen, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
@@ -19,7 +19,8 @@ import { outcome } from '../game/preview'
 import { CITY_RADIUS, HOMES, centreOf, findHome, findUpgrade, groundOf, hexAt, paveable, type HomeKind } from '../game/city'
 import { Confirm, type ConfirmProps } from './Confirm'
 import { useStep } from './Advisor'
-import { canPay, mixText, oreHint, shareSpot, tryAction } from './helpers'
+import { ActionStrip } from './ActionStrip'
+import { canPay, mixText, oreHint, shareSpot, spendables, tryAction } from './helpers'
 import { Icon } from './Icon'
 import { clockTime, span } from './Caravans'
 
@@ -41,14 +42,16 @@ const TERRAIN_NAME: Record<string, string> = {
   tundra: 'Tundra', snow: 'Snowfield',
 }
 
-export function Inspector({ game, p, col, row, tap, onClose, notify }: {
+export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: welcomeFirst }: {
   game: Game; p: Player; col: number; row: number; /** where on the map it was tapped (px, unlifted), so a home goes there */ tap?: { x: number; y: number }; onClose: () => void; notify: (s: string) => void
+  /** open straight on a welcoming caravan to the village here (from the log) */
+  welcome?: boolean
 }) {
   const { world, state } = game
   const i = cellIndex(world, col, row)
   const cell = world.cells[i]
   const known = state.revealed.includes(i)
-  const [mode, setMode] = useState<'main' | 'build' | 'gather' | 'caravan' | 'troops'>('main')
+  const [mode, setMode] = useState<'main' | 'build' | 'gather' | 'caravan' | 'troops' | 'welcome'>(welcomeFirst ? 'welcome' : 'main')
   // the yes/no window shown before anything is spent
   const [confirm, setConfirm] = useState<Omit<ConfirmProps, 'onNo'> | null>(null)
   const v = state.villages[p.villageId]
@@ -80,6 +83,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
 
   /** greyed out when there's no action to pay for it: still opens, to look at what it would take */
   const cant = (size: 'big' | 'medium' | 'small') => (canPay(p, size) ? '' : ' cant')
+  /** the build menu holds every size: grey it only with no whole action at all */
+  const cantAny = spendables(p).some((t) => t.strength >= 1) ? '' : ' cant'
 
   const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
     const r = tryAction(game, p, action, col, row, extra, need)
@@ -104,11 +109,11 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       : ASK_TITLE[action] ?? `${ACTIONS[action].name}?`
     setConfirm({ title: title ?? what, ...o, onYes: () => void run(action, extra, need) })
   }
-  const dialog = confirm && <Confirm {...confirm} onNo={() => setConfirm(null)} />
+  const dialog = confirm && <Confirm {...confirm} onNo={() => setConfirm(null)} extra={<ActionStrip game={game} p={p} readOnly />} />
 
   if (!known) {
     return (
-      <Shell onClose={onClose} title="Unexplored" onShare={share}>
+      <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title="Unexplored" onShare={share}>
         <p className="muted">Mist hides this hex.</p>
         <ActionButton game={game} p={p} action="scout" col={col} row={row} onRun={() => run('scout')} />
       </Shell>
@@ -139,7 +144,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     if (mine && !here && !village && !trees) workActs.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
     // dirt roads are dug by the road team (the plan above); by hand, only stone
-    if (cell.tier > 0 && !v.paved?.includes(i)) workActs.push('pave')
+    if (cell.tier > 0 && !v.paved?.includes(i) && !inCity) workActs.push('pave')
     if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) workActs.push('well')
     if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
     if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
@@ -160,7 +165,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
     const ownHere = !!here && here.village.id === v.id
     const bldgs = mine && !village && (!here || ownHere) && !inCity
     return (
-      <Shell onClose={onClose} title={`Build on ${TERRAIN_NAME[terr]}`}>
+      <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title={`Build on ${TERRAIN_NAME[terr]}`}>
         <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
         <p className="muted" style={{ margin: '4px 0' }}>Pick something to see what it costs and what you get. Nothing is spent until you say yes.</p>
         {(inCity || (cobbleOk && !village)) && (
@@ -215,7 +220,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
 
   if (mode === 'gather') {
     return (
-      <Shell onClose={onClose} title={`Gather on ${TERRAIN_NAME[terr]}`}>
+      <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title={`Gather on ${TERRAIN_NAME[terr]}`}>
         <button className="btn ghost" onClick={() => setMode('main')}>← back</button>
         <p className="muted" style={{ margin: '4px 0' }}>What do you want to gather here? You'll see what you'd get, and what it uses up, before anything is spent.</p>
         <div className="actions">
@@ -233,9 +238,12 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
   if (mode === 'caravan' && village) {
     return <CaravanForm game={game} p={p} to={village.id} onBack={() => setMode('main')} onSend={(goods, crew, food) => run('caravan', { to: village.id, goods, crew, food })} />
   }
+  if (mode === 'welcome' && village && welcomeOpen(state, v, village, game.now().toISOString())) {
+    return <CaravanForm game={game} p={p} to={village.id} welcome onBack={() => setMode('main')} onSend={(goods, crew, food) => run('caravan', { to: village.id, goods, crew, food, welcome: true })} />
+  }
 
   return (
-    <Shell onClose={onClose} title={title} onShare={share}>
+    <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title={title} onShare={share}>
       <p className="muted" style={{ margin: 0 }}>{sub}</p>
       {!here && !village && land.resource && DEPOSIT_NOTE[land.resource] && isDeposit(land.resource, land.feature) && (
         <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>
@@ -275,9 +283,9 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
       )}
       {here && here.village.id === v.id && here.building.progress >= 1 && BUILDINGS[here.building.type].harvest && (
         <p className="muted" style={{ margin: '4px 0' }}>
-          🌾 {season === 'spring' ? `Sowing now: ${Math.round((here.building.sown ?? 1) * 100)}% sown so far (half a crew sows over Sunday and Monday).`
-            : season === 'summer' ? `${Math.round((here.building.sown ?? 1) * 100)}% sown. Nothing to do until the harvest.`
-            : season === 'autumn' ? `Harvest: a full crew reaps it Thursday and Friday. It was ${Math.round((here.building.sown ?? 1) * 100)}% sown (unsown ground still gives a quarter).`
+          🌾 {season === 'spring' ? `Sowing now: ${Math.round((here.building.sown ?? 1) * 100)}% sown so far (half a crew sows over Sunday and Monday; seed sown on a day of the rain habit comes up 20% more).`
+            : season === 'summer' ? `${Math.round((here.building.sown ?? 1) * 100)}% sown${fieldRain(here.building) > 1 ? `, ${Math.round((fieldRain(here.building) - 1) * 100)}% more for the spring rain` : ''}. Nothing to do until the harvest.`
+            : season === 'autumn' ? `Harvest: a full crew reaps it Thursday and Friday; the rain habit on a reaping day reaps 20% more. It was ${Math.round((here.building.sown ?? 1) * 100)}% sown (unsown ground still gives a quarter)${fieldRain(here.building) > 1 ? `, ${Math.round((fieldRain(here.building) - 1) * 100)}% more for the spring rain` : ''}.`
             : 'Resting for the winter. It is sown again in spring.'}
         </p>
       )}
@@ -311,8 +319,11 @@ export function Inspector({ game, p, col, row, tap, onClose, notify }: {
         {mine && !village && here && here.building.progress < 1
           ? <button className={`btn medium action${cant(BUILDINGS[here.building.type].size)}`} onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
           : (cell.tier > 0 || terr === 'shallow') && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
-            && <button className={`btn medium action${cant('medium')}`} onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
+            && <button className={`btn medium action${cantAny}`} onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
+        {village && village.id !== v.id && welcomeOpen(state, v, village, game.now().toISOString()) && (
+          <button className="btn small action" onClick={() => setMode('welcome')}>Send a welcoming caravan…<small>they're new here: no action needed, and it lifts your village's morale (+{WELCOME_MORALE})</small></button>
+        )}
         {acts.map((a) => a === 'caravan'
           ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action${tierOf(village!) === 'free' ? '' : cant(tierOf(village!) === 'medium' ? 'medium' : 'small')}`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
           : a === 'troops'
@@ -409,12 +420,13 @@ function Reserves({ left, wild, game: animals, building }: {
   return <p className="muted" style={{ margin: '4px 0' }}>⛰ {lines.join(' · ')}</p>
 }
 
-function Shell({ title, children, onClose, onShare }: { title: string; children: React.ReactNode; onClose: () => void; onShare?: () => void }) {
+function Shell({ title, children, onClose, onShare, strip }: { title: string; children: React.ReactNode; onClose: () => void; onShare?: () => void; strip?: React.ReactNode }) {
   return (
     <div className="inspector" style={{ bottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
       <button className="btn ghost close" onClick={onClose} aria-label="close">✕</button>
       {onShare && <button className="btn ghost share" onClick={onShare} title="Send someone a link to this hex">🔗 Share</button>}
       <h2>{title}</h2>
+      {strip}
       {children}
     </div>
   )
@@ -552,7 +564,7 @@ function TroopsForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to
     </div>
   )
   return (
-    <Shell onClose={onBack} title={`Troops to ${host.name}`}>
+    <Shell strip={<ActionStrip game={game} p={p} />} onClose={onBack} title={`Troops to ${host.name}`}>
       <button className="btn ghost" onClick={onBack}>← back</button>
       <p className="muted">They stay your people (counted at home as away, with houses kept for them), but they can't work while they're gone. They wait at {host.name}'s gate until it takes them in (or turns them back). Once on the walls they're its to command, on guard and on expeditions, and they eat only the food you send. When it runs out they walk home, with their weapons and armour.</p>
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -577,7 +589,7 @@ function TroopsForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to
   )
 }
 
-function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to: string; onBack: () => void; onSend: (g: Record<string, number>, crew: number, food: Record<string, number>) => void }) {
+function CaravanForm({ game, p, to, welcome, onBack, onSend }: { game: Game; p: Player; to: string; welcome?: boolean; onBack: () => void; onSend: (g: Record<string, number>, crew: number, food: Record<string, number>) => void }) {
   const v = game.state.villages[p.villageId]
   const dest = game.state.villages[to]
   const free = spare(v, weekSeason(game.today(p.id)))
@@ -606,10 +618,11 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
     </span>
   )
   return (
-    <Shell onClose={onBack} title={`Caravan to ${dest.name}`}>
+    <Shell strip={<ActionStrip game={game} p={p} />} onClose={onBack} title={welcome ? `Welcome ${dest.name}` : `Caravan to ${dest.name}`}>
       <button className="btn ghost" onClick={onBack}>← back</button>
+      {welcome && <p className="deal-yes" style={{ margin: '4px 0' }}>A welcoming caravan for new neighbours: it needs no action, and sending it lifts your village's morale by {WELCOME_MORALE}. One to each new village, in its first {WELCOME_DAYS} days.</p>}
       <p className="muted" style={{ margin: '4px 0' }}>
-        {tier === 'free'
+        {welcome ? '' : tier === 'free'
           ? (carry.animals === 'carts' ? (v.oxenBack && v.oxenBack > now.toISOString() ? `Paved road all the way, but your oxen are on the road home until ${clockTime(new Date(v.oxenBack), now)}: it takes a small task till then.` : 'Paved road all the way: your ox carts go without a task, then walk home before they go again.') : 'Paved road all the way: with ox carts (a Cart shed) it would cost no task at all. For now, a small task.')
           : tier === 'small' ? 'A road connects you: a small task. Pave it all the way and ox carts go for free.' : 'No road connects you: a medium task, and a slow trek. A road makes it a small task and three times as fast.'}
         {' '}{pct(carry.road)} of the way is on roads{carry.paved > 0 ? `, ${pct(carry.paved)} paved` : ''}.
@@ -656,7 +669,7 @@ function CaravanForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; t
       <p className="muted" style={{ margin: '2px 0' }}>Load: {Math.round(weight * 10) / 10} / {carry.cap} weight, provisions included. Gifts of food or rare goods cheer them up.</p>
       {refineTips(load).map((t) => <p key={t} className="muted" style={{ margin: '2px 0' }}>💡 {t}</p>)}
       <button className="btn primary" disabled={!weightOf(load) || crew < 1 || crew > free || packed + 1e-9 < need} style={{ marginTop: 4 }}
-        onClick={() => onSend(Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)), crew, Object.fromEntries(Object.entries(food).filter(([, n]) => n > 0)))}>Send caravan</button>
+        onClick={() => onSend(Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)), crew, Object.fromEntries(Object.entries(food).filter(([, n]) => n > 0)))}>{welcome ? 'Send the welcome' : 'Send caravan'}</button>
     </Shell>
   )
 }

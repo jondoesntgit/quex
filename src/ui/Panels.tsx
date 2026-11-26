@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { rationsOf } from '../game/units'
+import { rationsOf, shown, shownStock, stepFor } from '../game/units'
 import { BUILDINGS, FOOD, GOOD_LABEL, ROAD_TEAM, TOOLS, isBulk, HABIT_PRESETS, MAX_HABIT_SLOTS, ORES, PERFECT_DAYS_PER_SLOT, PLAN_SIZES, SIZE_POINTS, type Good } from '../game/data'
-import { GROW_MORALE, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight, winterOutlook, type Source } from '../game/reducer'
+import { GROW_MORALE, WELCOME_DAYS, welcomeOpen, validate, dayScore, defence, fmtGoods, foodStock, logText, palisades, popCap, storageCap, tonight, winterOutlook, type Source } from '../game/reducer'
 import { influx } from '../game/immigrants'
 import { LastNightButton, dayName } from './NightReport'
 import { hands, jobs, needOf, people, spare, storesFull } from '../game/workers'
@@ -317,7 +317,8 @@ function LabelInput({ game, pid, date, slot, placeholder, readOnly }: { game: Ga
 export function VillagePanel({ game, p, onAbandon, notify }: { game: Game; p: Player; onAbandon: () => void; notify: (s: string) => void }) {
   const v = game.state.villages[p.villageId]
   const [confirm, setConfirm] = useState(false)
-  const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) > 0.05) as [Good, number][]
+  // what's shown as 0 is used up (see shownStock)
+  const goods = Object.entries(v.goods).filter(([g, n]) => shownStock(g as Good, n ?? 0) > 0) as [Good, number][]
   const outlook = winterOutlook(game.state, game.world, p, game.now())
   return (
     <div>
@@ -441,15 +442,89 @@ export function PartyPanel({ game, p, onAddFriend, onManage }: { game: Game; p: 
   )
 }
 
-export function LogPanel({ game, p }: { game: Game; p: Player }) {
-  const entries = game.state.log.filter((e) => !e.text.startsWith('(ignored') && (e.playerId === p.id || e.kind !== 'info')).slice(-60).reverse()
+/** When a log line happened, on this device's clock: "Nov 24, 3:40 PM". */
+export const logWhen = (at: string) =>
+  new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+/** Who a log line is about, unless the line already says (it names them or their village). */
+export function logWho(s: Game['state'], playerId: string | null, text: string): string | null {
+  const o = playerId ? s.players[playerId] : null
+  if (!o) return null
+  const v = s.villages[o.villageId]
+  if (text.includes(o.name) || (v && text.includes(v.name))) return null
+  return o.name
+}
+
+const an = (x: string) => `${/^[aeiou]/i.test(x) ? 'an' : 'a'} ${x}`
+/** Log lines saved before they named who did what (2026-11-26), turned round to say so: "Abigail laid a dirt road." */
+const OLD_LINES: [RegExp, (n: string, m: RegExpMatchArray) => string][] = [
+  [/^A dirt road was laid\.$/, (n) => `${n} laid a dirt road.`],
+  [/^A paved road was laid\.$/, (n) => `${n} laid a paved road.`],
+  [/^A stretch of road was paved with stone\.$/, (n) => `${n} paved a stretch of road with stone.`],
+  [/^A (stone )?bridge was built over the river\.$/, (n, m) => `${n} built a ${m[1] ?? ''}bridge over the river.`],
+  [/^Cobblestone was laid: (.*)$/, (n, m) => `${n} laid cobblestone: ${m[1]}`],
+  [/^A (.+) went up in the city: (.*)$/, (n, m) => `${n} built ${an(m[1])} in the city: ${m[2]}`],
+  [/^A cottage was pulled down and a town house raised in its place: (.*)$/, (n, m) => `${n} pulled down a cottage and raised a town house in its place: ${m[1]}`],
+  [/^(.+) completed!$/, (n, m) => `${n} built ${an(m[1].toLowerCase())}!`],
+  [/^(.+) half-built\.$/, (n, m) => `${n} half-built ${an(m[1].toLowerCase())}.`],
+  [/^(.+) pulled down: (.*)$/, (n, m) => `${n} pulled down the ${m[1].toLowerCase()}: ${m[2]}`],
+  [/^A caravan of (\d+) set off for (.+)$/, (n, m) => `${n} sent a caravan of ${m[1]} to ${m[2]}`],
+  [/^Gathered (.*)$/, (n, m) => `${n} gathered ${m[1]}`],
+  [/^Cleared the trees: \+([\d.]+) timber\. (.*)$/, (n, m) => `${n} cleared the trees for ${m[1]} timber. ${m[2]}`],
+  [/^Trees felled: \+([\d.]+) timber\. (.*)$/, (n, m) => `${n} felled the trees for ${m[1]} timber. ${m[2]}`],
+  [/^Cut wood: \+([\d.]+) timber\. (.*)$/, (n, m) => `${n} cut ${m[1]} timber. ${m[2]}`],
+  [/^Cut peat: \+([\d.]+)\. (.*)$/, (n, m) => `${n} cut ${m[1]} peat. ${m[2].replace(' behind you', ' behind')}`],
+  [/^Cleared (\d.*)$/, (n, m) => `${n} cleared ${m[1]}`],
+  [/^Dug (.*)$/, (n, m) => `${n} dug ${m[1]}`],
+  [/^(Two s|S)aplings planted\. (.*)$/, (n, m) => `${n} planted ${m[1] === 'S' ? '' : 'two '}saplings. ${m[2]}`],
+  [/^A well was dug: (.*)$/, (n, m) => `${n} dug a well: ${m[1]}`],
+  [/^An outpost was founded\.$/, (n) => `${n} founded an outpost.`],
+  [/^A small camp was pitched\.$/, (n) => `${n} pitched a small camp.`],
+  [/^An extra shift at the (.+?): (.*)$/, (n, m) => `${n} worked an extra shift at the ${m[1]}: ${m[2]}`],
+  [/^Scouts mapped new land\.$/, (n) => `${n} scouted new land.`],
+  [/^Scouts spotted (.+) nearby!$/, (n, m) => `${n} sent scouts out, and they spotted ${m[1]} nearby!`],
+  [/^The road team (.*)$/, (n, m) => `${n}'s road team ${m[1]}`],
+]
+
+/** A log line as shown: names filled in, and an old line that didn't say who turned round to say it. */
+export function logLine(s: Game['state'], playerId: string | null, raw: string): string {
+  const text = logText(s, raw)
+  const name = logWho(s, playerId, text)
+  if (!name) return text
+  for (const [re, f] of OLD_LINES) { const m = text.match(re); if (m) return f(name, m) }
+  return `${name}: ${text}`
+}
+
+/** A line saying a player founded their village (the log keeps who, so this works for villages founded before welcomes). */
+const isFounding = (text: string) => text.includes('} founded a ')
+
+/** The world's story: what each player did and when, with a welcome to send to anyone new. */
+export function LogPanel({ game, p, onWelcome }: { game: Game; p: Player; onWelcome?: (villageId: string) => void }) {
+  const s = game.state
+  const entries = s.log.filter((e) => !e.text.startsWith('(ignored') && (e.playerId === p.id || e.kind !== 'info')).slice(-60).reverse()
+  const mine = s.villages[p.villageId]
+  const now = game.now().toISOString()
   return (
     <div className="log">
-      {entries.length ? entries.map((e, i) => (
-        <p key={i} className={e.kind}>
-          <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{logText(game.state, e.text)}
-        </p>
-      )) : <p className="muted">Nothing has happened yet.</p>}
+      {entries.length ? entries.map((e, i) => {
+        const text = logLine(s, e.playerId, e.text)
+        const founder = isFounding(e.text) && e.playerId ? s.players[e.playerId] : null
+        const theirs = founder ? s.villages[founder.villageId] : null
+        const greet = !!(theirs && mine && founder!.id !== p.id && welcomeOpen(s, mine, theirs, now))
+        return (
+          <p key={i} className={e.kind}>
+            <span className="muted">{logWhen(e.at)} · </span>{text}
+            {founder && founder.id !== p.id && <span className="new-player"> New player!</span>}
+            {greet && onWelcome && (
+              <>
+                {' '}<button className="btn small" onClick={() => onWelcome(theirs!.id)}
+                  title={`No action needed, for their first ${WELCOME_DAYS} days`}>Send a welcoming caravan</button>
+              </>
+            )}
+            {founder && founder.id !== p.id && !greet && mine?.greeted?.includes(theirs?.id ?? '') && <span className="muted"> (you welcomed them)</span>}
+          </p>
+        )
+      }) : <p className="muted">Nothing has happened yet.</p>}
     </div>
   )
 }
@@ -497,7 +572,7 @@ export function GuestPanel({ game }: { game: Game }) {
           <div className="log">
             {entries.length ? entries.map((e, i) => (
               <p key={i} className={e.kind}>
-                <span className="muted">{new Date(e.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} </span>{logText(game.state, e.text)}
+                <span className="muted">{logWhen(e.at)} · </span>{logLine(game.state, e.playerId, e.text)}
               </p>
             )) : <p className="muted">Nothing has happened yet.</p>}
           </div>
@@ -632,14 +707,14 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
   const net = new Map(t.rows.map((r) => [r.good, r]))
   // goods tonight will make that aren't in store yet
   const coming = t.rows.filter((r) => r.have <= 0.05 && r.net[1] > 0).map((r) => [r.good, 0] as [Good, number])
-  const fmt = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(Math.round(x * 10) / 10)}`
+  const fmt = (x: number, g: Good) => { const y = shown(x, FOOD[g] ? 1 : 0.1); return `${y > 0 ? '+' : y < 0 ? '−' : ''}${Math.abs(y)}` }
   const change = (g: Good) => {
     const r = net.get(g)
     if (!r) return null
     const [lo, hi] = r.net
     if (Math.abs(lo) < 0.05 && Math.abs(hi) < 0.05) return null
     const k = rationsOf(g, 1)
-    const text = lo === hi ? fmt(lo * k) : `${fmt(lo * k)} to ${fmt(hi * k)}`
+    const text = lo === hi ? fmt(lo * k, g) : `${fmt(lo * k, g)} to ${fmt(hi * k, g)}`
     return <small className={hi > 0 ? 'up' : 'down'}>{text}</small>
   }
   const all = [...goods, ...coming]
@@ -653,7 +728,7 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
       </p>
       {all.length ? (
         <div className="goods">{all.map(([g, n]) => (
-          <button key={g} className="good" title="How tonight's number comes about" onClick={() => setOpen(g)}><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{FOOD[g] ? Math.round(rationsOf(g, n)) : Math.round(n * 10) / 10}</b>{FOOD[g] ? <small className="muted"> rations</small> : isBulk(g) && <small className="muted"> loads</small>} {change(g)}</span></button>
+          <button key={g} className="good" title="How tonight's number comes about" onClick={() => setOpen(g)}><Icon name={g} title={GOOD_LABEL[g]} /> <span>{GOOD_LABEL[g]}<br /><b>{shownStock(g, n)}</b>{FOOD[g] ? <small className="muted"> rations</small> : isBulk(g) && <small className="muted"> loads</small>} {change(g)}</span></button>
         ))}</div>
       ) : <p className="muted">Nothing in store.</p>}
       {open && <Breakdown good={open} sources={t.sources} net={net.get(open)?.net ?? [0, 0]} score={t.score} onClose={() => setOpen(null)} />}
@@ -666,7 +741,8 @@ function Stores({ game, p, goods }: { game: Game; p: Player; goods: [Good, numbe
 function Breakdown({ good, sources, net, score, onClose }: { good: Good; sources: Source[]; net: [number, number]; score: number; onClose: () => void }) {
   const k = rationsOf(good, 1)
   const unit = FOOD[good] ? 'rations' : isBulk(good) ? 'loads' : ''
-  const fmt = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(Math.round(x * k * 100) / 100)}`
+  // tonight's changes, a step finer than the stores: tenths of a ration, hundredths of a load
+  const fmt = (x: number) => { const y = shown(x * k, stepFor(good) / 10); return `${y > 0 ? '+' : y < 0 ? '−' : ''}${Math.abs(y)}` }
   const lines = sources.filter((s) => s.delta[good] || s.makes?.includes(good))
   return createPortal(
     <div className="modal fixed" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>

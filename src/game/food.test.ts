@@ -52,9 +52,14 @@ describe('what a worker makes', () => {
   })
   it('the garden grows a different thing each season', () => {
     const g = BUILDINGS.garden
-    expect(producesIn(g, 'spring')).toMatchObject({ grain: 0.8, worts: 1.2 })
-    expect(producesIn(g, 'summer')).toMatchObject({ grain: 0.8, dried_peas: 0.7 })
-    expect(producesIn(g, 'autumn')).toMatchObject({ grain: 0.8, turnips: 0.65 })
+    expect(producesIn(g, 'spring')).toEqual({ worts: 2.53 })
+    expect(producesIn(g, 'summer')).toEqual({ dried_peas: 1.5 })
+    expect(producesIn(g, 'autumn')).toEqual({ turnips: 1.38 })
+    // vegetables only, and as many rations as before (when it was 8 of grain besides)
+    const rations = (x: Partial<Record<string, number>>) => Object.entries(x).reduce((a, [k, n]) => a + (n ?? 0) * (FOOD[k as keyof typeof FOOD]?.value ?? 0), 0)
+    expect(rations(producesIn(g, 'spring')!)).toBeCloseTo(8 + 1.2 * 6, 0)
+    expect(rations(producesIn(g, 'summer')!)).toBeCloseTo(8 + 0.7 * 10, 0)
+    expect(rations(producesIn(g, 'autumn')!)).toBeCloseTo(8 + 0.65 * 11, 0)
     expect(FOOD.worts?.keeps).toBe(false)
     expect(FOOD.dried_peas?.keeps).toBe(true)
     expect(FOOD.turnips?.keeps).toBe(true)

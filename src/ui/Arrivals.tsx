@@ -1,6 +1,7 @@
 /** The note shown when newcomers arrive: who they are, where from, and what they brought for the road.
  *  Shown once per arrival (the newest first, then any older ones not yet read); the log keeps a line. */
 import { useState } from 'react'
+import { shown } from '../game/amount'
 import { FOOD, GOOD_LABEL, HEADS, type Good } from '../game/data'
 import { TRAVEL_DAYS } from '../game/immigrants'
 import { BASE_CAP } from '../game/reducer'
@@ -23,7 +24,7 @@ export function arrivalPending(v: { id: string; arrivals?: Arrival[] }): boolean
   return (v.arrivals ?? []).some((x) => !seen.includes(x.id))
 }
 
-const amount = (n: number) => (Math.round(n * 10) / 10).toString()
+const amount = (n: number) => shown(n, 0.1).toString()
 
 export function Arrivals({ game, p }: { game: Game; p: Player }) {
   const v = game.state.villages[p.villageId]
@@ -46,7 +47,7 @@ export function Arrivals({ game, p }: { game: Game; p: Player }) {
           </p>
           <ul>
             <li>🌾 <b>Fields</b> are sown in spring (about a quarter of the village), left alone in summer, and reaped in autumn (about half the village for two days, if grain is all you eat). Unsown ground still gives a quarter. The village does this for you unless you take over its workers.</li>
-            <li>🥬 <b>Gardens</b> give grain and a vegetable each season: worts (kale and leeks) in spring, dried peas in summer, turnips in autumn. About 3 rations a worker.</li>
+            <li>🥬 <b>Gardens</b> give vegetables, a different one each season: worts (kale and leeks) in spring, peas in summer, turnips in autumn. About 3 rations a worker.</li>
             <li>🐟 <b>Fishing</b> works on rivers as well as the shore, and hunters range over the forest around their lodge, never taking the last of the game.</li>
             <li>🐑 <b>Sheep pens</b> keep a flock that grows by half each spring, as far as the pasture around a well or pen allows. Cheese and wool all year, mutton at the autumn cull, and grain to feed them in winter.</li>
           </ul>
@@ -71,7 +72,7 @@ export function Arrivals({ game, p }: { game: Game; p: Player }) {
         )}
         <h3 style={{ margin: '8px 0 4px', fontWeight: 400 }}>They brought food for {TRAVEL_DAYS} days</h3>
         <ul className="arrival-goods">
-          {goods.map(([g, n]) => <li key={g}><Icon name={g} size={32} /> <b>{FOOD[g] ? `${Math.round(n * FOOD[g]!.value)} rations of` : amount(n)}</b> {GOOD_LABEL[g].toLowerCase()}{g === 'grain' ? ' (seed grain: it will grow if sown)' : ''}</li>)}
+          {goods.map(([g, n]) => <li key={g}><Icon name={g} size={32} /> <b>{FOOD[g] ? `${shown(n * FOOD[g]!.value, 1)} rations of` : amount(n)}</b> {GOOD_LABEL[g].toLowerCase()}{g === 'grain' ? ' (seed grain: it will grow if sown)' : ''}</li>)}
         </ul>
         <p className="muted" style={{ margin: '4px 0 0' }}>So the stores aren't emptied the day they arrive. After that they eat with everyone else.</p>
         <div className="confirm-buttons"><button className="btn primary" onClick={done} autoFocus>Welcome them</button></div>

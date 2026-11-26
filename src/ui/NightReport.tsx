@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FOOD, GOOD_LABEL, isBulk, type Good, type Goods } from '../game/data'
-import { rationsOf } from '../game/units'
+import { rationsOf, shown } from '../game/units'
 import { weekSeason, SEASON_ICON } from '../game/calendar'
 import type { NightReport, Player, Village } from '../game/types'
 import type { Game } from '../app/store'
@@ -26,7 +26,7 @@ export const dayName = (date: string) => DAY[new Date(`${date}T00:00:00Z`).getUT
 /** An amount of a good as the player counts it: rations for food, loads for bulk goods. */
 function amount(g: Good, n: number) {
   const x = FOOD[g] ? rationsOf(g, n) : n
-  const r = Math.abs(x) >= 10 ? Math.round(x) : Math.round(x * 10) / 10
+  const r = shown(x, Math.abs(x) >= 10 ? 1 : 0.1)
   return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r)}`
 }
 const unit = (g: Good) => (FOOD[g] ? ' rations' : isBulk(g) ? ' loads' : '')

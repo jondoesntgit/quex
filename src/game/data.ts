@@ -212,7 +212,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   library: B({ id: 'library', name: 'Library', role: 'any', size: 'big', cost: { timber: 8, stone: 4 }, blurb: 'Powered by the reading habit: +5% output when you read.' }),
   market: B({ id: 'market', name: 'Market', role: 'any', size: 'big', cost: { timber: 6, stone: 6, copper: 2 }, morale: 2, blurb: 'Cheaper caravans and better NPC rates.' }),
   // farming
-  garden: B({ id: 'garden', name: 'Garden plots', role: 'farm', size: 'medium', cost: { timber: 1 }, terrain: ['grass', 'meadow', 'savannah'], produces: { grain: 0.8 }, seasonal: { spring: { worts: 1.2 }, summer: { dried_peas: 0.7 }, autumn: { turnips: 0.65 } }, crop: true, blurb: 'Tended all season, about 3 rations a worker. Grain, plus worts (kale and leeks) in spring, dried peas in summer, turnips in autumn. Peas and turnips keep through winter.' }),
+  garden: B({ id: 'garden', name: 'Garden plots', role: 'farm', size: 'medium', cost: { timber: 1 }, terrain: ['grass', 'meadow', 'savannah'], produces: {}, seasonal: { spring: { worts: 2.53 }, summer: { dried_peas: 1.5 }, autumn: { turnips: 1.38 } }, crop: true, blurb: 'Tended all season, about 3 rations a worker of vegetables: worts (kale and leeks) in spring, peas in summer, turnips in autumn. Peas and turnips keep through winter; grain comes from fields.' }),
   field: B({ id: 'field', name: 'Wheat field', role: 'farm', size: 'medium', cost: { timber: 2 }, terrain: ['grass', 'meadow'], produces: { grain: 7 }, harvest: true, labor: { spring: 0.5, summer: 0, autumn: 1 }, crop: true, blurb: 'Wheat and barley: sow it in spring (half a crew), leave it in summer, reap it in autumn (a full crew). Reaped well, 7 rations a worker, and half the village on the harvest feeds all of it. Unsown, it still gives a quarter in volunteer grain.' }),
   mill: B({ id: 'mill', name: 'Mill & bakery', role: 'farm', size: 'big', cost: { stone: 6, timber: 6 }, consumes: { grain: 3 }, produces: { bread: 2 }, blurb: 'Grain to flour to bread: 3 grain bake 2 loaves. No more food than the grain, but bread lifts morale and weighs half as much to carry.' }),
   orchard: B({ id: 'orchard', name: 'Orchard', role: 'farm', size: 'medium', cost: { timber: 3 }, terrain: ['grass', 'meadow', 'hills'], produces: { berries: 1.25 }, labor: { spring: 0.5 }, crop: true, blurb: 'Fruit for a varied diet.' }),
@@ -341,7 +341,7 @@ export const SIZE_RANK: Record<TaskSize, number> = { small: 1, medium: 2, big: 3
 
 export type HabitEffect = 'rain' | 'movement' | 'library' | 'morale' | 'trade' | 'health'
 export const HABIT_PRESETS: { id: string; name: string; effect: HabitEffect; blurb: string }[] = [
-  { id: 'water', name: 'Drink water', effect: 'rain', blurb: 'Rain: +20% crops' },
+  { id: 'water', name: 'Drink water', effect: 'rain', blurb: 'Rain: +20% garden crops; on a field, +20% to what is sown in spring rain and to what is reaped in autumn rain' },
   { id: 'walk', name: 'Walk / exercise', effect: 'movement', blurb: 'Units and caravans move faster' },
   { id: 'read', name: 'Read', effect: 'library', blurb: 'Library: +5% output' },
   { id: 'devotions', name: 'Devotions', effect: 'morale', blurb: 'Chapel: +morale' },
@@ -350,3 +350,10 @@ export const HABIT_PRESETS: { id: string; name: string; effect: HabitEffect; blu
 ]
 export const MAX_HABIT_SLOTS = 13
 export const PERFECT_DAYS_PER_SLOT = 7
+/** Perfect task days in a row: each adds this much to the night's work... */
+export const STREAK_STEP = 0.1
+/** ...up to this much (+100%). */
+export const STREAK_MAX = 1
+/** The rain habit on a field: what's sown in spring rain comes up this much more, and a rainy reaping day in autumn
+ *  reaps this much more (so 44% more with both). Summer rain does nothing for a field. */
+export const RAIN_BONUS = 0.2

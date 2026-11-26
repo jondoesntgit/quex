@@ -382,3 +382,12 @@ button.good:hover { background: rgba(0, 0, 0, 0.06); }
 .arrival-goods { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
 .arrival-goods li { display: flex; align-items: center; gap: 6px; }
 @media (max-width: 420px) { .arrival-goods { grid-template-columns: 1fr; } }
+
+/* the log: a new player's founding */
+.log .new-player { color: var(--good, #2e7d32); font-weight: bold; }
+.info-list { margin: 4px 0; padding-left: 18px; }
+.info-list li { margin: 4px 0; }
+/* the player's actions, small, inside the hex panel and the confirm window (always in sight while spending) */
+.action-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0 6px; font-size: 14px; }
+.inspector .action-strip { position: sticky; top: -10px; z-index: 1; background: var(--paper); padding: 4px 0; }
+.token.mini { font-size: 16px; }

@@ -49,6 +49,9 @@ export interface Player {
   habits: Habit[]
   habitSlots: number
   perfectStreak: number
+  /** perfect task days in a row (all of the day's tasks done): each one adds STREAK_STEP to the night's work, up to STREAK_MAX.
+   *  Saturdays and frozen days leave it as it is. Unset is 0. */
+  taskStreak?: number
   freezes: number
   days: Record<ISODate, DayRecord>
   tokens: Token[]
@@ -72,6 +75,8 @@ export interface Building {
   order?: string
   /** fields: how much of this year's crop was sown (0..1; unset counts as sown, see shift) */
   sown?: number
+  /** fields: how much of this year's sowing went in under the rain habit (0..sown; it comes up RAIN_BONUS more); reset with `sown` each winter */
+  sownWet?: number
   /** pens: the flock, head by age (index 0 = this year's lambs); unset is the starting flock (see herds.ts) */
   herd?: number[]
 }
@@ -120,6 +125,10 @@ export interface Village {
   arrivals?: Arrival[]
   /** the winter whose newcomers have already come */
   welcomed?: ISODate
+  /** when the village was founded (unset for villages founded before it was kept: see foundedAt) */
+  foundedAt?: string
+  /** new villages this one has sent a welcoming caravan to (one each) */
+  greeted?: string[]
   /** the last winter night the village went hungry (no newcomers the Sunday after) */
   hungryWinter?: ISODate
   /** last night's work, step by step, shown to the player in the morning (see tick) */
@@ -282,7 +291,7 @@ export type GameEvent =
   /** log progress toward a habit's daily goal (negative to correct a mistake) */
   | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
-  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods; /** a home built in the city (for an upgrade, the town house that replaces the cottage at `replace`) */ home?: Home; replace?: number })
+  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods; /** a welcoming caravan to a new village: no action needed (see welcomeOpen) */ welcome?: boolean; /** a home built in the city (for an upgrade, the town house that replaces the cottage at `replace`) */ home?: Home; replace?: number })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */

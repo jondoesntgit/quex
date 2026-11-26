@@ -79,6 +79,8 @@ describe('workers', () => {
     expect(send(HEADS, { grain: 3 })).toBeNull()
     expect(v.away).toBe(HEADS)
     expect(spare(v, SEASON)).toBe(2 * HEADS)
+    // on foot, with nothing paved between (a city's cobbles count as paved road)
+    v.city = []; s.villages.v_bob.city = []
     expect(caravanCarry(world, s, v, s.villages.v_bob, HEADS).cap).toBe(HEADS * CARRY_EACH)
   })
 })

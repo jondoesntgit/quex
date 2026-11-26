@@ -32,6 +32,8 @@ describe('caravans carry by weight', () => {
   it('porters, then mules, then carts (on roads), and paving carries more', () => {
     const s = setup()
     const ann = s.villages.v_ann, bob = s.villages.v_bob
+    // (no cobbled cities: their cobblestone is paved road, see below)
+    ann.city = []; bob.city = []
     expect(caravanCarry(world, s, ann, bob, 5 * HEADS)).toMatchObject({ animals: 'foot', cap: 1000 }) // 25 people, 40 lb each
     ann.buildings.push({ id: 'st', type: 'stable', col: ann.col, row: ann.row, progress: 1 })
     s.wells = { [cellIndex(world, ann.col, ann.row)]: true }
@@ -52,6 +54,7 @@ describe('caravans carry by weight', () => {
   it('refuses a load that is too heavy', () => {
     const s = setup()
     const ann = s.villages.v_ann
+    ann.city = []; s.villages.v_bob.city = []
     ann.goods = { wool: 20, cheese: 450 }
     // 25 people carry 1000 lb, provisions included: a long cross-country trip takes 135 rations of cheese (216 lb), leaving 784 lb for wool (400 lb a bale)
     expect(act(s, 'caravan', 0, 0, { to: 'v_bob', goods: { wool: 2 }, crew: 5 * HEADS, food: { cheese: 135 } }, 'medium')).toMatch(/Too heavy: .* 1000 lb/)
@@ -72,9 +75,11 @@ describe('caravans carry by weight', () => {
 /** a dry land hex beside Ann's village (no river: that would be a bridge) */
 function landBeside(s: GameState) {
   const ann = s.villages.v_ann
-  for (const [dc, dr] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-    const c = world.cells[cellIndex(world, ann.col + dc, ann.row + dr)]
-    if (c && c.tier > 0 && c.riverTo === -1) return c
+  // dry land near the village but off its cobbles (those are paved already)
+  for (const o of spiral(ann, 3)) {
+    const i = cellIndex(world, o.col, o.row)
+    const c = world.cells[i]
+    if (c && c.tier > 0 && c.riverTo === -1 && !ann.city?.includes(i) && !(o.col === ann.col && o.row === ann.row)) return c
   }
   throw new Error('no dry land beside Ann')
 }
@@ -219,5 +224,43 @@ describe('water for the herds', () => {
     apply(s, world, { t: 'resetHour', id: 'r', at: AT, playerId: 'ann', hour: 0 })
     expect(s.wells?.[i]).toBe(true)
     expect(s.wellsGiven).toBe(true)
+  })
+})
+
+describe('roads beyond your land', () => {
+  it('city cobblestone is paved road for caravans', () => {
+    const s = setup()
+    const ann = s.villages.v_ann, bob = s.villages.v_bob
+    ann.city = []; bob.city = []
+    const bare = caravanCarry(world, s, ann, bob, 5 * HEADS).cap
+    const way = line(ann, bob).map((o) => cellIndex(world, o.col, o.row))
+    ann.city = way.slice(0, Math.ceil(way.length / 2))
+    expect(route(world, s, ann, bob).paved).toBeGreaterThan(0)
+    expect(caravanCarry(world, s, ann, bob, 5 * HEADS).cap).toBeGreaterThan(bare)
+    // and paving it again is refused
+    const c = world.cells[ann.city[ann.city.length - 1]]
+    ann.goods = { stone: 5 }
+    expect(act(s, 'pave', c.col, c.row)).toMatch(/Already paved/)
+  })
+
+  it('a dirt road or a paved one can run on from your roads, a hex at a time, outside your land', async () => {
+    const { inTerritory, territory } = await import('./reducer')
+    const { distance, neighbours } = await import('../world/hex')
+    const s = setup()
+    const ann = s.villages.v_ann
+    const reach = Math.max(...territory(ann).map((t) => t.radius)) + 1
+    // a land hex just past where roads could reach before, and its neighbour one further out
+    const ring = spiral(ann, reach + 2).filter((o) => distance(o, ann) === reach + 1 && world.cells[cellIndex(world, o.col, o.row)]?.tier > 0)
+    const far = ring.find((o) => neighbours(o.col, o.row).some(([c, r]) => distance({ col: c, row: r }, ann) === reach && world.cells[cellIndex(world, c, r)]?.tier > 0))!
+    const [nc, nr] = neighbours(far.col, far.row).find(([c, r]) => distance({ col: c, row: r }, ann) === reach && world.cells[cellIndex(world, c, r)]?.tier > 0)!
+    s.revealed = [...new Set([...s.revealed, cellIndex(world, far.col, far.row), cellIndex(world, nc, nr)])]
+    expect(inTerritory(ann, far.col, far.row)).toBe(false)
+    // nothing of yours beside it yet
+    expect(act(s, 'road', far.col, far.row, {}, 'small')).toMatch(/join your land or one of your roads/)
+    // a road on the hex next to it (still within reach of your land), then on out
+    ann.roads.push(cellIndex(world, nc, nr))
+    const size = world.cells[cellIndex(world, far.col, far.row)].riverTo !== -1 ? 'medium' : 'small'
+    expect(act(s, 'road', far.col, far.row, {}, size)).toBeNull()
+    expect(ann.roads).toContain(cellIndex(world, far.col, far.row))
   })
 })

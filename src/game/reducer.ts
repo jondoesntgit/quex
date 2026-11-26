@@ -9,10 +9,11 @@ import { hasTrees, isOpen, isVillageSite, MOUNTAIN_TERRAIN, treeCount, type Land
 import type { Feature, Resource, Terrain, World } from '../world/types'
 import { addDays, CROP_SEASON, daysBetween, isSabbath, playerDate, weekSeason, weekday, type WeekSeason } from './calendar'
 import {
-  ACTIONS, BUILDINGS, FUEL_PEOPLE, ROAD_TEAM, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, STATION_RATE, stationOres,
+  ACTIONS, BUILDINGS, FUEL_PEOPLE, ROAD_TEAM, TOOLS, producesIn, toolMult, DEEPEN_COST, EAT, FOOD_SCALE, GOOD_LABEL, foodUnit, gatherAmount, SALT_PER_OLD, HEADS, type BuildingId, FOOD, GATHER, HABIT_PRESETS, MAX_DEPTH, MAX_HABIT_SLOTS, MINE_RATE, ORES, PERFECT_DAYS_PER_SLOT, RAIN_BONUS, STREAK_MAX, STREAK_STEP, STATION_RATE, stationOres,
   PLAN_SIZES, SIZE_POINTS, SIZE_RANK, type ActionKind, type BuildingDef, type Good, type Goods, type TaskSize,
 } from './data'
 import { barterProblem, noteTrade, weightOf } from './market'
+import { shown } from './amount'
 import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
 import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, hexAt, paveable, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
@@ -64,7 +65,7 @@ export function scoutsNew(world: World, s: GameState, col: number, row: number, 
 
 export function dayScore(d: DayRecord | undefined): number {
   if (!d) return 0
-  return d.slots.reduce((a, s) => a + SIZE_POINTS[s.size] * (s.status === 'full' ? 1 : s.status === 'half' ? 0.5 : 0), 0)
+  return (d.slots ?? []).reduce((a, s) => a + SIZE_POINTS[s.size] * (s.status === 'full' ? 1 : s.status === 'half' ? 0.5 : 0), 0)
 }
 
 export function cellIndex(world: World, col: number, row: number) {
@@ -510,7 +511,9 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
           if (seen.has(j)) return 'A hex is on the plan twice'
           seen.add(j)
           if (world.cells[j].tier === 0) return 'Roads need land'
-          if (!territory(v).some((t) => distance(t, h) <= t.radius + 1)) return 'Roads must start from your territory'
+          // the plan runs out from your land or your roads, one hex after another
+          if (!roadReach(world, v, h, seen)) return 'A road must join your land or one of your roads'
+          if (!s.revealed.includes(j) && !inTerritory(v, h.col, h.row)) return 'Scout there first'
           if (v.roads.includes(j)) return 'Already a road'
         }
       }
@@ -537,6 +540,9 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
   }
 }
 
+/** From this moment a task takes an action of exactly its size (before, a bigger one could pay for it). */
+export const EXACT_SIZE_FROM = '2026-11-26T02:00:00.000Z'
+
 /** The action an act spends: one token, or two half-done tokens of the same
  *  size merged into a whole action of that size. A string is why it can't. */
 /** The token id of an action that costs no task (a caravan on paved road the whole way). */
@@ -560,21 +566,32 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
   if (tok.strength < 1 && ev.at >= WEEKLY_TOKENS_FROM) return 'Finish the task to use this action'
   const dest = ev.action === 'caravan' && ev.to ? s.villages[ev.to] : null
   const tier = dest && dest.id !== v.id ? caravanTier(world, s, v, dest) : null
-  if (tok.id === FREE) {
+  if (ev.welcome) {
+    if (ev.action !== 'caravan' || !dest || !welcomeOpen(s, v, dest, ev.at)) return `A welcoming caravan goes once to each village, in its first ${WELCOME_DAYS} days`
+    if (tok.id !== FREE) return 'A welcoming caravan needs no action'
+  } else if (tok.id === FREE) {
     if (tier !== 'free') return 'Only a caravan on paved road the whole way goes without a task'
     if (!done(v).some((b) => b.type === 'cart_shed') || !done(v).some((b) => b.type === 'stable')) return 'A caravan without a task needs ox carts (a Mule stable and a Cart shed)'
     if (v.oxenBack && ev.at < v.oxenBack) return 'Your oxen are still on the road home'
   }
-  const need = tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(world, ev.action, ev.col, ev.row, ev.at, v)
+  const need = ev.welcome ? 'small' : tier ? (tier === 'medium' ? 'medium' : 'small') : actionSize(world, ev.action, ev.col, ev.row, ev.at, v)
+  // from EXACT_SIZE_FROM a task takes an action of its own size: a bigger one is split first, never spent by accident
+  const tooBig = (size: TaskSize) => ev.at >= EXACT_SIZE_FROM && tok.id !== FREE && SIZE_RANK[tok.size] > SIZE_RANK[size]
+    ? `That is a ${tok.size} action, and this takes a ${size} one: split it first (tap it under Your actions)` : null
   if (ev.action === 'build') {
     const def = ev.building && BUILDINGS[ev.building]
     if (!def) return 'Unknown building'
     if (SIZE_RANK[tok.size] < SIZE_RANK[def.size]) return `${def.name} needs a ${def.size} task`
+    const big = tooBig(def.size)
+    if (big) return big
   } else if (ev.action === 'home' || ev.action === 'upgrade') {
     const def = ev.action === 'upgrade' ? HOMES.townhouse : ev.home && HOMES[ev.home.kind]
     if (!def) return 'Pick a home to build'
     if (SIZE_RANK[tok.size] < SIZE_RANK[def.size]) return `A ${def.name} needs a ${def.size} task`
+    const big = tooBig(def.size)
+    if (big) return big
   } else if (SIZE_RANK[tok.size] < SIZE_RANK[need]) return ev.action === 'road' && need === 'medium' ? 'A bridge needs a medium task' : `${ACTIONS[ev.action].name} needs a ${need} task`
+  else if (tooBig(need)) return tooBig(need)
   if (ev.col < 0 || ev.row < 0 || ev.col >= world.width || ev.row >= world.height) return 'Off the map'
   const i = cellIndex(world, ev.col, ev.row)
   const cell = world.cells[i]
@@ -632,7 +649,8 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       return null
     case 'road':
       if (cell.tier === 0) return 'Roads need land'
-      if (!territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Roads must start from your territory'
+      if (!roadReach(world, v, ev)) return 'A road must join your land or one of your roads'
+      if (!revealed && !inTerritory(v, ev.col, ev.row)) return 'Scout there first'
       if (v.roads.includes(i)) return 'Already a road'
       return null
     case 'cobble': return cobbleError(world, s, v, i)
@@ -659,8 +677,9 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
     case 'pave':
       // a stone road on one of your roads, or straight onto open land (it is a road too)
       if (cell.tier === 0) return 'Roads need land'
-      if (!v.roads.includes(i) && !territory(v).some((t) => distance(t, ev) <= t.radius + 1)) return 'Roads must start from your territory'
-      if (v.paved?.includes(i)) return 'Already paved'
+      if (v.paved?.includes(i) || v.city?.includes(i)) return 'Already paved'
+      if (!v.roads.includes(i) && !roadReach(world, v, ev)) return 'A road must join your land or one of your roads'
+      if (!revealed && !inTerritory(v, ev.col, ev.row)) return 'Scout there first'
       if (!hasGoods(v, PAVE_COST)) return `Paving takes ${fmtGoods(PAVE_COST)}`
       return null
     case 'well':
@@ -796,7 +815,8 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
 export function fmtGoods(g: Goods, k = 1) {
   return Object.entries(g).map(([n, q]) => {
     const f = FOOD[n as Good]
-    return f ? `${Math.round((q ?? 0) * k * f.value)} rations of ${n.replace('_', ' ')}` : `${round2((q ?? 0) * k)} ${n.replace('_', ' ')}`
+    // rounded down, and never "0" for something there is some of (see shown)
+    return f ? `${shown((q ?? 0) * k * f.value, 1)} rations of ${n.replace('_', ' ')}` : `${shown((q ?? 0) * k, 0.01)} ${n.replace('_', ' ')}`
   }).join(', ')
 }
 
@@ -977,6 +997,10 @@ function syncGoal(d: DayRecord, h: { id: string; goal?: { target: number } }) {
  *  everywhere, even in old lines: {p:id|name-then} / {v:id|name-then}. */
 const P = (p: { id: string; name: string }) => `{p:${p.id}|${p.name}}`
 const V = (v: { id: string; name: string }) => `{v:${v.id}|${v.name}}`
+/** The player a village belongs to, for the log (its name if they've gone). */
+const who = (s: GameState, v: Village) => (s.players[v.playerId] ? P(s.players[v.playerId]) : v.name)
+/** "a lumber camp", "an orchard" */
+const an = (x: string) => `${/^[aeiou]/i.test(x) ? 'an' : 'a'} ${x}`
 
 /** A log line with today's names filled in (the name at the time if it's gone). */
 export function logText(s: GameState, text: string): string {
@@ -1125,7 +1149,7 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
     joined: playerDate(ev.at, ev.resetHour, ev.tz),
   }
   const v: Village = {
-    id: vid, playerId: p.id, name: `${ev.name}'s ${ev.role ? ROLE_TOWN[ev.role] : 'Village'}`, ...(ev.role ? { role: ev.role } : {}),
+    id: vid, playerId: p.id, foundedAt: ev.at, name: `${ev.name}'s ${ev.role ? ROLE_TOWN[ev.role] : 'Village'}`, ...(ev.role ? { role: ev.role } : {}),
     col: ev.site.col, row: ev.site.row, population: 5 * HEADS, morale: 60,
     goods: { grain: ev.at >= FOOD_FROM ? 18 : 12, timber: 8, stone: 3, berries: 4, ...(ev.at >= PURSE_FROM ? PURSE : {}) }, buildings: [], outposts: [], roads: [], planted: [], cleared: [],
     winterForecast: 'tight',
@@ -1218,7 +1242,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const radius = scoutRadius(v, k)
       reveal(world, s, ev, radius)
       const found = spiral(ev, radius).map((o) => s.lairs.find((l) => !l.cleared && l.col === o.col && l.row === o.row)).find(Boolean)
-      log(s, ev.at, p.id, found ? `Scouts spotted ${found.kind} nearby!` : 'Scouts mapped new land.', found ? 'monster' : 'info')
+      log(s, ev.at, p.id, found ? `${P(p)} sent scouts out, and they spotted ${found.kind} nearby!` : `${P(p)} scouted new land.`, found ? 'monster' : 'info')
       break
     }
     case 'gather': {
@@ -1230,7 +1254,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         if (g === 'game') n = hunt(world, s, i, playerDate(ev.at, p.resetHour, p.tz), n)
       }
       addGoods(v, { [g]: n })
-      log(s, ev.at, p.id, `Gathered ${n} ${g.replace('_', ' ')}.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} gathered ${n} ${g.replace('_', ' ')}.`, 'good')
       break
     }
     case 'pick': {
@@ -1239,26 +1263,26 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       addGoods(v, { stone: n })
       const rest = leftAt(world, s, i)!.surface
       const field = buildingAt(s, ev.col, ev.row)?.building
-      log(s, ev.at, p.id, `Cleared ${n} stone.${rest < 1 ? ' The ground is picked clean' + (field && BUILDINGS[field.type].crop ? ': the crops will grow better.' : '.') : ''}`, 'good')
+      log(s, ev.at, p.id, `${P(p)} cleared ${n} stone.${rest < 1 ? ' The ground is picked clean' + (field && BUILDINGS[field.type].crop ? ': the crops will grow better.' : '.') : ''}`, 'good')
       break
     }
     case 'rice': {
       const n = round2(3 * k)
       addGoods(v, { rice: n })
-      log(s, ev.at, p.id, `Gathered ${n} wild rice. The marsh reseeds itself.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} gathered ${n} wild rice. The marsh reseeds itself.`, 'good')
       break
     }
     case 'peat': {
       const n = round2(3 * k)
       addGoods(v, { peat: n })
-      log(s, ev.at, p.id, `Cut peat: +${n}. The bog fills in behind you.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} cut ${n} peat. The bog fills in behind.`, 'good')
       break
     }
     case 'chop': {
       // cutting wood from a forest takes branches and the odd tree, and the forest stays as it was
       const n = round2((land0.terrain === 'forest' ? 3 : 1) * k)
       addGoods(v, { timber: n })
-      log(s, ev.at, p.id, `Cut wood: +${n} timber. The forest is as thick as before.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} cut ${n} timber. The forest is as thick as before.`, 'good')
       break
     }
     case 'clear': {
@@ -1271,14 +1295,14 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         const old = woods[i]
         woods[i] = { n: 0, young: 0, max: old?.max ?? Math.max(1, treeCount(land0)), kind: old?.kind ?? (land0.feature?.startsWith('pine') ? 'pine' : 'oak'), since: ev.at.slice(0, 10) }
         addGoods(v, { timber: n })
-        log(s, ev.at, p.id, `Cleared the trees: +${n} timber. The land is open for good.`, 'good')
+        log(s, ev.at, p.id, `${P(p)} cleared the trees for ${n} timber. The land is open for good.`, 'good')
         break
       }
       const n = round2(wood * k)
       v.planted = v.planted.filter((x) => x.cell !== i)
       if (!v.cleared.includes(i)) v.cleared.push(i)
       addGoods(v, { timber: n })
-      log(s, ev.at, p.id, `Trees felled: +${n} timber. The land is open.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} felled the trees for ${n} timber. The land is open.`, 'good')
       break
     }
     case 'plant':
@@ -1286,12 +1310,12 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         const woods = (s.woods ??= {})
         const was = treeCount(world.cells[i])
         woods[i] = { n: 0, young: 2, max: Math.max(2, was), kind: world.cells[i].feature?.startsWith('pine') ? 'pine' : 'oak', since: ev.at.slice(0, 10) }
-        log(s, ev.at, p.id, 'Two saplings planted. They take root in winter, and the trees spread from there.', 'good')
+        log(s, ev.at, p.id, `${P(p)} planted two saplings. They take root in winter, and the trees spread from there.`, 'good')
         break
       }
       v.cleared = v.cleared.filter((x) => x !== i)
       v.planted.push({ cell: i, date: ev.at.slice(0, 10) })
-      log(s, ev.at, p.id, 'Saplings planted. A forest in three days.', 'good')
+      log(s, ev.at, p.id, `${P(p)} planted saplings. A forest in three days.`, 'good')
       break
     case 'cobble': {
       addGoods(v, COBBLE_COST, -1)
@@ -1299,21 +1323,21 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const felled = clearForCity(world, s, i, ev.at)
       const timber = round2(felled * (world.cells[i].terrain === 'forest' ? 3 : 1) * 0.5)
       if (timber > 0) addGoods(v, { timber })
-      log(s, ev.at, p.id, felled ? `Cobblestone was laid: another hex of the city. ${felled} tree${felled === 1 ? '' : 's'} came down for it (+${timber} timber).` : 'Cobblestone was laid: another hex of the city.', 'good')
+      log(s, ev.at, p.id, felled ? `${P(p)} laid cobblestone: another hex of the city. ${felled} tree${felled === 1 ? '' : 's'} came down for it (+${timber} timber).` : `${P(p)} laid cobblestone: another hex of the city.`, 'good')
       break
     }
     case 'home': {
       const h = ev.home!, def = HOMES[h.kind]
       addGoods(v, def.cost, -1)
       ;(v.homes ??= []).push({ kind: h.kind, key: h.key, x: h.x, y: h.y, side: h.side })
-      log(s, ev.at, p.id, `A ${def.name.toLowerCase()} went up in the city: room for ${def.cap} more villagers.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} built ${an(def.name.toLowerCase())} in the city: room for ${def.cap} more villagers.`, 'good')
       break
     }
     case 'upgrade': {
       const h = ev.home!
       addGoods(v, HOMES.townhouse.cost, -1)
       v.homes![ev.replace!] = { kind: 'townhouse', key: h.key, x: h.x, y: h.y, side: h.side }
-      log(s, ev.at, p.id, `A cottage was pulled down and a town house raised in its place: room for ${HOMES.townhouse.cap - HOMES.cottage.cap} more villagers.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} pulled down a cottage and raised a town house in its place: room for ${HOMES.townhouse.cap - HOMES.cottage.cap} more villagers.`, 'good')
       break
     }
     case 'pave':
@@ -1323,24 +1347,24 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       ;(v.paved ??= []).push(i)
       // the road team has nothing left to dig here
       if (v.roadPlan?.includes(i)) v.roadPlan = v.roadPlan.filter((j) => j !== i)
-      log(s, ev.at, p.id, fresh ? (world.cells[i].riverTo !== -1 ? 'A stone bridge was built over the river.' : 'A paved road was laid.') : 'A stretch of road was paved with stone.', 'good')
+      log(s, ev.at, p.id, fresh ? (world.cells[i].riverTo !== -1 ? `${P(p)} built a stone bridge over the river.` : `${P(p)} laid a paved road.`) : `${P(p)} paved a stretch of road with stone.`, 'good')
       break
     case 'well':
       addGoods(v, WELL_COST, -1)
       ;(s.wells ??= {})[i] = true
-      log(s, ev.at, p.id, 'A well was dug: fresh water for the herds nearby.', 'good')
+      log(s, ev.at, p.id, `${P(p)} dug a well: fresh water for the herds nearby.`, 'good')
       break
     case 'dig_clay': {
       const n = round2(Math.min(3 * k, clayLeft(world, s, i)!))
       const dug = (s.clayDug ??= {})
       dug[i] = round2((dug[i] ?? 0) + n)
       addGoods(v, { clay: n })
-      log(s, ev.at, p.id, `Dug ${n} clay.${(clayLeft(world, s, i) ?? 0) < 1 ? (clayRenews(world, i) ? ' Dug out until winter brings more.' : ' That pit is dug out for good.') : ''}`, 'good')
+      log(s, ev.at, p.id, `${P(p)} dug ${n} clay.${(clayLeft(world, s, i) ?? 0) < 1 ? (clayRenews(world, i) ? ' Dug out until winter brings more.' : ' That pit is dug out for good.') : ''}`, 'good')
       break
     }
     case 'road':
       v.roads.push(i)
-      log(s, ev.at, p.id, world.cells[i].riverTo !== -1 ? 'A bridge was built over the river.' : 'A dirt road was laid.', 'good')
+      log(s, ev.at, p.id, world.cells[i].riverTo !== -1 ? `${P(p)} built a bridge over the river.` : `${P(p)} laid a dirt road.`, 'good')
       break
     case 'build': {
       const def = BUILDINGS[ev.building!]
@@ -1350,14 +1374,14 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         const old = existing.building
         addGoods(v, refundOf(v, old, ev.at))
         v.buildings = v.buildings.filter((b) => b !== old)
-        log(s, ev.at, p.id, `${BUILDINGS[old.type].name} pulled down: ${fmtGoods(refundOf(v, old, ev.at)) || 'nothing'} back in the stores.`, 'info')
+        log(s, ev.at, p.id, `${P(p)} pulled down the ${BUILDINGS[old.type].name.toLowerCase()}: ${fmtGoods(refundOf(v, old, ev.at)) || 'nothing'} back in the stores.`, 'info')
         existing = null
       }
       addGoods(v, buildCost(v, def, ev.at), -k)
       if (existing) existing.building.progress = Math.min(1, existing.building.progress + k)
       else v.buildings.push({ id: ev.id, type: def.id, col: ev.col, row: ev.row, progress: Math.min(1, k) })
       const b = buildingAt(s, ev.col, ev.row)!.building
-      log(s, ev.at, p.id, b.progress >= 1 ? `${def.name} completed!` : `${def.name} half-built.`, 'good')
+      log(s, ev.at, p.id, b.progress >= 1 ? `${P(p)} built ${an(def.name.toLowerCase())}!` : `${P(p)} half-built ${an(def.name.toLowerCase())}.`, 'good')
       break
     }
     case 'caravan': {
@@ -1368,14 +1392,19 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const mins = caravanMinutes(p, v, to, ev.at, world, s)
       const homeAt = new Date(Date.parse(ev.at) + mins * 2 * 60_000).toISOString()
       // ox carts sent without a task have to walk home before they go again
-      if (ev.tokenId === FREE) v.oxenBack = homeAt
+      if (ev.tokenId === FREE && !ev.welcome) v.oxenBack = homeAt
       // its people are away until they're home again
       v.away = (v.away ?? 0) + ev.crew!
       s.caravans.push({
         id: ev.id, from: v.id, to: to.id, goods: ev.goods!, departAt: ev.at,
         arriveAt: new Date(Date.parse(ev.at) + mins * 60_000).toISOString(), crew: ev.crew, homeAt,
       })
-      log(s, ev.at, p.id, `A caravan of ${ev.crew} set off for ${V(to)}.`, 'info')
+      if (ev.welcome) {
+        // a welcome for new neighbours lifts the village's own spirits
+        ;(v.greeted ??= []).push(to.id)
+        v.morale = Math.min(100, v.morale + WELCOME_MORALE)
+        log(s, ev.at, p.id, `${V(v)} sent a welcoming caravan of ${ev.crew} to ${V(to)} with ${fmtGoods(ev.goods!)}. Morale +${WELCOME_MORALE}.`, 'good')
+      } else log(s, ev.at, p.id, `${P(p)} sent a caravan of ${ev.crew} to ${V(to)}.`, 'info')
       break
     }
     case 'troops': {
@@ -1394,12 +1423,12 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       addGoods(v, { timber: 6, stone: 2 }, -k)
       v.outposts.push({ col: ev.col, row: ev.row, radius: k >= 1 ? 1 : 0 } as Village['outposts'][number])
       reveal(world, s, ev, 2)
-      log(s, ev.at, p.id, k >= 1 ? 'An outpost was founded.' : 'A small camp was pitched.', 'good')
+      log(s, ev.at, p.id, k >= 1 ? `${P(p)} founded an outpost.` : `${P(p)} pitched a small camp.`, 'good')
       break
     case 'work': {
       const b = buildingAt(s, ev.col, ev.row)!.building
       const got = shift(s, world, v, b, k * (0.75 + v.morale / 200), playerDate(ev.at, p.resetHour, p.tz), ev.at, { roll: ev.id })
-      log(s, ev.at, p.id, `An extra shift at the ${BUILDINGS[b.type].name.toLowerCase()}: ${fmtGoods(got) || 'nothing'}.`, 'good')
+      log(s, ev.at, p.id, `${P(p)} worked an extra shift at the ${BUILDINGS[b.type].name.toLowerCase()}: ${fmtGoods(got) || 'nothing'}.`, 'good')
       break
     }
     case 'deepen': {
@@ -1413,7 +1442,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const d = dungeonUnder(world, i)
       if (d && depth >= d.level && !s.dungeons?.[i]) {
         ;(s.dungeons ??= {})[i] = { kind: d.kind, villageId: v.id, raids: d.raids, strength: d.strength, found: ev.at }
-        log(s, ev.at, p.id, `The miners broke through into ${DUNGEON[d.kind].name}! An expedition could raid it.`, 'monster')
+        log(s, ev.at, p.id, `${P(p)}'s miners broke through into ${DUNGEON[d.kind].name}! An expedition could raid it.`, 'monster')
       }
       break
     }
@@ -1450,7 +1479,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       } else {
         v.morale = Math.max(0, v.morale - 10)
         state.strength = round2(state.strength * 0.9) // the defenders are worn down a little all the same
-        log(s, ev.at, p.id, `The siege of ${fort.name} failed: its walls held (x${walls}). ${kit ? `Spent: ${kit}. ` : ''}Bring rams, siege towers or cannon to break them.`, 'monster')
+        log(s, ev.at, p.id, `${P(p)} laid siege to ${fort.name}, but its walls held (x${walls}). ${kit ? `Spent: ${kit}. ` : ''}Bring rams, siege towers or cannon to break them.`, 'monster')
       }
       break
     }
@@ -1581,11 +1610,45 @@ export function caravanTier(world: World, s: GameState, from: Village, to: Villa
   return 'medium'
 }
 
+/** A new village can be sent a welcoming caravan, with no action spent, for this many days after it is founded... */
+export const WELCOME_DAYS = 3
+/** ...and sending one lifts the sender's morale this much. */
+export const WELCOME_MORALE = 5
+
+/** When a village was founded: kept since welcomes began, and before that, read off its founding in the log. */
+export function foundedAt(s: GameState, v: Village): string | null {
+  if (v.foundedAt) return v.foundedAt
+  for (let k = s.log.length - 1; k >= 0; k--) {
+    const e = s.log[k]
+    if (e.playerId === v.playerId && e.text.includes('} founded a ')) return e.at
+  }
+  return null
+}
+
+/** Can `from` still send `to` a welcoming caravan at `at` (founded in the last WELCOME_DAYS days, not welcomed by it yet)? */
+export function welcomeOpen(s: GameState, from: Village, to: Village, at: string): boolean {
+  if (from.id === to.id || from.greeted?.includes(to.id)) return false
+  const f = foundedAt(s, to)
+  if (!f || at < f) return false
+  return Date.parse(at) - Date.parse(f) <= WELCOME_DAYS * 86_400_000
+}
+
+/** Can a road go here: in or next to your land, or next to one of your roads (or `more`: hexes planned before it)?
+ *  Roads can run out across open country, a hex at a time. */
+export function roadReach(world: World, v: Village, at: { col: number; row: number }, more?: Set<number>): boolean {
+  if (territory(v).some((t) => distance(t, at) <= t.radius + 1)) return true
+  const own = new Set([...v.roads, ...(v.paved ?? []), ...(v.city ?? []), ...(more ?? [])])
+  own.delete(cellIndex(world, at.col, at.row))
+  return neighbours(at.col, at.row).some(([c, r]) => c >= 0 && r >= 0 && c < world.width && r < world.height && own.has(cellIndex(world, c, r)))
+}
+
 function roadSets(world: World, s: GameState) {
   const roads = new Set<number>(), paved = new Set<number>(), towns = new Set<number>()
   for (const v of Object.values(s.villages)) {
     for (const r of v.roads) roads.add(r)
     for (const r of v.paved ?? []) paved.add(r)
+    // a city's cobblestone is paved road
+    for (const r of v.city ?? []) { roads.add(r); paved.add(r) }
     // a village is its own crossroads
     towns.add(cellIndex(world, v.col, v.row))
   }
@@ -1712,7 +1775,7 @@ export function digRoads(s: GameState, world: World, at: string) {
       const i = plan.shift()!
       if (world.cells[i].tier === 0 || v.roads.includes(i)) { work += 1; continue }
       v.roads.push(i)
-      log(s, at, v.playerId, world.cells[i].riverTo !== -1 ? 'The road team built a bridge over the river.' : 'The road team finished a stretch of dirt road.', 'good')
+      log(s, at, v.playerId, world.cells[i].riverTo !== -1 ? `${who(s, v)}'s road team built a bridge over the river.` : `${who(s, v)}'s road team finished a stretch of dirt road.`, 'good')
     }
     v.roadDone = plan.length ? Math.round(work * 1000) / 1000 : 0
   }
@@ -1732,7 +1795,7 @@ function deliverCaravans(s: GameState, at: string) {
     addGoods(to, c.goods)
     const gift = Object.keys(c.goods).some((g) => ['berries', 'cheese', 'relic', 'cloth', 'bread', 'tin'].includes(g))
     if (gift) to.morale = Math.min(100, to.morale + 2)
-    log(s, c.arriveAt, to.playerId, `A caravan from ${s.villages[c.from] ? V(s.villages[c.from]) : 'afar'} arrived: ${fmtGoods(c.goods)}.`, 'good')
+    log(s, c.arriveAt, to.playerId, `${s.villages[c.from] ? `${who(s, s.villages[c.from])}'s caravan` : 'A caravan from afar'} reached ${V(to)} with ${fmtGoods(c.goods)}.`, 'good')
   }
 }
 
@@ -1902,6 +1965,12 @@ export const workable = (b: { type: BuildingId }) => {
   return !def.crop && !!(def.produces || def.mine || def.smelts || def.recipes)
 }
 
+/** What spring rain did for a field's crop: RAIN_BONUS more on the share of its sowing that went in under the rain habit. */
+export function fieldRain(b: { sown?: number; sownWet?: number }): number {
+  const sown = b.sown ?? 1
+  return sown > 0 ? 1 + RAIN_BONUS * Math.min(1, (b.sownWet ?? 0) / sown) : 1
+}
+
 /** A sawmill beside a river saws this many times the timber in a shift (same planks per log). */
 export const RIVER_SAW = 3
 
@@ -1930,7 +1999,12 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   if (def.harvest) {
     // a field is sown in spring (the share of the crew it has makes the share of the crop that goes in), is
     // left in summer, and is all reaped in autumn: the rest of the year it makes nothing
-    if (season === 'spring') b.sown = Math.min(1, (b.sown ?? 1) + 0.5 * st)
+    if (season === 'spring') {
+      const before = b.sown ?? 1
+      b.sown = Math.min(1, before + 0.5 * st)
+      // seed sown in the rain comes up better
+      if (opts.rain) b.sownWet = round2(Math.min(b.sown, (b.sownWet ?? 0) + b.sown - before))
+    }
     if (season !== 'autumn') { why(`It's ${season}`, 'reaped in autumn'); return {} }
   }
   if (opts.why) {
@@ -1993,8 +2067,12 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   if (!yields) { why(`It's ${season}`, 'nothing to make'); return made }
   why('A full shift makes', fmtGoods(yields))
   if (def.consumes) why('…from', fmtGoods(def.consumes))
-  if (def.harvest) { mul(`Sown: ${Math.round((b.sown ?? 1) * 100)}%`, 0.25 + 0.75 * (b.sown ?? 1)); if (opts.rain) mul('Rain habit', 1.2) }
-  if (def.harvest) k *= (0.25 + 0.75 * (b.sown ?? 1)) * (opts.rain ? 1.2 : 1) // unsown ground still gives volunteer grain
+  if (def.harvest) {
+    // unsown ground still gives volunteer grain; seed sown in spring rain comes up RAIN_BONUS more, and a rainy reaping day reaps RAIN_BONUS more
+    const sown = 0.25 + 0.75 * (b.sown ?? 1), wet = fieldRain(b), reapRain = opts.rain ? 1 + RAIN_BONUS : 1
+    mul(`Sown: ${Math.round((b.sown ?? 1) * 100)}%`, sown); mul('Sown in spring rain', wet); mul('Rain at the reaping', reapRain)
+    k *= sown * wet * reapRain
+  }
   if (def.crop && !def.harvest) { mul(`Season: ${weekSeason(date)}`, CROP_SEASON[weekSeason(date)]); if (opts.rain) mul('Rain habit', 1.2) }
   if (def.crop && !def.harvest) k *= CROP_SEASON[weekSeason(date)] * (opts.rain ? 1.2 : 1)
   // ground picked clean of stone grows more
@@ -2027,21 +2105,37 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   return made
 }
 
+/** Perfect task days in a row once tonight is counted: a perfect day adds one, Saturday (no tasks) and a frozen
+ *  day leave it as it was, any other day starts it again. */
+export function streakAfter(p: Player, d: DayRecord, date: ISODate, at: string): number {
+  const n = p.taskStreak ?? 0
+  if ((isSabbath(date) && at >= SABBATH_FROM) || weekSeason(date) === 'winter' || d.frozen) return n
+  return dayScore(d) >= 100 ? n + 1 : 0
+}
+
+/** What a perfect-day streak adds to tonight's work: STREAK_STEP a day (10%, 20%, 30%...), up to STREAK_MAX; only on a perfect day. */
+export function streakBonus(p: Player, d: DayRecord, date: ISODate, at: string): number {
+  if (dayScore(d) < 100 || d.frozen) return 0
+  return Math.min(STREAK_MAX, STREAK_STEP * streakAfter(p, d, date, at))
+}
+
 export function produce(s: GameState, world: World, v: Village, p: Player, d: DayRecord, date: ISODate, prod: number, at: string, odds?: Odds, trace?: Source[], score?: number): Goods {
   const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
   const moraleK = 0.75 + v.morale / 200
   const libraryK = habitOn('library') && done(v).some((b) => b.type === 'library') ? 1.05 : 1
+  const streakK = 1 + streakBonus(p, d, date, at)
   const made: Goods = {}
   for (const b of done(v)) {
     const def = BUILDINGS[b.type]
     if (!def.produces && !def.mine && !def.smelts && !def.recipes) continue
     const role = onRole(v, def, at) ? 1.25 : 1
-    const k = prod * moraleK * libraryK * role
+    const k = prod * moraleK * libraryK * streakK * role
     const why: Factor[] | undefined = trace ? [] : undefined
     if (why) {
       why.push({ label: weekSeason(date) === 'winter' ? 'Winter: the buildings rest' : `Today's tasks: score ${score ?? '?'}/100`, value: times(prod) })
       why.push({ label: `Morale ${Math.round(v.morale)}`, value: times(moraleK) })
       if (libraryK !== 1) why.push({ label: 'Library habit', value: times(libraryK) })
+      if (streakK !== 1) why.push({ label: `Perfect days in a row: ${streakAfter(p, d, date, at)}`, value: times(streakK) })
       if (role !== 1) why.push({ label: "The village's calling", value: times(role) })
     }
     const before = trace ? { ...v.goods } : null
@@ -2113,7 +2207,7 @@ function foodUpdate(s: GameState, world: World, at: string) {
 function herdsNight(s: GameState, world: World, v: Village, date: ISODate, notes: string[]) {
   const pens = done(v).filter((b) => b.type === 'pen')
   // fields start the new year unsown
-  if (weekSeason(date) === 'winter') for (const b of v.buildings) if (BUILDINGS[b.type].harvest) b.sown = 0
+  if (weekSeason(date) === 'winter') for (const b of v.buildings) if (BUILDINGS[b.type].harvest) { b.sown = 0; delete b.sownWet }
   if (!pens.length) return
   const season = weekSeason(date)
   const day = weekday(date)
@@ -2160,13 +2254,31 @@ function herdsNight(s: GameState, world: World, v: Village, date: ISODate, notes
   }
 }
 
+/** One thing that sets where a village's morale is heading tonight (it moves a quarter of the way there each night). */
+export interface MoralePart { label: string; value: number; how: string }
+export const MORALE_PULL = 0.25
+
+/** Where morale heads tonight, piece by piece: the day's tasks, how varied the food was (`variety` kinds eaten),
+ *  buildings that cheer, and the devotions and sleep habits. The sum is the target. */
+export function moraleParts(v: Village, p: Player, d: DayRecord, score: number, variety: number): MoralePart[] {
+  const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
+  const cheer = done(v).filter((b) => BUILDINGS[b.type].morale)
+  return [
+    { label: 'Where it settles', value: 50, how: 'the starting point, before the rest' },
+    { label: `Today's tasks: ${score}/100`, value: (score - 50) / 5, how: 'finish your tasks: a perfect day adds 10, half a day nothing, none takes 10 away' },
+    { label: `Kinds of food eaten: ${variety}`, value: Math.max(-4, (variety - 2) * 3), how: 'a varied table: 3 for each kind past two (fields, gardens, fish, game, cheese, bread...)' },
+    { label: cheer.length ? cheer.map((b) => BUILDINGS[b.type].name).join(', ') : 'Buildings that cheer', value: cheer.reduce((a, b) => a + (BUILDINGS[b.type].morale ?? 0), 0), how: `build a ${BUILDINGS.chapel.name} (+${BUILDINGS.chapel.morale}) or a ${BUILDINGS.market.name} (+${BUILDINGS.market.morale})` },
+    { label: 'Devotions habit', value: habitOn('morale') ? 6 : 0, how: 'keep the devotions habit today (+6)' },
+    { label: 'Bed on time habit', value: habitOn('health') ? 2 : 0, how: 'keep the sleep habit today (+2)' },
+  ]
+}
+
 function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 'tick' }>) {
   const v = s.villages[p.villageId]
   const d = ensureDay(p, ev.date)
   const season = weekSeason(ev.date)
   const winter = season === 'winter'
   const rng = rngFor(s.worldSeed, 'tick', p.id, ev.date)
-  const habitOn = (effect: string) => d.habitsDone.some((h) => p.habits.find((x) => x.id === h)?.effect === effect)
   const rest = isSabbath(ev.date) && ev.at >= SABBATH_FROM
   const score = rest ? REST_SCORE : d.frozen ? Math.max(dayScore(d), 60) : dayScore(d)
   const notes: string[] = []
@@ -2196,10 +2308,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   const short = need > 1e-6
   if (short && winter) v.hungryWinter = ev.date
   const variety = eaten.size
-  let moraleTarget = 50 + (score - 50) / 5 + Math.max(-4, (variety - 2) * 3)
-  moraleTarget += done(v).reduce((a, b) => a + (BUILDINGS[b.type].morale ?? 0), 0)
-  if (habitOn('morale')) moraleTarget += 6
-  if (habitOn('health')) moraleTarget += 2
+  const moraleTarget = moraleParts(v, p, d, score, variety).reduce((a, x) => a + x.value, 0)
   if (short) {
     const harsh = winter ? 12 : 6
     v.morale -= harsh
@@ -2209,7 +2318,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
       notes.push('a family left to find food')
     }
   }
-  v.morale = Math.round(Math.max(0, Math.min(100, v.morale + (moraleTarget - v.morale) * 0.25)))
+  v.morale = Math.round(Math.max(0, Math.min(100, v.morale + (moraleTarget - v.morale) * MORALE_PULL)))
 
   // 2b. the winter night: wood or peat on the fire, a unit for every FUEL_PEOPLE people (peat first)
   if (winter) {
@@ -2271,6 +2380,9 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
       }
     }
   }
+
+  // 5b. the perfect-day streak (its bonus went into tonight's work above)
+  p.taskStreak = streakAfter(p, d, ev.date, ev.at)
 
   // 6. habits -> slots (missing never removes a slot; Saturday misses are neutral; freezes pause)
   if (!d.frozen && p.habits.length) {

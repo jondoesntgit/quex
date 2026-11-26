@@ -4,7 +4,7 @@ import { generateWorld } from '../world/generate'
 import { BUILDINGS, HEADS } from './data'
 import { line } from '../world/hex'
 import { FREE, HEX_MINUTES, apply, caravanMinutes, caravanTier, cellIndex, newGame, scoutRadius, scoutsNew, tonight, validate } from './reducer'
-import type { GameEvent, GameState } from './types'
+import type { Building, GameEvent, GameState } from './types'
 
 const world = generateWorld('test-seed')
 const sites = world.regions[world.startRegion].sites
@@ -343,5 +343,101 @@ describe('the road planner and wild rice', () => {
     const c = world.cells[i]
     expect(run(s, { t: 'act', id: 'r1', at: AT, playerId: 'ann', tokenId: tok(s, 'small'), action: 'rice', col: c.col, row: c.row } as GameEvent)).toBeNull()
     expect(v.goods.rice).toBe(3)
+  })
+})
+
+describe('perfect-day streak', () => {
+  const sizes = ['big', 'medium', 'medium', 'small', 'small', 'small'] as const
+  const full = (date: string) => ({ date, slots: sizes.map((size) => ({ size, status: 'full' as const })), habitsDone: [], frozen: false, ticked: false })
+  const part = (date: string) => ({ ...full(date), slots: sizes.map((size, k) => ({ size, status: k ? 'full' as const : 'none' as const })) })
+  it('adds 10% a perfect day, up to +100%; a day left undone starts it again; Saturday leaves it', async () => {
+    const { streakBonus, streakAfter } = await import('./reducer')
+    const s = setup()
+    const p = s.players.ann
+    const MON = '2026-11-23', SAT = '2026-11-28', AT2 = '2026-11-23T12:00:00Z'
+    expect(streakBonus(p, full(MON), MON, AT2)).toBeCloseTo(0.1)
+    p.taskStreak = 2
+    expect(streakBonus(p, full(MON), MON, AT2)).toBeCloseTo(0.3)
+    p.taskStreak = 15
+    expect(streakBonus(p, full(MON), MON, AT2)).toBeCloseTo(1)
+    expect(streakBonus(p, part(MON), MON, AT2)).toBe(0)
+    expect(streakAfter(p, part(MON), MON, AT2)).toBe(0)
+    expect(streakAfter(p, { ...part(SAT), slots: [] }, SAT, '2026-11-28T12:00:00Z')).toBe(15)
+    expect(streakAfter(p, { ...part(MON), frozen: true }, MON, AT2)).toBe(15)
+  })
+  it('counts up night by night, and makes more on a streak', async () => {
+    const { produce } = await import('./reducer')
+    const s = setup()
+    const p = s.players.ann, v = s.villages.v_ann
+    v.buildings.push({ id: 'lc', type: 'lumber_camp', col: v.col, row: v.row, progress: 1 })
+    v.jobs = { lc: 1000 }
+    const made = (streak: number) => {
+      const t = structuredClone(s)
+      t.players.ann.taskStreak = streak
+      return produce(t, world, t.villages.v_ann, t.players.ann, full(DAY), DAY, 1, AT).timber ?? 0
+    }
+    expect(made(4)).toBeCloseTo(made(0) * 1.5 / 1.1, 1)
+    p.days['2026-11-23'] = full('2026-11-23')
+    run(s, { t: 'tick', id: `st${++n}`, at: '2026-11-24T04:00:00Z', playerId: 'ann', date: '2026-11-23' } as GameEvent)
+    expect(p.taskStreak).toBe(1)
+  })
+})
+
+describe('rain on the fields', () => {
+  it('sown in spring rain comes up 20% more, reaped in autumn rain 20% more, and summer rain does nothing', async () => {
+    const { shift } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    v.jobs = { f1: 1000 }
+    const year = (rain: { spring?: boolean; summer?: boolean; autumn?: boolean }) => {
+      const t = structuredClone(s)
+      const tv = t.villages.v_ann
+      const b: Building = { id: 'f1', type: 'field', col: v.col, row: v.row, progress: 1, sown: 0 }
+      tv.buildings = [b]
+      // Sunday and Monday sowing, Tuesday and Wednesday summer, Thursday reaping
+      for (const d of ['2026-11-22', '2026-11-23']) shift(t, world, tv, b, 1, d, `${d}T12:00:00Z`, { rain: rain.spring })
+      for (const d of ['2026-11-24', '2026-11-25']) shift(t, world, tv, b, 1, d, `${d}T12:00:00Z`, { rain: rain.summer })
+      return shift(t, world, tv, b, 1, '2026-11-26', '2026-11-26T12:00:00Z', { rain: rain.autumn }).grain ?? 0
+    }
+    const dry = year({})
+    expect(dry).toBeGreaterThan(0)
+    expect(year({ summer: true })).toBeCloseTo(dry, 5)
+    expect(year({ spring: true })).toBeCloseTo(dry * 1.2, 5)
+    expect(year({ autumn: true })).toBeCloseTo(dry * 1.2, 5)
+    expect(year({ spring: true, summer: true, autumn: true })).toBeCloseTo(dry * 1.44, 5)
+  })
+})
+
+describe('welcoming caravans', () => {
+  it('go to a village in its first three days with no action, once, and cheer the sender', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = { cheese: 100, salt: 100 }
+    v.city = []; s.villages.v_bob.city = []
+    const send = (at: string, id = `wc${++n}`) => run(s, { t: 'act', id, at, playerId: 'ann', tokenId: FREE, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { salt: 20 }, crew: 1, food: { cheese: 20 }, welcome: true } as GameEvent)
+    // Bob joined on the 16th: four days on is too late
+    expect(send('2026-11-20T09:00:00Z')).toMatch(/first 3 days/)
+    const before = v.morale
+    expect(send('2026-11-18T09:00:00Z')).toBeNull()
+    expect(v.morale).toBe(Math.min(100, before + 5))
+    expect(v.greeted).toEqual(['v_bob'])
+    expect(send('2026-11-18T10:00:00Z')).toMatch(/once to each village/)
+    // an ordinary caravan still needs an action
+    expect(run(s, { t: 'act', id: `wc${++n}`, at: '2026-11-18T11:00:00Z', playerId: 'ann', tokenId: FREE, action: 'caravan', col: 0, row: 0, to: 'v_bob', goods: { salt: 20 }, crew: 1, food: { cheese: 20 } } as GameEvent)).toMatch(/without a task/)
+  })
+})
+
+describe('action sizes', () => {
+  it('from EXACT_SIZE_FROM a task takes an action of its own size: a bigger one is refused', async () => {
+    const { territoryCells, EXACT_SIZE_FROM } = await import('./reducer')
+    const s = setup()
+    const v = s.villages.v_ann
+    const i = territoryCells(world, v).find((j) => world.cells[j].tier > 0 && world.cells[j].riverTo === -1 && !v.city?.includes(j) && !v.roads.includes(j))!
+    const c = world.cells[i]
+    const road = (size: 'big' | 'medium' | 'small', at: string) => run(s, { t: 'act', id: `r${++n}`, at, playerId: 'ann', tokenId: tok(s, size), action: 'road', col: c.col, row: c.row } as GameEvent)
+    const after = new Date(Date.parse(EXACT_SIZE_FROM) + 3_600_000).toISOString()
+    expect(road('medium', after)).toMatch(/medium action, and this takes a small one: split it first/)
+    expect(road('big', after)).toMatch(/split it first/)
+    expect(road('small', after)).toBeNull()
   })
 })

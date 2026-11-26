@@ -51,3 +51,10 @@ the family world. See `src/app/worlds.ts`.
 ## Checks before committing
 `npx tsc --noEmit -p tsconfig.app.json`, `npx vitest run`, `npx oxlint src`, `npm run build`.
 Browser flows: `e2e/*.mjs` (Playwright; pass `APP_URL` and, if needed, `CHROME_PATH`).
+
+## Backward compatibility (keep BACKCOMPAT.md up to date)
+Old worlds, offline event logs and saved state must keep working through the playtest, so the code carries
+shims: `…_FROM` rule cutoffs, one-time conversions in `apply()`, fallbacks for fields older saves lack, kept ids,
+and display-time rewrites of old log text. **Every time you add one, add a line to `BACKCOMPAT.md`.**
+At the end of a playtest season, once its worlds are retired or reset, use that file as the checklist for a
+codebase cleanup: delete each shim and keep only the current rule.

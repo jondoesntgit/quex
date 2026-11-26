@@ -21,9 +21,18 @@ export interface Spendable { id: string; size: TaskSize; strength: number; tok: 
 /** Everything in the tray: whole tokens, then half-done ones paired with a
  *  half of the same size into wholes, then the unpaired halves (at most one per
  *  size), which can't be spent until another half of their size joins them. */
-/** Has the player a whole action (or two halves that make one) big enough for a task of this size? */
+/** Has the player a whole action (or two halves that make one) of exactly this size? A bigger one is never
+ *  spent on a smaller task by accident: it has to be split first (see splitHint). */
 export function canPay(p: Player, size: 'big' | 'medium' | 'small'): boolean {
-  return spendables(p).some((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[size])
+  return !!bestToken(p, size)
+}
+
+/** When only a bigger action could pay for a task of this size: "(or split your big action: tap it in the tray)". */
+export function splitHint(p: Player, size: 'big' | 'medium' | 'small'): string {
+  const bigger = spendables(p).filter((t) => t.strength >= 1 && SIZE_RANK[t.size] > SIZE_RANK[size] && !t.tok2)
+  if (!bigger.length) return ''
+  bigger.sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size])
+  return ` (or split your ${bigger[0].size} action into smaller ones: tap it under Your actions)`
 }
 
 export function spendables(p: Player): Spendable[] {
@@ -41,13 +50,14 @@ export function spendables(p: Player): Spendable[] {
 
 /** Smallest sufficient whole action (a lone half-done one can't be spent). */
 export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Spendable | null {
-  const ok = spendables(p).filter((t) => t.strength >= 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
-  ok.sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size] || (a.tok2 ? 1 : 0) - (b.tok2 ? 1 : 0))
+  // the same size only: a bigger action is split on purpose, never spent on a smaller task by accident
+  const ok = spendables(p).filter((t) => t.strength >= 1 && t.size === need)
+  ok.sort((a, b) => (a.tok2 ? 1 : 0) - (b.tok2 ? 1 : 0))
   return ok[0] ?? null
 }
 
 export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number> } = {}): GameEvent {
+  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}): GameEvent {
   return {
     t: 'act', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: tok.tok.id,
     ...(tok.tok2 ? { tokenId2: tok.tok2.id } : {}), action, col, row, ...extra,
@@ -55,11 +65,18 @@ export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKi
 }
 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number> } = {}, needOverride?: 'big' | 'medium' | 'small') {
+  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}, needOverride?: 'big' | 'medium' | 'small') {
   // a caravan costs by how the villages are connected: across country, by road, or free on paved road
   const v = game.state.villages[p.villageId]
   const dest = action === 'caravan' && extra.to ? game.state.villages[extra.to] : null
   const tier = dest && v ? caravanTier(game.world, game.state, v, dest) : null
+  if (extra.welcome) {
+    // a welcoming caravan costs no action
+    const free: Spendable = { id: FREE, size: 'small', strength: 1, tok: { id: FREE, size: 'small', strength: 1, date: '', slot: -1 } }
+    const ev = actEvent(game, p, free, action, col, row, extra)
+    const error = validate(game.state, game.world, ev)
+    return { ev: error ? null : ev, error, tok: free }
+  }
   if (tier === 'free') {
     const free: Spendable = { id: FREE, size: 'small', strength: 1, tok: { id: FREE, size: 'small', strength: 1, date: '', slot: -1 } }
     const ev = actEvent(game, p, free, action, col, row, extra)
@@ -71,8 +88,9 @@ export function tryAction(game: Game, p: Player, action: ActionKind, col: number
   const tok = bestToken(p, size)
   if (!tok) {
     const need = size
-    const half = p.tokens.some((t) => t.strength < 1 && SIZE_RANK[t.size] >= SIZE_RANK[need])
-    return { ev: null, error: half ? `Finish your half-done ${need} task (or half-do another ${need} one) to unlock this` : `Finish a ${need} task to unlock this` }
+    const half = p.tokens.some((t) => t.strength < 1 && t.size === need)
+    const base = half ? `Finish your half-done ${need} task (or half-do another ${need} one) to unlock this` : `Finish a ${need} task to unlock this`
+    return { ev: null, error: base + splitHint(p, need) }
   }
   const ev = actEvent(game, p, tok, action, col, row, extra)
   const error = validate(game.state, game.world, ev)

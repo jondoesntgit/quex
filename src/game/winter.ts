@@ -3,7 +3,7 @@
  *  only: it mirrors the nightly tick's rules (see tick() in reducer.ts). */
 import { BUILDINGS, producesIn, EAT, FOOD, FOOD_SCALE, type BuildingId, type Good, type TaskSize } from './data'
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
-import { defence, foodStock, storageCap } from './reducer'
+import { defence, fieldRain, foodStock, storageCap } from './reducer'
 import { people } from './workers'
 import type { ISODate, Village } from './types'
 
@@ -57,7 +57,7 @@ function keepsMade(v: Village, date: ISODate, score: number): number {
     if (!yields) continue
     if (def.harvest && season !== 'autumn') continue
     let k = prod * moraleK
-    if (def.harvest) k *= 0.25 + 0.75 * (b.sown ?? 1)
+    if (def.harvest) k *= (0.25 + 0.75 * (b.sown ?? 1)) * fieldRain(b)
     else if (def.crop) k *= CROP_SEASON[season]
     for (const [g, n] of Object.entries(yields)) {
       const f = FOOD[g as Good]

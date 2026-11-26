@@ -6,6 +6,7 @@ import { Account, ManageWard, SignIn } from './ui/Account'
 import { Help } from './ui/Help'
 import { Caravans } from './ui/Caravans'
 import { Season } from './ui/Season'
+import { VillageInfo } from './ui/VillageInfo'
 import { rememberAccount, setAway } from './app/accounts'
 import { loadAtlas } from './render/atlas'
 import { loadHouseArt } from './render/houseart'
@@ -123,7 +124,7 @@ function Main({ game }: { game: Game }) {
   const [collapsed, setCollapsed] = useState(false)
   // a shared link (?at=col,row) centres on that hex, marks it, and opens it for existing players
   const [linked] = useState(() => linkedSpot(game.world))
-  const [sel, setSel] = useState<{ col: number; row: number; x?: number; y?: number } | null>(() => (game.meta.activePlayer ? linked : null))
+  const [sel, setSel] = useState<{ col: number; row: number; x?: number; y?: number; welcome?: boolean } | null>(() => (game.meta.activePlayer ? linked : null))
   // prospecting: dim everything but deposits (ore, building stone, clay, salt)
   const [prospect, setProspect] = useState(false)
   const [preview, setPreview] = useState<Spot | null>(null)
@@ -138,6 +139,7 @@ function Main({ game }: { game: Game }) {
   const [showHelp, setShowHelp] = useState(false)
   const [showCaravans, setShowCaravans] = useState(false)
   const [showSeason, setShowSeason] = useState(false)
+  const [showVillage, setShowVillage] = useState(false)
   const [splitting, setSplitting] = useState<string | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   // one-off messages: from startup (e.g. accepting a parent link), or an action the server refused
@@ -261,7 +263,7 @@ function Main({ game }: { game: Game }) {
         <span className="chip title">QUEX</span>
         <button className="chip" onClick={() => setShowSeason(true)} title="How long the world has left">{SEASON_ICON[season]} {season} · wk {Math.min(week, SEASON_WEEKS)}/{SEASON_WEEKS}</button>
         {p && <span className="chip score"><Icon name="star" size={16} /> <b>{score}</b>/100</span>}
-        {v && <span className="chip"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</span>}
+        {v && <button className="chip" onClick={() => setShowVillage(true)} title="What lifts your village's work, morale and numbers"><Icon name="people" size={16} /> {Math.floor(v.population)} · morale {v.morale}</button>}
         <span className="spacer" />
         {p && game.meta.localPlayers.length > 1 && <span className="chip">{p.name}</span>}
         {game.store instanceof SupabaseStore && game.store.offline && (
@@ -333,7 +335,7 @@ function Main({ game }: { game: Game }) {
         )
       })()}
 
-      {p && sel && !placing && <Inspector key={`${sel.col},${sel.row}`} game={game} p={p} col={sel.col} row={sel.row} tap={sel.x !== undefined && sel.y !== undefined ? { x: sel.x, y: sel.y } : undefined} onClose={() => setSel(null)} notify={notify} />}
+      {p && sel && !placing && <Inspector key={`${sel.col},${sel.row}${sel.welcome ? ":w" : ""}`} game={game} p={p} col={sel.col} row={sel.row} tap={sel.x !== undefined && sel.y !== undefined ? { x: sel.x, y: sel.y } : undefined} onClose={() => setSel(null)} notify={notify} welcome={sel.welcome} />}
 
       {p && !placing && (
         <div className={`sheet ${collapsed ? 'collapsed' : ''}`}>
@@ -349,7 +351,12 @@ function Main({ game }: { game: Game }) {
             {tab === 'today' && <TodayPanel game={game} p={p} />}
             {tab === 'village' && <VillagePanel game={game} p={p} onAbandon={abandon} notify={notify} />}
             {tab === 'party' && <PartyPanel game={game} p={p} onAddFriend={() => setOnboard('friend')} onManage={setManaging} />}
-            {tab === 'log' && <LogPanel game={game} p={p} />}
+            {tab === 'log' && <LogPanel game={game} p={p} onWelcome={(vid) => {
+              const to = game.state.villages[vid]
+              if (!to) return
+              viewRef.current?.centreOn(to.col, to.row, game.world.cells[to.row * game.world.width + to.col].tier)
+              setSel({ col: to.col, row: to.row, welcome: true })
+            }} />}
           </div>
         </div>
       )}
@@ -363,6 +370,7 @@ function Main({ game }: { game: Game }) {
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
       {showCaravans && <Caravans game={game} onClose={() => setShowCaravans(false)} />}
       {showSeason && <Season game={game} onClose={() => setShowSeason(false)} />}
+      {showVillage && p && <VillageInfo game={game} p={p} onClose={() => setShowVillage(false)} />}
       {mapError && (
         <div className="modal"><div className="card">
           <h2 style={{ marginTop: 0 }}>The map didn't load</h2>
