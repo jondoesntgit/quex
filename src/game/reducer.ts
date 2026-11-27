@@ -2144,10 +2144,47 @@ function deliverCaravans(s: GameState, at: string) {
 /** Buildings whose game comes from the wild animals on their hex. */
 const HUNTS = new Set(['hunting_lodge', 'forager_camp'])
 
-/** The villagers eat half a unit of food each, fresh food first and a little of
- *  everything (variety lifts morale). Returns the food still needed (if they ran short). */
-function eatFood(v: Village): { need: number; eaten: Set<Good> } {
+/** Until EAT_FRESH_FROM the villagers took a third of the meal from each food in turn (fresh first) and then
+ *  filled up, so they ate preserved food while fresh food spoiled. Now they taste every food and fill up on
+ *  fresh food first. */
+export const EAT_FRESH_FROM = '2026-11-27T17:00:00.000Z'
+/** A taste of each food in store, as a share of the night's need, and the most all the tastes may come to. */
+const TASTE = 0.05
+const TASTE_ALL = 0.25
+
+/** The villagers eat a ration each: a taste of every food in store (variety lifts morale), then fresh food
+ *  before what keeps, since fresh food would partly spoil tonight anyway. Within each, they eat in proportion
+ *  to what's in store, so the larder stays varied. Returns the food still needed (if they ran short). */
+function eatFood(v: Village, at: string): { need: number; eaten: Set<Good> } {
+  if (at < EAT_FRESH_FROM) return eatFoodOld(v)
   // those away on a neighbour's walls eat their own provisions
+  let need = people(v) * EAT
+  const eaten = new Set<Good>()
+  const foods = (Object.entries(FOOD) as [Good, { value: number; keeps: boolean }][]).filter(([g]) => (v.goods[g] ?? 0) > 0)
+  const take = (g: Good, value: number, rations: number) => {
+    const n = Math.min(v.goods[g] ?? 0, rations / value)
+    if (n <= 0) return
+    addGoods(v, { [g]: -n })
+    need -= n * value
+    eaten.add(g)
+  }
+  // a taste of each
+  const taste = need * Math.min(TASTE, TASTE_ALL / Math.max(1, foods.length))
+  for (const [g, f] of foods) take(g, f.value, Math.min(taste, need))
+  // then fill up: fresh food first, then what keeps, each in proportion to what's in store
+  for (const keeps of [false, true]) {
+    if (need <= 1e-9) break
+    const group = foods.filter(([, f]) => f.keeps === keeps).map(([g, f]) => [g, f.value, (v.goods[g] ?? 0) * f.value] as const)
+    const total = group.reduce((a, x) => a + x[2], 0)
+    if (total <= 0) continue
+    const k = Math.min(1, need / total)
+    for (const [g, value, rations] of group) take(g, value, rations * k)
+  }
+  return { need: Math.max(0, need), eaten }
+}
+
+/** The eating rule before EAT_FRESH_FROM. */
+function eatFoodOld(v: Village): { need: number; eaten: Set<Good> } {
   let need = people(v) * EAT
   const eaten = new Set<Good>()
   const order = (Object.entries(FOOD) as [Good, { value: number; keeps: boolean }][]).sort((a, b) => Number(a[1].keeps) - Number(b[1].keeps))
@@ -2198,8 +2235,8 @@ export function tonight(s: GameState, world: World, p: Player, now: Date) {
   const sources: Source[] = []
   const made = produce(test, world, tv, tp, d, date, prod, at, odds, sources, score)
   const beforeEat = { ...tv.goods }
-  const { need } = eatFood(tv)
-  sources.push({ label: 'Eaten', delta: goodsDiff(beforeEat, tv.goods), factors: [{ label: `${people(tv)} people at home`, value: `${EAT} ration each` }, { label: 'A little of every food first', value: '' }] })
+  const { need } = eatFood(tv, at)
+  sources.push({ label: 'Eaten', delta: goodsDiff(beforeEat, tv.goods), factors: [{ label: `${people(tv)} people at home`, value: `${EAT} ration each` }, { label: 'A taste of every food, then fresh food before what keeps', value: '' }] })
   const beforeSpoil = { ...tv.goods }
   const rotted = spoil(tv)
   sources.push({ label: 'Spoiled', delta: goodsDiff(beforeSpoil, tv.goods), factors: [{ label: 'Fresh food', value: 'loses 30% overnight' }, ...(rotted ? [{ label: 'Past what the stores hold', value: 'rots' }] : [])] })
@@ -2276,7 +2313,7 @@ export function winterOutlook(s: GameState, world: World, p: Player, now: Date) 
     const harvest = trace.filter((x) => x.type && BUILDINGS[x.type].harvest).reduce((a, x) => a + foodOf(x.delta), 0)
     herdsNight(test, world, tv, date, [])
     const f1 = foodStock(tv)
-    const { need } = eatFood(tv)
+    const { need } = eatFood(tv, at)
     const f2 = foodStock(tv)
     spoil(tv)
     const f3 = foodStock(tv)
@@ -2639,9 +2676,9 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   const herdNotes = notes.length
   traced('The flock', () => herdsNight(s, world, v, ev.date, notes), () => notes.slice(herdNotes).map((t) => ({ label: t, value: '' })))
 
-  // 2. eating (fresh food first, it spoils anyway)
+  // 2. eating (a taste of everything, then fresh food first: it spoils anyway)
   const pop = people(v)
-  const { need, eaten } = traced('Eaten', () => eatFood(v), (r) => [
+  const { need, eaten } = traced('Eaten', () => eatFood(v, ev.at), (r) => [
     { label: `${pop} people at home`, value: `${EAT} ration each` },
     ...(r.need > 1e-6 ? [{ label: 'Ran short by', value: `${round2(r.need)} rations` }] : []),
   ])

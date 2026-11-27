@@ -309,3 +309,31 @@ describe('the food update', () => {
     expect(weekSeason(SUN)).toBe('spring')
   })
 })
+
+describe('what the village eats', () => {
+  const late = '2026-11-29' // a Sunday after EAT_FRESH_FROM
+  const lateTick = (s: GameState) => apply(s, world, { t: 'tick', id: `t${++n}`, at: `${late}T23:00:00.000Z`, playerId: 'ann', date: late })
+
+  it('fills up on fresh food before what keeps, but tastes everything', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    const need = v.population // a ration each
+    v.goods = { fish: need / 10 + 2, grain: 10, cheese: 50 }
+    lateTick(s)
+    // a taste of grain and cheese, no more
+    expect(10 - (v.goods.grain ?? 0)).toBeLessThanOrEqual((need * 0.05) / 10 + 0.01)
+    expect(50 - (v.goods.cheese ?? 0)).toBeGreaterThan(0)
+    expect(50 - (v.goods.cheese ?? 0)).toBeLessThanOrEqual(need * 0.05 + 0.01)
+    // the fish left over is what they didn't need, less the night's spoiling
+    expect(v.goods.fish ?? 0).toBeLessThan(2 * 0.7 + 0.5)
+  })
+
+  it('eats what keeps once the fresh food runs out, in proportion to what is in store', () => {
+    const s = setup()
+    const v = s.villages.v_ann
+    v.goods = { smoked_fish: 20, dried_peas: 20 } // nothing else uses these
+    lateTick(s)
+    expect(v.goods.dried_peas ?? 0).toBeLessThan(20)
+    expect((v.goods.smoked_fish ?? 0) / 20).toBeCloseTo((v.goods.dried_peas ?? 0) / 20, 1) // the tastes are equal rations, not equal shares
+  })
+})

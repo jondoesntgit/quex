@@ -32,6 +32,7 @@ optional fields required (with a default in `newGame` / `join`); delete the disp
 | `STARTER_FROM` | reducer.ts | 2026-11-23 | the square was three town houses on one hex |
 | `FOOD_FROM` | reducer.ts | 2026-11-24 | old food rules; new villages started with less grain and no field |
 | `EXACT_SIZE_FROM` | reducer.ts | 2026-11-26 | a bigger action could pay for a smaller task |
+| `EAT_FRESH_FROM` (`eatFoodOld`) | reducer.ts | 2026-11-27 | each food in turn gave a third of the meal (fresh first), then they filled up, so preserved food went while fresh food spoiled |
 | `SQUARE_FROM` | reducer.ts (`join`, `starterFor(…, corner)`) | 2026-11-27 | a new village's well stood on its own hex, homes one to a hex, hexes on any level |
 | `RAIDS_FROM` | reducer.ts | 2026-11-27 | one village's `expedition` took on a lair; troops sent home were home at once (no walk, no `homeward` goods) and stayed till their food ran out; lairs raided villages in spring too; a night raid took a fifth of one good (from it, orcs and goblins come in force and every able adult turns out: `nightRaid`); troops carried raw metal and leather (`OLD_GEAR`), from it soldiers' kit (`GEAR` = `KIT`). A detachment that left before it keeps its old gear (it doesn't count in a fight, and goes home with them). From it, camps grow stronger day by day (`grewOn`) and night raids grow more frequent week by week; a workshop built from it waits for an order (`order: ''`), while one built before carries on with its first recipe (outfitters, which had no recipes before, are set to wait in `warnOfOrcs`) |
 
