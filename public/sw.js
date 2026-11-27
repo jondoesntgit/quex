@@ -1,9 +1,11 @@
 /* Quex service worker: keeps the game playable with no connection.
  * - Pages: network first, falling back to the cached copy when offline.
+ * - The art's JSON (sprite sheets' frame lists and the hash of their image): network first, so new art shows up
+ *   at once (their images are fetched by that hash, so they stay cache first).
  * - Built files (/assets/*, hashed names), tile art, icons, fonts: cache first.
  * - Everything else (Supabase API, realtime) goes straight to the network.
  * Bump VERSION to drop old caches. */
-const VERSION = 'quex-v2'
+const VERSION = 'quex-v3'
 const STATIC = /^\/(assets|art|icons)\/|\.(woff2?|ttf|png|svg|webmanifest)$/
 
 self.addEventListener('install', (e) => {
@@ -31,6 +33,16 @@ self.addEventListener('fetch', (e) => {
         if (res.status === 200) caches.open(VERSION).then((c) => c.put('/', copy))
         return res
       }).catch(() => caches.match('/').then((r) => r || caches.match(req))),
+    )
+    return
+  }
+
+  if (/^\/art\/.*\.json$/.test(url.pathname)) {
+    e.respondWith(
+      fetch(req).then((res) => {
+        if (res.status === 200 && res.type === 'basic') { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)) }
+        return res
+      }).catch(() => caches.match(req).then((r) => r || Response.error())),
     )
     return
   }
