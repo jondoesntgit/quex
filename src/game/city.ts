@@ -28,21 +28,32 @@ const PAD = 0.5
 type Pt = [number, number]
 
 export type HomeKind = Home['kind']
-export const HOMES: Record<HomeKind, { name: string; size: 'medium' | 'big'; cost: Goods; cap: number; blurb: string }> = {
+export const HOMES: Record<HomeKind, { name: string; size: 'medium' | 'big'; cost: Goods; cap: number; storage?: number; blurb: string }> = {
   cottage: { name: 'Cottage', size: 'medium', cost: { timber: 3, stone: 1 }, cap: 12, blurb: 'A cottage: room for 12 villagers.' },
   townhouse: { name: 'Town house', size: 'big', cost: { timber: 4, planks: 2, stone: 3 }, cap: 24, blurb: 'Two storeys on a narrow plot: room for 24 villagers.' },
+  // the Granary's job (and price), as a building on the cobbles
+  barn: { name: 'Barn', size: 'medium', cost: { timber: 6, stone: 2 }, cap: 0, storage: 40, blurb: 'A barn on the cobbles: keeps food safe for the Saturday winter.' },
 }
+/** Homes that house people (a barn stores food instead). */
+export const isDwelling = (kind: HomeKind) => kind !== 'barn'
 /** Laying a hex of cobblestone. */
 export const COBBLE_COST: Goods = { stone: 4 }
 /** The city reaches this many hexes from the village square. */
 export const CITY_RADIUS = 2
 
 export const homesCap = (v: Village) => (v.homes ?? []).reduce((a, h) => a + (h.start ? 0 : HOMES[h.kind].cap), 0)
+/** Food storage the city's barns add (in the same units as a building's `storage`). */
+export const homesStorage = (v: Village) => (v.homes ?? []).reduce((a, h) => a + (HOMES[h.kind].storage ?? 0), 0)
+/** The open square round the well, for villages whose well stands where three cobbled hexes meet (ground px). */
+export const SQUARE = 15
 
 // ------------------------------------------------------------------ the ground
 const feet = sheet.footprints as Record<string, number[]>
 /** A sprite key that's really on the sheet, for this kind of home. */
-export const validKey = (kind: HomeKind, key: string) => !!feet[key] && (kind === 'cottage' ? /^c_[SML]_(tile|tile2|thatch|shingle|slate)_[xy]_[01]$/.test(key) : /^t_(tile|tile2|slate|shingle)_y_[012]$/.test(key))
+export const validKey = (kind: HomeKind, key: string) => !!feet[key] && (
+  kind === 'cottage' ? /^c_[SML]_(tile|tile2|thatch|shingle|slate)_[xy]_[01]$/.test(key)
+    : kind === 'barn' ? /^b_(thatch|shingle)$/.test(key)
+      : /^t_(tile|tile2|slate|shingle)_y_[012]$/.test(key))
 
 /** Half extents of a building's footprint on the ground (px), a little generous. */
 export function dims(key: string): Pt {
@@ -132,6 +143,16 @@ function screenOk(world: World, v: Village, c: Box, others: Box[]): boolean {
       }
     }
     if (hid > all / 3 || doorHid > 1) return false
+    // the well in its square stays in plain view: nothing in front comes within a block of it
+    if (back.key === 'well') {
+      for (let y = 0; y < 24; y++) for (let x = 0; x < 16; x++) {
+        if (!mb[y * 16 + x]) continue
+        for (let ey = -1; ey <= 1; ey++) for (let ex = -1; ex <= 1; ex++) {
+          const fx = x + ex - sx, fy = y + ey - sy
+          if (fx >= 0 && fy >= 0 && fx < 16 && fy < 24 && mf[fy * 16 + fx]) return false
+        }
+      }
+    }
   }
   return true
 }
@@ -211,6 +232,9 @@ export function roomFor(world: World, v: Village, h: Home, skip?: Home): boolean
     const q: Pt = [b.gx + sx * b.hx, b.gy + sy * b.hy], i = hexAt(world, v, q)
     if (i < 0 || !city.has(i) || world.cells[i].tier !== tier) return false
   }
+  // the open square round the well
+  const sq = v.starter?.square
+  if (sq && Math.hypot(Math.max(Math.abs(b.gx - v.starter!.x) - b.hx, 0), Math.max(Math.abs(b.gy - v.starter!.y) - b.hy, 0)) < sq) return false
   const others = boxesOf(world, v).filter((o) => !skip || o.fixed || o.gx !== skip.x || o.gy !== skip.y)
   const mine = approach(b)
   for (const o of others) {
@@ -399,6 +423,7 @@ const SIZES = ['S', 'M', 'M', 'L'], ROOFS = ['tile', 'tile2', 'thatch', 'shingle
 function keysFor(kind: HomeKind, seed: number): string[] {
   const at = (xs: string[], salt: number) => xs[Math.floor(pick01(seed, salt) * xs.length)]
   if (kind === 'townhouse') return [`t_${at(TOWN_ROOFS, 1)}_y_${Math.floor(pick01(seed, 2) * 3)}`]
+  if (kind === 'barn') return [`b_${at(['thatch', 'shingle'], 1)}`]
   const sz = at(SIZES, 1), roof = at(ROOFS, 2), tim = pick01(seed, 3) < 0.5 ? 0 : 1
   return pick01(seed, 4) < 0.5 ? [`c_${sz}_${roof}_x_${tim}`, `c_${sz}_${roof}_y_${tim}`] : [`c_${sz}_${roof}_y_${tim}`, `c_${sz}_${roof}_x_${tim}`]
 }
@@ -406,10 +431,10 @@ const seedOf = (v: Village) => (v.homes?.length ?? 0) * 7919 + [...v.id].reduce(
 
 /** A place for a home of this kind: in `hex` if given (nearest `near`, else nearest the square), or
  *  anywhere in the city. Chooses what the player will be asked to confirm; the server re-checks it. */
-export function findHome(world: World, v: Village, kind: HomeKind, hex: number | null = null, near: Pt | null = null): Home | null {
-  const seed = seedOf(v), keys = keysFor(kind, seed), gates = openGates(world, v)
+export function findHome(world: World, v: Village, kind: HomeKind, hex: number | null = null, near: Pt | null = null, keysWanted?: string[]): Home | null {
+  const seed = seedOf(v), keys = keysWanted ?? keysFor(kind, seed), gates = openGates(world, v)
   const hexes = hex === null ? (v.city ?? []) : [hex]
-  const aim: Pt = near ?? [0, 0]
+  const aim: Pt = near ?? (v.starter ? [v.starter.x, v.starter.y] : [0, 0])
   const spots: { g: Pt; d: number }[] = []
   for (const i of hexes) {
     const c = centreOf(world, v, i)
@@ -420,7 +445,7 @@ export function findHome(world: World, v: Village, kind: HomeKind, hex: number |
     }
   }
   spots.sort((a, b) => a.d - b.d)
-  for (const { g } of spots) for (const key of keys) for (const side of ['front', 'back'] as const) {
+  for (const { g } of spots) for (const key of keys) for (const side of kind === 'barn' ? ['front'] as const : ['front', 'back'] as const) {
     const h: Home = { kind, key, x: Math.round(g[0] * 10) / 10, y: Math.round(g[1] * 10) / 10, side }
     if (roomFor(world, v, h) && visible(world, v, h) && walkable(world, v, [h], gates)) return h
   }
@@ -428,12 +453,83 @@ export function findHome(world: World, v: Village, kind: HomeKind, hex: number |
 }
 
 // ------------------------------------------------------------------ the square, laid out in the city
-/** The starting square of a village with a city of three hexes or more: a well on the village hex and a few
- *  homes (a town house and two or three cottages) spread over the cobbles, instead of three town houses
- *  crowded onto one hex. Null if they won't fit (then the fixed picture stays). Deterministic. */
-export function starterFor(world: World, v: Village): { starter: { x: number; y: number }; homes: Home[] } | null {
+/** Where three cobbled hexes meet at a corner: the corner (ground px, where the well goes), and the three
+ *  hexes, fewest levels first (then the village's own hex and the first hexes of its city). `levels` says how
+ *  many levels they stand on: if more than one, levelCity evens them out first. Null if no three meet. */
+export function cornerOf(world: World, v: Village): { at: Pt; hexes: number[]; levels: number } | null {
+  const city = v.city ?? []
+  const near = (a: number, b: number) => distance(world.cells[a], world.cells[b]) === 1
+  let best: { hexes: number[]; levels: number } | null = null
+  for (let a = 0; a < city.length; a++) for (let b = a + 1; b < city.length; b++) for (let c = b + 1; c < city.length; c++) {
+    const hs = [city[a], city[b], city[c]]
+    if (!near(hs[0], hs[1]) || !near(hs[1], hs[2]) || !near(hs[0], hs[2])) continue
+    const levels = new Set(hs.map((h) => world.cells[h].tier)).size
+    if (!best || levels < best.levels) best = { hexes: hs, levels }
+  }
+  if (!best) return null
+  const cs = best.hexes.map((h) => centreOf(world, v, h))
+  const at: Pt = [Math.round((cs[0][0] + cs[1][0] + cs[2][0]) / 3 * 10) / 10, Math.round((cs[0][1] + cs[1][1] + cs[2][1]) / 3 * 10) / 10]
+  return { at, hexes: best.hexes, levels: best.levels }
+}
+
+/** The ground made level for a square: the hex (of the three meeting at the corner) that isn't on the level
+ *  the other two share is raised or lowered to it (if all three differ, the two others go to the village
+ *  hex's level). Returns the hexes to change and the level each takes; nothing if they already match. */
+export function levelling(world: World, v: Village): Record<number, number> {
+  const c = cornerOf(world, v)
+  if (!c || c.levels === 1) return {}
+  const tiers = c.hexes.map((h) => world.cells[h].tier)
+  const shared = tiers.find((t, k) => tiers.indexOf(t) !== k)
+  const home = v.row * world.width + v.col
+  const level = shared ?? world.cells[c.hexes.includes(home) ? home : c.hexes[0]].tier
+  const out: Record<number, number> = {}
+  for (const h of c.hexes) if (world.cells[h].tier !== level) out[h] = level
+  return out
+}
+
+const originalTier = new WeakMap<World, Map<number, number>>()
+/** Put the world's ground at the levels the game has set (state.levelled), and any other hex back to where
+ *  the world was made. Call it wherever a state meets its world: the levels live in the state. */
+export function levelWorld(world: World, levelled: Record<number, number> | undefined) {
+  let orig = originalTier.get(world)
+  if (!orig) { orig = new Map(); originalTier.set(world, orig) }
+  const want = levelled ?? {}
+  let changed = false
+  for (const [i, t] of [...orig]) if (!(i in want)) { if (world.cells[i].tier !== t) { world.cells[i].tier = t; changed = true } orig.delete(i) }
+  for (const [k, t] of Object.entries(want)) {
+    const i = Number(k), cell = world.cells[i]
+    if (!cell) continue
+    if (!orig.has(i)) orig.set(i, cell.tier)
+    if (cell.tier !== t) { cell.tier = t; changed = true }
+  }
+  if (changed) highCache.delete(world)
+}
+
+/** The starting square of a village with a city of three hexes or more.
+ *
+ *  With `corner` (villages founded since SQUARE_FROM): the well stands where the three hexes meet, with an
+ *  open square round it, and a town house and three cottages are packed round the square across the three
+ *  hexes. Before that: a well on the village hex and the homes spread one to a hex.
+ *  Null if they won't fit (then the fixed picture stays). Deterministic. */
+export function starterFor(world: World, v: Village, corner = false): { starter: { x: number; y: number; square?: number }; homes: Home[] } | null {
   const city = v.city ?? []
   if (city.length < 3) return null
+  if (corner) {
+    const c = cornerOf(world, v)
+    if (c) {
+      const starter = { x: c.at[0], y: c.at[1], square: SQUARE }
+      const base: Village = { ...v, starter, homes: [...(v.homes ?? [])] }
+      const placed: Home[] = []
+      for (const kind of ['townhouse', 'cottage', 'cottage', 'cottage'] as HomeKind[]) {
+        const h = findHome(world, base, kind)
+        if (!h) continue
+        const home: Home = { ...h, start: true }
+        base.homes!.push(home)
+        placed.push(home)
+      }
+      if (placed.length >= 2) return { starter, homes: placed }
+    }
+  }
   const base: Village = { ...v, starter: { x: 0, y: 0 }, homes: [...(v.homes ?? [])] }
   const placed: Home[] = []
   // each in a different hex in turn, near the middle of it (the village hex: in front of the well)
@@ -451,4 +547,52 @@ export function starterFor(world: World, v: Village): { starter: { x: number; y:
     if (placed.length >= 4) break
   }
   return placed.length >= 2 ? { starter: { x: 0, y: 0 }, homes: placed } : null
+}
+
+/** The `n`th cottage of a kind for this village, to be placed (relayout finds where). */
+export function cottageFor(v: Village, n: number): Home {
+  return { kind: 'cottage', key: keysFor('cottage', seedOf(v) + n * 104729)[0], x: 0, y: 0, side: 'front' }
+}
+
+/** Other sprites a home could take and still be the same home: a cottage turned the other way. */
+function altKeys(h: Home): string[] {
+  if (h.kind === 'barn') return [h.key, h.key === 'b_thatch' ? 'b_shingle' : 'b_thatch']
+  if (h.kind !== 'cottage') return [h.key]
+  const turned = h.key.replace(/_([xy])_([01])$/, (_, o, t) => `_${o === 'x' ? 'y' : 'x'}_${t}`)
+  return [h.key, turned]
+}
+
+/** A village's square moved to the corner where three of its cobbled hexes meet, and everything on the
+ *  cobbles laid out again round it, nearest the well first (the same homes, as many of each kind, the same
+ *  sprites where they fit, and a barn for each of `barns`). Null if there's no such corner or anything won't fit. */
+export function relayout(world: World, v: Village, barns = 0, extra: Home[] = []): { starter: { x: number; y: number; square: number }; homes: Home[] } | null {
+  const c = cornerOf(world, v)
+  if (!c) return null
+  const starter = { x: c.at[0], y: c.at[1], square: SQUARE }
+  const old = v.homes ?? []
+  const barnHome = (n: number): Home => ({ kind: 'barn', key: n % 2 ? 'b_shingle' : 'b_thatch', x: 0, y: 0, side: 'front' })
+  const all: Home[] = [...old, ...extra, ...Array.from({ length: barns }, (_, n) => barnHome(n + old.length))]
+  // the biggest first packs best: town houses, then barns, then cottages large to small (the start homes before the ones built)
+  const size = (h: Home) => { const [hx, hy] = dims(h.key); return hx * hy }
+  const tries = [
+    [...all].sort((a, b) => Number(!!b.start) - Number(!!a.start) || size(b) - size(a)),
+    [...all].sort((a, b) => size(b) - size(a)),
+    all,
+  ]
+  for (const order of tries) {
+    const base: Village = { ...v, starter, homes: [] }
+    let ok = true
+    for (const h of order) {
+      const at = findHome(world, base, h.kind, null, null, altKeys(h))
+      if (!at) { ok = false; break }
+      base.homes!.push({ ...at, ...(h.start ? { start: true } : {}) })
+    }
+    if (ok) {
+      // keep the homes in the order they were built (the barns after them)
+      const placed = base.homes!
+      const out = all.map((h) => placed[order.indexOf(h)])
+      return { starter, homes: out }
+    }
+  }
+  return null
 }

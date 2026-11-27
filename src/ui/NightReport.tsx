@@ -2,7 +2,7 @@
  *  it (the day's score, morale, workers, tools, water, the season), then the flock, eating, spoiling and anything
  *  else the night did. Shown once, the first time the player opens the game after a night; the Village tab keeps
  *  it to read again. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FOOD, GOOD_LABEL, isBulk, type Good, type Goods } from '../game/data'
 import { rationsOf, shown } from '../game/units'
@@ -11,6 +11,7 @@ import type { NightReport, Player, Village } from '../game/types'
 import type { Game } from '../app/store'
 import { Icon } from './Icon'
 import { arrivalPending } from './Arrivals'
+import { hadNotice, markNotice, onScreen } from './notices'
 
 const KEY = (villageId: string) => `quex:night:${villageId}`
 function seenNight(villageId: string): string | null {
@@ -75,10 +76,19 @@ export function NightReportCard({ r, onClose }: { r: NightReport; onClose: () =>
 export function MorningReport({ game, p }: { game: Game; p: Player }) {
   const v: Village | undefined = game.state.villages[p.villageId]
   const [, bump] = useState(0)
-  if (!v || game.guest || !v.lastNight || arrivalPending(v)) return null
-  const r = v.lastNight
-  if (seenNight(v.id) === r.date) return null
-  return <NightReportCard r={r} onClose={() => { rememberNight(v.id, r.date); bump((x) => x + 1) }} />
+  const r = v?.lastNight
+  const id = r ? `night:${r.date}` : ''
+  const show = !!v && !!r && !game.guest && !arrivalPending(v, game.now())
+    && (onScreen.has(id) || (!hadNotice(v, id) && seenNight(v.id) !== r.date))
+  // had the moment it shows (on every device); it stays up until closed
+  useEffect(() => {
+    if (!show || !v || onScreen.has(id)) return
+    onScreen.add(id)
+    rememberNight(v.id, r!.date)
+    markNotice(game, p, v, id)
+  }, [show, id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!show) return null
+  return <NightReportCard r={r!} onClose={() => { onScreen.delete(id); bump((x) => x + 1) }} />
 }
 
 /** The Village tab's way back to it. */

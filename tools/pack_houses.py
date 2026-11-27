@@ -6,6 +6,7 @@ Run: python3 tools/pack_houses.py <render dir>   ->  public/art/houses/houses.pn
 (the render dir comes from: REPO=$PWD OUT=<dir> Blender --background --factory-startup --python tools/blender/render_houses.py)"""
 import hashlib, json, os, sys
 from PIL import Image
+from unbrace import unbrace
 SRC = sys.argv[1]
 def outline(img):
     out = img.copy(); src, dst = img.load(), out.load()
@@ -22,7 +23,9 @@ frames = {}
 masks = {}
 for n, k in enumerate(keys):
     x, y = (n % COLS) * W, (n // COLS) * H
-    sheet.alpha_composite(outline(Image.open(os.path.join(SRC, k + '.png')).convert('RGBA')), (x, y))
+    sprite = outline(Image.open(os.path.join(SRC, k + '.png')).convert('RGBA'))
+    unbrace(sprite)  # no dashed diagonal braces on the walls
+    sheet.alpha_composite(sprite, (x, y))
     frames[k] = [x, y]
     a = Image.open(os.path.join(SRC, k + '.png')).convert('RGBA').split()[3]
     bits = ''.join('1' if any(a.getpixel((bx * 4 + i, by * 4 + j)) > 0 for i in range(4) for j in range(4)) else '0' for by in range(24) for bx in range(16))

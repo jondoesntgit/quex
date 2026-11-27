@@ -120,9 +120,11 @@ export interface Village {
   homes?: Home[]
   /** the square is laid out in the city (a well here, ground px from the village hex's centre, and `start` homes)
    *  instead of the fixed picture of three town houses on the village hex */
-  starter?: { x: number; y: number }
+  starter?: { x: number; y: number; /** the open square round the well, ground px (nothing is built nearer) */ square?: number }
   /** the newest groups of immigrants (see immigrants.ts), shown to the player as a note */
   arrivals?: Arrival[]
+  /** notices the player has had on any device (see the 'seen' event): arrival ids and `night:<date>` */
+  seen?: string[]
   /** the winter whose newcomers have already come */
   welcomed?: ISODate
   /** when the village was founded (unset for villages founded before it was kept: see foundedAt) */
@@ -166,8 +168,8 @@ export interface Arrival {
 
 /** A home in the city: a cottage or a town house, with the sprite it's drawn with and where it stands. */
 export interface Home {
-  kind: 'cottage' | 'townhouse'
-  /** sprite on the house sheet, e.g. 'c_M_thatch_x_1' or 't_tile_y_0' */
+  kind: 'cottage' | 'townhouse' | 'barn'
+  /** sprite on the house sheet, e.g. 'c_M_thatch_x_1', 't_tile_y_0' or 'b_thatch' */
   key: string
   /** ground position of its centre, in px from the village hex's centre (screen y is y * 0.5774) */
   x: number
@@ -215,6 +217,10 @@ export interface GameState {
   cheeseRations?: boolean
   /** every village that could has had its square laid out in its city (see placeStarters) */
   startersPlaced?: boolean
+  /** every village that could has had its well moved to the corner of its first three cobbled hexes (see moveWells) */
+  wellsMoved?: boolean
+  /** hexes raised or lowered so a city's square stands on one level: hex -> level (see levelWorld) */
+  levelled?: Record<number, number>
   /** the food update's gift of grain has been handed out (see FOOD_UPDATE_FROM) */
   foodUpdate?: boolean
   worldSeed: string
@@ -302,6 +308,8 @@ export type GameEvent =
   | (Base & { t: 'roadplan'; plan?: { col: number; row: number }[]; crew?: number })
   /** pick the colours of the player's borders and villagers (null puts the default back; a missing key is left alone) */
   | (Base & { t: 'colors'; border?: string | null; meeple?: string | null })
+  /** the player has had these notices (arrival ids, `night:<date>` for a morning report), on any device */
+  | (Base & { t: 'seen'; ids: string[] })
   /** barter with a merchant calling at the village today (game/market) */
   | (Base & { t: 'barter'; merchant: 'ship' | 'barge' | 'caravan' | 'pedlar'; give: Goods; take: Goods })
   /** give up this village entirely; the player can found a new one */

@@ -15,7 +15,7 @@ import {
 import { barterProblem, noteTrade, weightOf } from './market'
 import { shown } from './amount'
 import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
-import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, hexAt, paveable, validKey } from './city'
+import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, cottageFor, homesStorage, hexAt, isDwelling, levelling, levelWorld, paveable, relayout, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
 import { CARRY_EACH, people, spare, staffing, needOf, jobs } from './workers'
 import { CHEESE_PER_HEAD, WOOL_PER_HEAD, CULL_RATE, FEED_PER_HEAD, LEAN_CULL, LEAN_DAYS, age, dailyYield, heads, lamb, mutton, pastureCap, sheepOf, slaughter } from './herds'
@@ -31,6 +31,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
     headsScaled: true,
     cheeseRations: true,
     startersPlaced: true,
+    wellsMoved: true,
     foodUpdate: true,
     worldSeed: world.seed,
     seasonStart,
@@ -316,7 +317,7 @@ export function done(v: Village) {
 }
 
 export function storageCap(v: Village) {
-  return FOOD_SCALE * (30 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0))
+  return FOOD_SCALE * (30 + done(v).reduce((a, b) => a + (BUILDINGS[b.type].storage ?? 0), 0) + homesStorage(v))
 }
 
 export function foodStock(v: Village, keepsOnly = false) {
@@ -520,6 +521,8 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
       if (ev.crew !== undefined && (!Number.isInteger(ev.crew) || ev.crew < 0 || ev.crew > people(v))) return `The team can be at most ${people(v)} people`
       return null
     }
+    case 'seen':
+      return Array.isArray(ev.ids) && ev.ids.length > 0 && ev.ids.length <= 20 && ev.ids.every((x) => typeof x === 'string' && x.length <= 80) ? null : 'Nothing to mark as read'
     case 'colors': {
       for (const c of [ev.border, ev.meeple]) if (c != null && !/^#[0-9a-f]{6}$/i.test(c)) return 'Colours look like #aabbcc'
       return ev.border === undefined && ev.meeple === undefined ? 'Pick a colour' : null
@@ -829,6 +832,7 @@ export function fmtGoods(g: Goods, k = 1) {
 export const TREES_FROM = '2026-11-19T13:00:00.000Z'
 
 export function apply(s: GameState, world: World, ev: GameEvent): GameState {
+  levelWorld(world, s.levelled)
   const err = validate(s, world, ev)
   s.version++
   deliverCaravans(s, ev.at)
@@ -838,6 +842,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   convertToCities(s, world, ev.at)
   convertCheese(s, ev.at)
   placeStarters(s, world, ev.at)
+  moveWells(s, world, ev.at)
   foodUpdate(s, world, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
@@ -881,6 +886,11 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
       ensureDay(p, ev.date).frozen = true
       p.freezes--
       log(s, ev.at, p.id, `${P(p)} used a freeze for ${ev.date}.`, 'info')
+      return s
+    }
+    case 'seen': {
+      const v = s.villages[p.villageId]
+      if (v) v.seen = [...new Set([...(v.seen ?? []), ...ev.ids])].slice(-40)
       return s
     }
     case 'colors': {
@@ -1141,6 +1151,76 @@ function placeStarters(s: GameState, world: World, at: string) {
   }
 }
 
+/** From this moment a village's well stands where three of its cobbled hexes meet, with an open square
+ *  round it and the homes packed round that (as in the village builder demo), and the Granary is a Barn
+ *  built on the cobbles. New villages start that way. Every village already standing with a city of three
+ *  hexes or more has its well moved to that corner once, its homes laid out again round the square, and each
+ *  granary it finished rebuilt as a barn in the city (if they all fit; otherwise it stays as it was).
+ *  Nothing else changes: not its food, goods or people, nor the room its homes have. */
+export const SQUARE_FROM = '2026-11-27T00:45:00.000Z'
+/** Raise or lower the odd one of the three hexes meeting at a village's square to the others' level. */
+function levelCity(s: GameState, world: World, v: Village) {
+  const change = levelling(world, v)
+  if (!Object.keys(change).length) return
+  s.levelled = { ...(s.levelled ?? {}), ...change }
+  levelWorld(world, s.levelled)
+}
+function moveWells(s: GameState, world: World, at: string) {
+  if (s.wellsMoved || at < SQUARE_FROM) return
+  const before = s.levelled
+  try {
+    for (const v of Object.values(s.villages)) {
+      if (!v.starter || (v.city?.length ?? 0) < 3) continue
+      const city = v.city!
+      const granaries = v.buildings.filter((b) => b.type === 'granary' && b.progress >= 1)
+      // the old House buildings beside the city: their hex is cobbled and the House becomes two cottages
+      const houses = v.buildings.filter((b) => {
+        if (b.type !== 'house' || b.progress < 1) return false
+        const i = cellIndex(world, b.col, b.row)
+        return !city.includes(i) && paveable(world.cells[i]) && city.some((c) => distance(world.cells[c], b) === 1)
+      })
+      const houseHexes = houses.map((b) => cellIndex(world, b.col, b.row))
+      const cottages = houses.flatMap((_, k) => [cottageFor(v, 2 * k + 1), cottageFor(v, 2 * k + 2)])
+      // everything if it fits; else without the barns, without the Houses, or just the square
+      const tries: [boolean, boolean][] = [[true, true], [true, false], [false, true], [false, false]]
+      let done: { r: NonNullable<ReturnType<typeof relayout>>; withHouses: boolean; withBarns: boolean } | null = null
+      const was = s.levelled
+      const tried = new Set<string>()
+      for (const [h, g] of tries) {
+        const withHouses = h && houses.length > 0, withBarns = g && granaries.length > 0
+        if (tried.has(`${withHouses}${withBarns}`)) continue
+        tried.add(`${withHouses}${withBarns}`)
+        const w: Village = { ...v, city: withHouses ? [...city, ...houseHexes] : city }
+        levelCity(s, world, w)
+        const r = relayout(world, w, withBarns ? granaries.length : 0, withHouses ? cottages : [])
+        if (r) { done = { r, withHouses, withBarns }; break }
+        // no room: the ground goes back as it was too
+        s.levelled = was
+        levelWorld(world, s.levelled)
+      }
+      if (!done) continue
+      const { r, withHouses, withBarns } = done
+      v.starter = r.starter
+      v.homes = r.homes
+      if (withHouses) {
+        v.city = [...city, ...houseHexes]
+        for (const i of houseHexes) clearForCity(world, s, i, at)
+      }
+      v.buildings = v.buildings.filter((b) => !(withBarns && granaries.includes(b)) && !(withHouses && houses.includes(b)))
+      const also = [
+        withHouses ? `${houses.length === 1 ? 'its House is now two cottages, on new cobbles' : `its ${houses.length} Houses are now cottages, on new cobbles`}` : '',
+        withBarns ? 'its granary is now a barn in the city (it stores just as much)' : '',
+      ].filter(Boolean)
+      log(s, at, v.playerId, `${V(v)}'s well now stands where its cobbled hexes meet, on level ground with a square round it, and its homes have been moved round the square${also.length ? `; ${also.join('; ')}` : ''}. Nothing else changed.`, 'good')
+    }
+    s.wellsMoved = true
+  } catch (e) {
+    s.levelled = before
+    levelWorld(world, s.levelled)
+    console.error('moving the wells could not run yet:', e)
+  }
+}
+
 function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>) {
   const vid = 'v_' + ev.playerId
   const p: Player = {
@@ -1159,7 +1239,8 @@ function join(s: GameState, world: World, ev: Extract<GameEvent, { t: 'join' }>)
   v.city = claimCity(world, v, takenHexes(world, s, v))
   for (const i of v.city) clearForCity(world, s, i, ev.at)
   if (ev.at >= STARTER_FROM) {
-    const st = starterFor(world, v)
+    if (ev.at >= SQUARE_FROM) levelCity(s, world, v)
+    const st = starterFor(world, v, ev.at >= SQUARE_FROM)
     if (st) { v.starter = st.starter; v.homes = st.homes }
   }
   const field = ev.at >= FOOD_FROM ? starterField(world, s, v) : null
@@ -1330,7 +1411,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       const h = ev.home!, def = HOMES[h.kind]
       addGoods(v, def.cost, -1)
       ;(v.homes ??= []).push({ kind: h.kind, key: h.key, x: h.x, y: h.y, side: h.side })
-      log(s, ev.at, p.id, `${P(p)} built ${an(def.name.toLowerCase())} in the city: room for ${def.cap} more villagers.`, 'good')
+      log(s, ev.at, p.id, isDwelling(h.kind) ? `${P(p)} built ${an(def.name.toLowerCase())} in the city: room for ${def.cap} more villagers.` : `${P(p)} built ${an(def.name.toLowerCase())} in the city: room to store ${(def.storage ?? 0) * FOOD_SCALE} more rations.`, 'good')
       break
     }
     case 'upgrade': {
@@ -1572,10 +1653,12 @@ export function caravanMinutes(p: Player, from: Village, to: Village, at: string
   return Math.round(steps.reduce((a, m) => a + m, 0) * k)
 }
 
-/** The shortest way along road hexes from one village to another (through any village on the way), or null. */
+/** The shortest way along road hexes from one village to another (through any village on the way), or null.
+ *  A dirt road also runs on through a hex with a building or an outpost on it, from one road to another
+ *  (the map draws it to the building and on), but not from one such hex to the next. */
 export function roadPath(world: World, s: GameState, from: Village, to: Village, pavedOnly = false): number[] | null {
-  const { roads, paved, towns } = roadSets(world, s)
-  const ok = (i: number) => towns.has(i) || (pavedOnly ? paved.has(i) : roads.has(i))
+  const { roads, paved, towns, stops } = roadSets(world, s)
+  const onRoad = (i: number) => towns.has(i) || (pavedOnly ? paved.has(i) : roads.has(i))
   const start = cellIndex(world, from.col, from.row), goal = cellIndex(world, to.col, to.row)
   const prev = new Map<number, number>([[start, -1]])
   const queue = [start]
@@ -1586,7 +1669,10 @@ export function roadPath(world: World, s: GameState, from: Village, to: Village,
     for (const [nc, nr] of neighbours(c.col, c.row)) {
       if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
       const j = nr * world.width + nc
-      if (prev.has(j) || !ok(j)) continue
+      if (prev.has(j)) continue
+      // into a building's hex only off a road, and out of one only onto a road
+      const through = !pavedOnly && stops.has(j) && onRoad(i)
+      if (!onRoad(j) && !through) continue
       prev.set(j, i)
       queue.push(j)
     }
@@ -1653,7 +1739,14 @@ function roadSets(world: World, s: GameState) {
     towns.add(cellIndex(world, v.col, v.row))
   }
   for (const t of towns) roads.add(t)
-  return { roads, paved, towns }
+  // hexes a road leads to and on from: buildings and outposts (not roads themselves)
+  const stops = new Set<number>()
+  for (const v of Object.values(s.villages)) {
+    for (const b of v.buildings) stops.add(cellIndex(world, b.col, b.row))
+    for (const o of v.outposts) stops.add(cellIndex(world, o.col, o.row))
+  }
+  for (const r of roads) stops.delete(r)
+  return { roads, paved, towns, stops }
 }
 
 /** Food (value) a caravan's people need for the road, there and back: what each eats a day, a day at least. */
@@ -2338,7 +2431,7 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
   }
 
   // 3. spoilage + storage cap
-  if (traced('Spoiled', () => spoil(v), (rotted) => [{ label: 'Fresh food', value: 'loses 30% overnight' }, ...(rotted ? [{ label: 'Past what the stores hold', value: 'rots' }] : [])])) notes.push('food rotted for want of a granary')
+  if (traced('Spoiled', () => spoil(v), (rotted) => [{ label: 'Fresh food', value: 'loses 30% overnight' }, ...(rotted ? [{ label: 'Past what the stores hold', value: 'rots' }] : [])])) notes.push('food rotted for want of a barn')
 
   // 4. newcomers come once a year, the Sunday after winter: as many as the village has room and morale for,
   // with food for three days, if it got through the winter night without going hungry

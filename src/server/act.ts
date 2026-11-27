@@ -11,6 +11,7 @@
  *  other players), but nothing is rebuilt from them any more except once, to
  *  make a world's first snapshot (seed). */
 import { generateWorld } from '../world/generate'
+import { levelWorld } from '../game/city'
 import type { World } from '../world/types'
 import { playerDate } from '../game/calendar'
 import { apply, newGame, pendingTicks, validate } from '../game/reducer'
@@ -41,6 +42,8 @@ function serverProblem(s: GameState, ev: GameEvent, now: Date): string | null {
 export function act(state: GameState, world: World, proposed: GameEvent, now: Date): Outcome {
   // the server's clock decides when things happen
   const ev = { ...proposed, at: now.toISOString() } as GameEvent
+  // the ground as this world's state has levelled it (squares on one level)
+  levelWorld(world, state.levelled)
   const err = serverProblem(state, ev, now) ?? validate(state, world, ev)
   if (err) return { ok: false, error: err }
   const next = structuredClone(state)

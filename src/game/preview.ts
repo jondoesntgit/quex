@@ -7,7 +7,7 @@
  *
  *  The numbers come from the same rule functions the reducer uses, so what's shown is what happens
  *  (preview.test.ts checks it against the reducer). Nothing here changes the game. */
-import { ACTIONS, BUILDINGS, FOOD, GATHER, gatherAmount, GOOD_LABEL, type ActionKind, type BuildingId, type TaskSize } from './data'
+import { ACTIONS, BUILDINGS, FOOD, FOOD_SCALE, GATHER, gatherAmount, GOOD_LABEL, type ActionKind, type BuildingId, type TaskSize } from './data'
 import { DEPLETION_FROM, gameLeft, leftAt } from './deposits'
 import { PAVE_COST, buildCost, buildingAt, fmtGoods, landAt, cellIndex, refundOf } from './reducer'
 import { COBBLE_COST, HOMES } from './city'
@@ -130,8 +130,13 @@ export function outcome(world: World, s: GameState, p: Player, action: ActionKin
       if (!h) break
       const def = HOMES[h.kind]
       out.spends.push(fmtGoods(def.cost))
-      out.gets.push(`A ${def.name.toLowerCase()} in the city`, `Room for ${def.cap} more villagers`)
-      out.notes.push(def.blurb, 'Villagers only move in while there is food to feed them and morale is good.')
+      if (def.storage) {
+        out.gets.push(`A ${def.name.toLowerCase()} in the city`, `Room to store ${def.storage * FOOD_SCALE} more rations`)
+        out.notes.push(def.blurb)
+      } else {
+        out.gets.push(`A ${def.name.toLowerCase()} in the city`, `Room for ${def.cap} more villagers`)
+        out.notes.push(def.blurb, 'Villagers only move in while there is food to feed them and morale is good.')
+      }
       break
     }
     case 'build': {

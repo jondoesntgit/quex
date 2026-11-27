@@ -32,6 +32,7 @@ optional fields required (with a default in `newGame` / `join`); delete the disp
 | `STARTER_FROM` | reducer.ts | 2026-11-23 | the square was three town houses on one hex |
 | `FOOD_FROM` | reducer.ts | 2026-11-24 | old food rules; new villages started with less grain and no field |
 | `EXACT_SIZE_FROM` | reducer.ts | 2026-11-26 | a bigger action could pay for a smaller task |
+| `SQUARE_FROM` | reducer.ts (`join`, `starterFor(…, corner)`) | 2026-11-27 | a new village's well stood on its own hex, homes one to a hex, hexes on any level |
 
 ## One-time conversions and grants (run on the first event after their cutoff; flag on `GameState`)
 
@@ -44,6 +45,7 @@ optional fields required (with a default in `newGame` / `join`); delete the disp
 | `foodUpdate` | `foodUpdate` | up to 100 loads of grain and a field; Arrivals note (kind `food`) |
 | `giveWells` | `wellsGiven` | a well for every pen, dairy and stable without water |
 | `giveStaff` | `staffGiven` | people (and a House) for villages short of workers |
+| `moveWells` | `wellsMoved` | moves each 3+ hex square's well to the corner (levelling the odd hex, `levelled`), lays its homes out again, turns finished granaries into barns and neighbouring Houses into cobbles and cottages |
 
 All of them are called at the top of `apply()`. Arrivals.tsx has the matching one-off notes (`update`, `food`).
 
@@ -53,6 +55,8 @@ All of them are called at the top of `apply()`. Arrivals.tsx has the matching on
 - `Player.taskStreak` (2026-11-25): unset is 0.
 - `Village.foundedAt` (2026-11-25): `foundedAt()` reads the founding line from the log instead.
 - `Village.greeted`, `Village.city`, `Village.paved`, `Village.homes`, `Village.tools` and similar: `?? []`.
+- `Village.starter.square` (2026-11-27): unset means the old square (well on the village hex, no open ground kept round it).
+- `GameState.levelled` (2026-11-27): unset means no hex was levelled.
 - `Building.sown`: unset counts as fully sown (fields built before sowing existed).
 - `DayRecord.slots`: `dayScore` treats it as empty if missing (some test fixtures, very old days).
 
@@ -60,6 +64,7 @@ All of them are called at the top of `apply()`. Arrivals.tsx has the matching on
 
 - Ore ids `copper_ore`, `iron_ore`, `silver_ore` stand for malachite, hematite and galena (the ids predate the minerals).
 - `BuildingDef.legacy` (the House): not offered any more except to a village with no room for a city; old ones still stand.
+- The Granary is `legacy` too since 2026-11-27 (the Barn, on the cobbles, replaced it): old ones that didn't fit as barns still stand and store food.
 - `Village.role` and `ROLE_TOWN` names ("Mine", "Trading Post"...) from when villages had roles.
 
 ## Display-time fixes for old saved text

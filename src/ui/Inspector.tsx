@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, FOOD_SCALE, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
 import { CARRY, fieldRain, WELCOME_DAYS, WELCOME_MORALE, welcomeOpen, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
@@ -88,11 +88,17 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
 
   const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
     const r = tryAction(game, p, action, col, row, extra, need)
+    // the window closes whatever happens: a "yes" that can't go through says why instead of hanging there
+    setConfirm(null)
     if (!r.ev) return notify(r.error ?? 'Not possible')
-    await game.dispatch(r.ev)
+    try {
+      await game.dispatch(r.ev)
+    } catch (e) {
+      console.error(e)
+      return notify("That didn't go through: try again")
+    }
     const last = game.state.log[game.state.log.length - 1]
     if (last) notify(logText(game.state, last.text))
-    setConfirm(null)
     setMode('main')
   }
 
@@ -174,7 +180,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
             <div className="actions">
               {!inCity && <WorkButton game={game} p={p} action="cobble" col={col} row={row} onPick={() => ask('cobble')} />}
               {inCity && <UpgradeButton game={game} p={p} hex={i} col={col} row={row} onPick={(h, index) => ask('upgrade', { home: h, replace: index }, HOMES.townhouse.size)} />}
-              {inCity && (['cottage', 'townhouse'] as HomeKind[]).map((k) => <HomeButton key={k} game={game} p={p} kind={k} hex={i} col={col} row={row} tap={tap} onPick={(h) => ask('home', { home: h }, HOMES[k].size)} />)}
+              {inCity && (['cottage', 'townhouse', 'barn'] as HomeKind[]).map((k) => <HomeButton key={k} game={game} p={p} kind={k} hex={i} col={col} row={row} tap={tap} onPick={(h) => ask('home', { home: h }, HOMES[k].size)} />)}
             </div>
           </>
         )}
@@ -469,7 +475,7 @@ function HomeButton({ game, p, kind, hex, col, row, tap, onPick }: { game: Game;
   return (
     <button className={`btn ${r?.ev ? def.size : ''} action`} disabled={!r?.ev} onClick={() => h && onPick(h)} title={def.blurb}>
       {def.name}
-      <small>{r?.ev ? `room for ${def.cap} · would cost ${fmtGoods(def.cost)}` : h ? r?.error : 'No room on this hex'}</small>
+      <small>{r?.ev ? `${def.storage ? `stores ${def.storage * FOOD_SCALE} rations` : `room for ${def.cap}`} · would cost ${fmtGoods(def.cost)}` : h ? r?.error : 'No room on this hex'}</small>
     </button>
   )
 }

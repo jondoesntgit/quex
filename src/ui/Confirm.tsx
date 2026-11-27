@@ -2,6 +2,7 @@
  *  "You spend" and "You get" are separate boxes, so browsing what something would cost is never
  *  mistaken for paying for it. Used for building, gathering and splitting actions. */
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 export interface ConfirmProps {
   title: string
@@ -32,7 +33,9 @@ export function Confirm({ title, spends, gets, notes = [], warn, yes = 'Yes, do 
   const said = useRef(false)
   useEffect(() => { said.current = false }, [title])
   const yesOnce = () => { if (!said.current) { said.current = true; onYes() } }
-  return (
+  // drawn in the app's own top container, above everything: a panel that scrolls or clips (the hex card on
+  // an iPad) mustn't cut it off, or the window shows as a grey screen with its buttons out of reach
+  return createPortal(
     <div className="confirm-scrim" onClick={(e) => { if (e.target === e.currentTarget) onNo() }} role="dialog" aria-modal="true" aria-label={title}>
       <div className="card confirm">
         <h2>{title}</h2>
@@ -54,6 +57,7 @@ export function Confirm({ title, spends, gets, notes = [], warn, yes = 'Yes, do 
           <button className="btn primary" onClick={yesOnce}>{yes}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.getElementById('root') ?? document.body,
   )
 }

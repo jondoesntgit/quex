@@ -222,6 +222,8 @@ export class People {
   private diggers = new Map<string, { g: Graphics; cell: number; shirt: number; skin: number; done: number }>()
   private clock = 0
   private parent: Container | null = null
+  /** each laid-out city's layer (see MapView), by village */
+  private townLayers = new Map<string, Container>()
   private state: GameState | null = null
   /** village id -> the owner's date when it is their Sabbath (absent otherwise) */
   private sabbath = new Map<string, string>()
@@ -241,10 +243,13 @@ export class People {
   nodes() { return [...this.walkers.map((w) => w.g), ...this.folk.map((f) => f.g), ...this.puffs.map((p) => p.g), ...[...this.diggers.values()].map((d) => d.g)] }
 
   /** Put the crowd into the map container and take its painter's ranks. */
-  attach(parent: Container, rank: Int32Array) {
+  attach(parent: Container, rank: Int32Array, towns: Map<string, Container> = new Map()) {
     this.rank = rank
     this.parent = parent
-    for (const w of [...this.walkers, ...this.folk]) if (w.g.parent !== parent) parent.addChild(w.g)
+    this.townLayers = towns
+    for (const w of this.walkers) if (w.g.parent !== parent) parent.addChild(w.g)
+    // villagers in a laid-out city walk in its layer, sorted among its buildings
+    for (const f of this.folk) { const home = towns.get(f.vid) ?? parent; if (f.g.parent !== home) home.addChild(f.g) }
     for (const p of this.puffs) if (p.g.parent !== parent) parent.addChild(p.g)
     for (const d of this.diggers.values()) if (d.g.parent !== parent) parent.addChild(d.g)
   }
@@ -386,7 +391,8 @@ export class People {
     const at = Math.floor(r() * town.stops.length)
     this.folk.push({ g: new Graphics(), vid: v.id, shirt: shirtOf(this.state, v.id), skin: SKIN[Math.floor(r() * SKIN.length)], rng: r, town, at, path: [town.stops[at]], seg: 0, t: 0, wait: r() * 6 })
     const f = this.folk[this.folk.length - 1]
-    if (this.parent) this.parent.addChild(f.g)
+    const home = this.townLayers.get(v.id) ?? this.parent
+    if (home) home.addChild(f.g)
   }
 
   /** Walk the folk on: pause at a door, then off along the lanes to another. */
@@ -416,8 +422,8 @@ export class People {
     if (i < 0) return
     const o = hexToPixel(v.col, v.row, this.W)
     const x = Math.round(o.x + g[0]), y = Math.round(o.y + g[1] * SQ - this.world.cells[i].tier * this.TP)
-    const r = this.rank[i] ?? -1
-    const zi = r * 4 + 3.5
+    // in a city's layer: sorted by where their feet are, among the buildings (by their front walls)
+    const zi = this.townLayers.has(f.vid) ? o.y + g[1] * SQ + 0.01 : (this.rank[i] ?? -1) * 4 + 3.5
     if (f.g.zIndex !== zi) f.g.zIndex = zi
     this.draw(f, x, y, walking ? 'walk' : 'stand', walking ? Math.floor((f.t + f.seg * 7) / 3) & 1 : 0)
   }

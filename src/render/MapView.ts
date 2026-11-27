@@ -31,7 +31,7 @@ import { drawCottages } from './cottages'
 import { drawCobbles } from './cobbles'
 import type { HouseArt } from './houseart'
 import { houseSpots, villageSpots, type Spot } from './townlayout'
-import { hexAt } from '../game/city'
+import { dims as homeDims, hexAt } from '../game/city'
 import { People } from './people'
 import { Traders } from './traders'
 import type { Atlas } from './atlas'
@@ -62,6 +62,8 @@ const BUILDING_SPRITE: Partial<Record<BuildingId, string>> = {
   pen: 'f_hut', dairy: 'f_hut', weaver: 'f_hut', scout_camp: 'f_hut', outfitter: 'f_hut',
   house: 'f_cottages', granary: 'f_hut', palisade: 'f_hut', chapel: 'f_hut', library: 'f_hut', market: 'f_village',
 }
+/** How far a building's front wall stands in front of its centre (ground px). */
+const homeDepth = (key: string) => { try { return homeDims(key)[1] } catch { return 0 } }
 const MONSTER_SPRITE = { goblins: 'f_goblins', orcs: 'f_orcs', trolls: 'f_troll', dragon: 'f_dragon' } as const
 
 /** 3x5 pixel digits, for the road planner's priority numbers. */
@@ -93,6 +95,8 @@ export class MapView {
   /** the white outline on the tapped hex: redrawn alone, so a tap doesn't rebuild the scene */
   private selection = new Graphics()
   private sceneKey: unknown[] | null = null
+  /** each laid-out city's layer (buildings and villagers sorted by how far forward they stand), by village */
+  private townLayers = new Map<string, Container>()
   private revealedNow: Set<number> = new Set()
   people!: People
   traders!: Traders
@@ -366,6 +370,9 @@ export class MapView {
     const { tier: TP } = this.atlas.meta
     const W = this.W
     const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes(), ...this.flock.nodes()])
+    // villagers walking in a city live in its town layer: take them out before the layer goes
+    for (const layer of this.townLayers.values()) for (const c of [...layer.children]) if (walkers.has(c)) layer.removeChild(c)
+    this.townLayers.clear()
     for (const c of this.cells.removeChildren()) if (!walkers.has(c)) c.destroy({ children: true })
     this.ambient ??= new Ambient(W)
     if (!this.mountains || (this.mountains as unknown as { world: World }).world !== world) this.mountains = new Mountains(world, W, TP)
@@ -401,6 +408,8 @@ export class MapView {
     // the homes built on them, by the hex each stands in
     const cobbled = new Set<number>()
     const homesByHex = new Map<number, Spot[]>()
+    /** cities laid out in the city (well and homes on the cobbles): everything standing there, by village */
+    const towns: { vid: string; hexes: number[]; spots: { key: string; x: number; y: number; front: number; hex: number }[] }[] = []
     /** villages whose square is laid out across the city: no fixed picture on the village hex */
     const squareLaidOut = new Set<number>()
     for (const v of Object.values(state.villages)) {
@@ -409,7 +418,18 @@ export class MapView {
       for (const c of v.city ?? []) cobbled.add(c)
       const vp = hexToPixel(v.col, v.row, W)
       // the square's well, when it's laid out in the city (and not the fixed picture)
-      const spots = [...(v.homes ?? []).map((h) => ({ key: h.key, x: h.x, y: h.y })), ...(v.starter ? [{ key: 'well', x: v.starter.x, y: v.starter.y }] : [])]
+      const spots = [...(v.homes ?? []).map((h) => ({ key: h.key + (h.side === 'back' && /^[cht]_/.test(h.key) ? '_b' : ''), x: h.x, y: h.y, base: h.key })), ...(v.starter ? [{ key: 'well', x: v.starter.x, y: v.starter.y, base: 'well' }] : [])]
+      if (v.starter) {
+        // drawn together, each by how far forward it stands, with the villagers walking among them
+        const town = { vid: v.id, hexes: [idx(v.col, v.row), ...(v.city ?? [])], spots: [] as { key: string; x: number; y: number; front: number; hex: number }[] }
+        for (const h of spots) {
+          const hi = hexAt(world, v, [h.x, h.y])
+          if (hi < 0) continue
+          town.spots.push({ key: h.key, x: vp.x + h.x, y: vp.y + h.y * 0.5774, front: vp.y + (h.y + (homeDepth(h.base))) * 0.5774, hex: hi })
+        }
+        towns.push(town)
+        continue
+      }
       for (const h of spots) {
         const hi = hexAt(world, v, [h.x, h.y])
         if (hi < 0) continue
@@ -442,6 +462,8 @@ export class MapView {
       hubs.add(idx(v.col, v.row))
       for (const o of v.outposts) hubs.add(idx(o.col, o.row))
       for (const b of v.buildings) hubs.add(idx(b.col, b.row))
+      // a city's cobbles are paved: roads run into them from any side
+      for (const c of v.city ?? []) hubs.add(c)
     }
     // development only (?roadtest): roads on every river hex and a scatter of their
     // neighbours, so every kind of crossing and bridge can be reviewed at once
@@ -687,6 +709,55 @@ export class MapView {
 
     this.mountains!.flush()
 
+    // Each laid-out city is one layer: its buildings and the villagers walking among them, sorted by how
+    // far forward each stands (so villagers pass behind houses as well as in front). The layer sits with
+    // the city's front-most hex. Things on the land just in front of the city's further hexes (trees,
+    // buildings) would be drawn under it, so they move into the layer too, sorted by their hex's middle.
+    for (const t of towns) {
+      if (!this.houses) continue
+      const known = t.hexes.filter((h) => revealed.has(h) && rank[h] >= 0)
+      if (!known.length) continue
+      const top = Math.max(...known.map((h) => rank[h]))
+      const layer = new Container()
+      layer.sortableChildren = true
+      layer.zIndex = top * 4 + 3.2
+      const shadows = new Graphics()
+      shadows.zIndex = -1e9
+      layer.addChild(shadows)
+      const art = this.houses
+      for (const sp of t.spots) {
+        const tex = art.tex(sp.key)
+        if (!tex) continue
+        const lift = world.cells[sp.hex].tier * TP
+        const s = new Sprite(tex)
+        s.anchor.set(art.anchor.x / art.anchor.w, art.anchor.y / art.anchor.h)
+        s.x = Math.round(sp.x)
+        s.y = Math.round(sp.y - lift)
+        s.zIndex = sp.front
+        const half = sp.key === 'well' ? 4 : sp.key[0] === 't' ? 10 : sp.key[0] === 'b' ? 17 : 12
+        shadows.ellipse(s.x + 2, s.y + 1, half, 2.5).fill({ color: 0x28281e, alpha: 0.25 })
+        layer.addChild(s)
+      }
+      const city = new Set(t.hexes)
+      for (const h of t.hexes) {
+        const c = world.cells[h]
+        for (const [nc, nr] of neighbours(c.col, c.row)) {
+          if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) continue
+          const j = idx(nc, nr)
+          if (city.has(j) || rank[j] < 0 || rank[j] >= top || rank[j] <= rank[h]) continue
+          const lo = rank[j] * 4 + 2.5, hi = rank[j] * 4 + 4, cyj = hexToPixel(nc, nr, W).y
+          for (const ch of [...this.cells.children]) {
+            if (ch.zIndex < lo || ch.zIndex >= hi || walkers.has(ch)) continue
+            this.cells.removeChild(ch)
+            ch.zIndex = cyj + (ch.zIndex - lo) * 0.01
+            layer.addChild(ch)
+          }
+        }
+      }
+      this.cells.addChild(layer)
+      this.townLayers.set(t.vid, layer)
+    }
+
     // Territory borders: dashed, Civilization-style, and part of the painter's
     // order. Each border hex draws its outside edges at its own height just
     // above its ground (z = rank*4 + 0.5), so its own trees, mountains and
@@ -825,7 +896,7 @@ export class MapView {
     }
     this.overlay.addChildAt(g, 0)
     this.people.sync(world, state, revealed)
-    this.people.attach(this.cells, rank)
+    this.people.attach(this.cells, rank, this.townLayers)
     this.traders.sync(world, state, revealed)
     this.traders.attach(this.cells, rank)
     this.flock.sync(world, state, revealed, (vid) => this.people.shirt(vid))

@@ -206,7 +206,7 @@ export function producesIn(def: BuildingDef, season: WeekSeason): Goods | undefi
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   // any village
   house: B({ id: 'house', name: 'House', role: 'any', size: 'medium', cost: { timber: 4 }, popCap: 4 * HEADS, legacy: true, blurb: `A row of cottages: room for ${4 * HEADS} more villagers. (New homes go up in the city, on cobblestone.)` }),
-  granary: B({ id: 'granary', name: 'Granary', role: 'any', size: 'medium', cost: { timber: 6, stone: 2 }, storage: 40, blurb: 'Keeps food safe for the Saturday winter.' }),
+  granary: B({ id: 'granary', name: 'Granary', role: 'any', size: 'medium', cost: { timber: 6, stone: 2 }, storage: 40, legacy: true, blurb: 'Keeps food safe for the Saturday winter. (Barns go up in the city now, on cobblestone.)' }),
   palisade: B({ id: 'palisade', name: 'Palisade', role: 'any', size: 'medium', cost: { timber: 8 }, defence: 6, blurb: 'Sharpened logs. Goblins hate it.' }),
   chapel: B({ id: 'chapel', name: 'Chapel', role: 'any', size: 'big', cost: { stone: 8, timber: 4 }, morale: 4, blurb: 'Powered by the devotions habit.' }),
   library: B({ id: 'library', name: 'Library', role: 'any', size: 'big', cost: { timber: 8, stone: 4 }, blurb: 'Powered by the reading habit: +5% output when you read.' }),

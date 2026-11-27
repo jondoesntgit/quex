@@ -1,27 +1,32 @@
 /** The note shown when newcomers arrive: who they are, where from, and what they brought for the road.
  *  Shown once per arrival (the newest first, then any older ones not yet read); the log keeps a line. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { shown } from '../game/amount'
 import { FOOD, GOOD_LABEL, HEADS, type Good } from '../game/data'
 import { TRAVEL_DAYS } from '../game/immigrants'
 import { BASE_CAP } from '../game/reducer'
 import { HOMES } from '../game/city'
-import type { Arrival, Player } from '../game/types'
+import type { Arrival, Player, Village } from '../game/types'
+import { fresh, hadNotice, markNotice, onScreen } from './notices'
 import type { Game } from '../app/store'
 import { Icon } from './Icon'
 
-const KEY = (villageId: string) => `quex:arrivals:${villageId}`
-function readSeen(villageId: string): string[] {
-  try { return JSON.parse(localStorage.getItem(KEY(villageId)) ?? '[]') } catch { return [] }
+// notes read before they were kept for every device (this device's list, still honoured)
+const OLD_KEY = (villageId: string) => `quex:arrivals:${villageId}`
+function readOld(villageId: string): string[] {
+  try { return JSON.parse(localStorage.getItem(OLD_KEY(villageId)) ?? '[]') } catch { return [] }
 }
-function remember(villageId: string, id: string) {
-  try { localStorage.setItem(KEY(villageId), JSON.stringify([...readSeen(villageId), id].slice(-30))) } catch { /* private window: it just shows again */ }
+const had = (v: Village, id: string) => hadNotice(v, id) || readOld(v.id).includes(id)
+
+/** The newcomers' note to show: the newest still news that the player hasn't had (on any device). */
+function nextArrival(v: Village, now: Date): Arrival | undefined {
+  const list = [...(v.arrivals ?? [])].reverse()
+  return list.find((x) => onScreen.has(x.id)) ?? list.find((x) => !had(v, x.id) && fresh(x.at, now))
 }
 
-/** A newcomers' note not yet read (the morning report waits for it). */
-export function arrivalPending(v: { id: string; arrivals?: Arrival[] }): boolean {
-  const seen = readSeen(v.id)
-  return (v.arrivals ?? []).some((x) => !seen.includes(x.id))
+/** A newcomers' note on screen or still to show (the morning report waits for it). */
+export function arrivalPending(v: Village, now = new Date()): boolean {
+  return !!nextArrival(v, now)
 }
 
 const amount = (n: number) => shown(n, 0.1).toString()
@@ -29,12 +34,16 @@ const amount = (n: number) => shown(n, 0.1).toString()
 export function Arrivals({ game, p }: { game: Game; p: Player }) {
   const v = game.state.villages[p.villageId]
   const [, bump] = useState(0)
-  if (!v || game.guest) return null
-  const seen = readSeen(v.id)
-  const a: Arrival | undefined = [...(v.arrivals ?? [])].reverse().find((x) => !seen.includes(x.id))
-  if (!a) return null
+  const a = v && !game.guest ? nextArrival(v, game.now()) : undefined
+  // had the moment it shows: another device, or opening the page again, won't show it again
+  useEffect(() => {
+    if (!a || !v || onScreen.has(a.id)) return
+    onScreen.add(a.id)
+    markNotice(game, p, v, a.id)
+  }, [a?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!v || !a) return null
   const goods = (Object.entries(a.goods) as [Good, number][]).filter(([, n]) => n > 0)
-  const done = () => { remember(v.id, a.id); bump((x) => x + 1) }
+  const done = () => { onScreen.delete(a.id); bump((x) => x + 1) }
   if (a.kind === 'food') {
     return (
       <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="The food rules have changed">

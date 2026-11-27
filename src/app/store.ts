@@ -16,6 +16,7 @@ import { generateWorld } from '../world/generate'
 import type { World } from '../world/types'
 import { addDays, playerDate } from '../game/calendar'
 import { apply, newGame, pendingTicks } from '../game/reducer'
+import { levelWorld } from '../game/city'
 import type { GameEvent, GameState, ISODate } from '../game/types'
 import type { Access } from './supabase'
 
@@ -126,6 +127,7 @@ export class Game {
   replay() {
     this.events.sort((a, b) => (a.at === b.at ? 0 : a.at < b.at ? -1 : 1))
     this.state = newGame(this.world, this.meta.seasonStart)
+    levelWorld(this.world, this.state.levelled)
     for (const ev of this.events) apply(this.state, this.world, ev)
   }
 
@@ -141,6 +143,7 @@ export class Game {
   private show() {
     if (!this.base) return
     this.state = structuredClone(this.base)
+    levelWorld(this.world, this.state.levelled)
     for (const ev of this.pending) apply(this.state, this.world, ev)
     this.emit()
   }

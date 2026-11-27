@@ -40,10 +40,10 @@ describe('winter prep', () => {
     expect(item(thu, 'food').todo[0].text).toMatch(/Finish today's tasks/)
   })
 
-  it('suggests a granary when the harvest would not fit, and a palisade when the stores are thin', () => {
+  it('suggests a barn when the harvest would not fit, and a palisade when the stores are thin', () => {
     const full = winterPrep(village({ goods: { grain: 29 }, buildings: [{ id: 'b', type: 'field', col: 0, row: 0, progress: 1 }] }), '2026-11-19', 0)
     expect(item(full, 'storage').ok).toBe(false)
-    expect(item(full, 'storage').todo[0].text).toMatch(/Granary/)
+    expect(item(full, 'storage').todo[0].text).toMatch(/Barn/)
     const thin = winterPrep(village(), '2026-11-19', 0)
     expect(item(thin, 'defence').ok).toBe(false)
     expect(item(thin, 'defence').todo[0].text).toMatch(/Palisade/)

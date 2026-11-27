@@ -5,6 +5,7 @@ import { BUILDINGS, producesIn, EAT, FOOD, FOOD_SCALE, type BuildingId, type Goo
 import { CROP_SEASON, weekday, weekSeason } from './calendar'
 import { defence, fieldRain, foodStock, storageCap } from './reducer'
 import { people } from './workers'
+import { HOMES } from './city'
 import type { ISODate, Village } from './types'
 
 export interface PrepItem {
@@ -109,7 +110,7 @@ export function winterPrep(v: Village, today: ISODate, score: number): WinterPre
     title: 'Room to store it',
     status: `${Math.round(stock)} of ${cap} storage used.`,
     impact: 'Food beyond what you can store rots overnight.',
-    todo: room ? [] : [{ size: BUILDINGS.granary.size, text: `Build a Granary: +${BUILDINGS.granary.storage! * FOOD_SCALE} storage (${costText(BUILDINGS.granary.cost)}).` }],
+    todo: room ? [] : [{ size: HOMES.barn.size, text: `Build a Barn in the city: +${HOMES.barn.storage! * FOOD_SCALE} storage (${costText(HOMES.barn.cost)}).` }],
   })
 
   // 3. defence: hungry villages draw raids in winter
