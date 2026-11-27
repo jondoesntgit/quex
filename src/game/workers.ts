@@ -21,13 +21,17 @@ export const WORKERS: Partial<Record<BuildingId, number>> = {
   forager_camp: 1, lumber_camp: 2, hunting_lodge: 2, charcoal_kiln: 1, sawmill: 2,
   pen: 1, dairy: 1, weaver: 1, stable: 1, cart_shed: 1,
   nitre_beds: 1, powder_mill: 2, gun_foundry: 3, gunsmith: 2, siege_workshop: 2,
+  smithy: 1, outfitter: 1,
 }
 /** Weight each person carries on a caravan. */
 export const CARRY_EACH = 40
 
 /** People a building needs to run at full strength: all year if no season is given, otherwise in that
  *  season (a field takes half a crew to sow in spring, none in summer, a full crew to reap in autumn). */
-export function needOf(b: { type: BuildingId; herd?: number[] }, season?: WeekSeason): number {
+/** A workshop nobody has told what to make yet (from RAIDS_FROM): it makes nothing and needs no hands. */
+export const idle = (b: { type: BuildingId; order?: string }) => b.order === '' && !!BUILDINGS[b.type].recipes
+export function needOf(b: { type: BuildingId; herd?: number[]; order?: string }, season?: WeekSeason): number {
+  if (idle(b)) return 0
   const base = b.type === 'pen' ? penCrew(b as Building) : (WORKERS[b.type] ?? 0) * HEADS
   if (!season) return base
   return Math.ceil(base * (BUILDINGS[b.type].labor?.[season] ?? 1) - 1e-9) || 0
@@ -35,8 +39,10 @@ export function needOf(b: { type: BuildingId; herd?: number[] }, season?: WeekSe
 /** People at home to work: the village's people, less those away on a neighbour's walls
  *  (who still count as the village's, and still have a house to come back to). */
 export const people = (v: Village) => Math.max(0, Math.floor(v.population) - (v.away ?? 0))
-/** People free for the buildings' work: those at home, less the road team. */
-export const hands = (v: Village) => Math.max(0, people(v) - (v.roadCrew ?? 0))
+/** People wounded in a fight, at home getting better. */
+export const hurt = (v: Village) => (v.wounded ?? []).reduce((a, w) => a + w.n, 0)
+/** People free for the buildings' work: those at home, less the road team and the wounded. */
+export const hands = (v: Village) => Math.max(0, people(v) - (v.roadCrew ?? 0) - hurt(v))
 
 const foodOf = (g: Goods | undefined, k = 1) => Object.entries(g ?? {}).reduce((a, [x, n]) => a + (n ?? 0) * k * (FOOD[x as Good]?.value ?? 0), 0)
 /** Food a building adds a night with all its hands (made, less any food it uses up), roughly. */

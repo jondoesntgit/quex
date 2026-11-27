@@ -44,6 +44,32 @@ export function Arrivals({ game, p }: { game: Game; p: Player }) {
   if (!v || !a) return null
   const goods = (Object.entries(a.goods) as [Good, number][]).filter(([, n]) => n > 0)
   const done = () => { onScreen.delete(a.id); bump((x) => x + 1) }
+  if (a.kind === 'orcs') {
+    const raided = (a.raided ?? []).filter((r) => r.village !== v.id)
+    const me = (a.raided ?? []).filter((r) => r.village === v.id)
+    const names = [...new Set(raided.map((r) => game.state.villages[r.village]?.name).filter(Boolean))]
+    const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: 'long' })
+    return (
+      <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="Orc raiders">
+        <div className="card confirm arrival">
+          <h2>⚔ Orc raiders</h2>
+          <p style={{ margin: '4px 0 8px' }}>
+            Riders came in the night with news: orcs have been raiding the villages{names.length ? <> of <b>{names.join(', ')}</b></> : ' nearby'}.
+          </p>
+          {raided.length > 0 && <ul>{raided.map((r, k) => <li key={k}>{game.state.villages[r.village]?.name}, {day(r.at)}: they carried off {r.took}.</li>)}</ul>}
+          {me.length > 0 && <p style={{ margin: '4px 0' }}>They raided you too: {me.map((r) => r.took).join('; ')}.</p>}
+          {a.camp && <p style={{ margin: '4px 0' }}>The nearest camp to you is <b>{a.camp.name}</b>, {a.camp.hexes} hexes away (hex {a.camp.col},{a.camp.row}).</p>}
+          <p style={{ margin: '8px 0 4px' }}>
+            The camps keep to themselves in <b>spring</b> and raid in summer and autumn. That's the time to act together: send soldiers in spring to the <b>palisade</b> of a village near the orcs, with food for the road and weapons and armour if you can spare them (a unit of copper, bronze or iron arms two; leather armours two). Away, they eat only what they carry, not your stores, and they come home while what's left still covers the road.
+          </p>
+          <p style={{ margin: '4px 0' }}>
+            From its <b>war council</b> the palisade can raid a camp with every soldier on its walls. Scout a camp first (a small action) to know your odds. Win, and the hoard is shared by soldiers sent, with a trophy found nowhere else that merchants pay well for.
+          </p>
+          <div className="confirm-buttons"><button className="btn primary" onClick={done} autoFocus>To arms</button></div>
+        </div>
+      </div>
+    )
+  }
   if (a.kind === 'food') {
     return (
       <div className="confirm-scrim" role="dialog" aria-modal="true" aria-label="The food rules have changed">

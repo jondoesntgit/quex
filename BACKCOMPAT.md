@@ -33,6 +33,7 @@ optional fields required (with a default in `newGame` / `join`); delete the disp
 | `FOOD_FROM` | reducer.ts | 2026-11-24 | old food rules; new villages started with less grain and no field |
 | `EXACT_SIZE_FROM` | reducer.ts | 2026-11-26 | a bigger action could pay for a smaller task |
 | `SQUARE_FROM` | reducer.ts (`join`, `starterFor(…, corner)`) | 2026-11-27 | a new village's well stood on its own hex, homes one to a hex, hexes on any level |
+| `RAIDS_FROM` | reducer.ts | 2026-11-27 | one village's `expedition` took on a lair; troops sent home were home at once (no walk, no `homeward` goods) and stayed till their food ran out; lairs raided villages in spring too; a night raid took a fifth of one good (from it, orcs and goblins come in force and every able adult turns out: `nightRaid`); troops carried raw metal and leather (`OLD_GEAR`), from it soldiers' kit (`GEAR` = `KIT`). A detachment that left before it keeps its old gear (it doesn't count in a fight, and goes home with them). From it, camps grow stronger day by day (`grewOn`) and night raids grow more frequent week by week; a workshop built from it waits for an order (`order: ''`), while one built before carries on with its first recipe (outfitters, which had no recipes before, are set to wait in `warnOfOrcs`) |
 
 ## One-time conversions and grants (run on the first event after their cutoff; flag on `GameState`)
 
@@ -45,6 +46,7 @@ optional fields required (with a default in `newGame` / `join`); delete the disp
 | `foodUpdate` | `foodUpdate` | up to 100 loads of grain and a field; Arrivals note (kind `food`) |
 | `giveWells` | `wellsGiven` | a well for every pen, dairy and stable without water |
 | `giveStaff` | `staffGiven` | people (and a House) for villages short of workers |
+| `warnOfOrcs` | `orcWarning` | the orc warning note (Arrivals kind `orcs`) to every village, and each one's nearest orc camp revealed |
 | `moveWells` | `wellsMoved` | moves each 3+ hex square's well to the corner (levelling the odd hex, `levelled`), lays its homes out again, turns finished granaries into barns and neighbouring Houses into cobbles and cottages |
 
 All of them are called at the top of `apply()`. Arrivals.tsx has the matching one-off notes (`update`, `food`).

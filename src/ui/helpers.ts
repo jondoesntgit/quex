@@ -1,3 +1,4 @@
+import type { Strategy } from '../game/battle'
 import { useEffect, useReducer } from 'react'
 import { BUILDINGS, GOOD_LABEL, ORES, SIZE_RANK, type ActionKind, type BuildingId, type Good, type Goods, type TaskSize } from '../game/data'
 import { FREE, actionSize, caravanTier, validate } from '../game/reducer'
@@ -57,7 +58,7 @@ export function bestToken(p: Player, need: 'big' | 'medium' | 'small'): Spendabl
 }
 
 export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}): GameEvent {
+  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; strategy?: Strategy; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}): GameEvent {
   return {
     t: 'act', id: eventId(), at: game.now().toISOString(), playerId: p.id, tokenId: tok.tok.id,
     ...(tok.tok2 ? { tokenId2: tok.tok2.id } : {}), action, col, row, ...extra,
@@ -65,7 +66,7 @@ export function actEvent(game: Game, p: Player, tok: Spendable, action: ActionKi
 }
 
 export function tryAction(game: Game, p: Player, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}, needOverride?: 'big' | 'medium' | 'small') {
+  extra: { building?: BuildingId; home?: Home; replace?: number; to?: string; goods?: Record<string, number>; troops?: number; strategy?: Strategy; crew?: number; food?: Record<string, number>; welcome?: boolean } = {}, needOverride?: 'big' | 'medium' | 'small') {
   // a caravan costs by how the villages are connected: across country, by road, or free on paved road
   const v = game.state.villages[p.villageId]
   const dest = action === 'caravan' && extra.to ? game.state.villages[extra.to] : null

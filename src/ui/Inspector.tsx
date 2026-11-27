@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, FOOD_SCALE, GATHER, GOOD_LABEL, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good } from '../game/data'
+import { ACTIONS, BUILDINGS, DEEPEN_COST, FOOD, FOOD_SCALE, GATHER, GOOD_LABEL, HEADS, kitCount, MAX_DEPTH, ORES, stationOres, type ActionKind, type BuildingDef, type Good, type Goods } from '../game/data'
 import { fmtLb, stepOf } from '../game/units'
-import { CARRY, fieldRain, WELCOME_DAYS, WELCOME_MORALE, welcomeOpen, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
+import { RAIDS_FROM, CARRY, fieldRain, WELCOME_DAYS, WELCOME_MORALE, welcomeOpen, actionSize, buildCost, buildSiteError, buildingAt, palisades, scoutRadius, scoutsNew, caravanCarry, caravanMinutes, caravanTier, clayLeft, provisionsFor, workable, clayRenews, mountainSpring, cellIndex, fmtGoods, inTerritory, landAt, logText, validate, villageAt } from '../game/reducer'
 import { hasTrees, isDeposit, treeCount } from '../world/land'
 import { distance, neighbours } from '../world/hex'
 import { DUNGEON, GAME_REGROW, about, gameLeft, gameMax, leftAt, levels, mixAt } from '../game/deposits'
 import type { Home, Player } from '../game/types'
-import { GEAR, RATION, foodValue, nightsOf, troopsAt } from '../game/garrison'
+import { GEAR, RATION, foodValue, garrison, nightsOf, stationed, troopsAt } from '../game/garrison'
+import { RAID_RANGE, campAt, campsInReach, fittingText, forecast, quartermaster, type Group } from '../game/camps'
+import { STRATEGIES, type Strategy } from '../game/battle'
 import { WEIGHT, weightOf } from '../game/market'
 import { WALLS, strongholdAt, wallsAfter } from '../game/strongholds'
 import { refineTips } from '../game/advisor'
@@ -51,7 +53,9 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
   const i = cellIndex(world, col, row)
   const cell = world.cells[i]
   const known = state.revealed.includes(i)
-  const [mode, setMode] = useState<'main' | 'build' | 'gather' | 'caravan' | 'troops' | 'welcome'>(welcomeFirst ? 'welcome' : 'main')
+  const [mode, setMode] = useState<'main' | 'build' | 'gather' | 'caravan' | 'troops' | 'welcome' | 'war'>(welcomeFirst ? 'welcome' : 'main')
+  /** the war council opened from a camp's hex puts that camp first */
+  const [warFocus, setWarFocus] = useState<number | undefined>(undefined)
   // the yes/no window shown before anything is spent
   const [confirm, setConfirm] = useState<Omit<ConfirmProps, 'onNo'> | null>(null)
   const v = state.villages[p.villageId]
@@ -87,8 +91,9 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
   /** the build menu holds every size: grey it only with no whole action at all */
   const cantAny = spendables(p).some((t) => t.strength >= 1) ? '' : ' cant'
 
-  const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small') => {
-    const r = tryAction(game, p, action, col, row, extra, need)
+  /** `at`: a different hex to act on (the war council scouts and raids the camp's hex, not the palisade's) */
+  const run = async (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small', at?: { col: number; row: number }, stay = false) => {
+    const r = tryAction(game, p, action, at?.col ?? col, at?.row ?? row, extra, need)
     // the window closes whatever happens: a "yes" that can't go through says why instead of hanging there
     setConfirm(null)
     if (!r.ev) return notify(r.error ?? 'Not possible')
@@ -100,21 +105,21 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
     }
     const last = game.state.log[game.state.log.length - 1]
     if (last) notify(logText(game.state, last.text))
-    setMode('main')
+    if (!stay) setMode('main')
   }
 
   /** Show what an action would spend and give, and only spend it on a yes. */
-  const ask = (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small', title?: string) => {
-    const r = tryAction(game, p, action, col, row, extra, need)
+  const ask = (action: ActionKind, extra: Parameters<typeof tryAction>[5] = {}, need?: 'big' | 'medium' | 'small', title?: string, at?: { col: number; row: number }, stay = false) => {
+    const r = tryAction(game, p, action, at?.col ?? col, at?.row ?? row, extra, need)
     if (!r.ev || !r.tok) return notify(r.error ?? 'Not possible')
-    const o = outcome(world, state, p, action, col, row, extra, { size: r.tok.size, strength: r.tok.strength, merged: !!r.tok.tok2 }, game.now().toISOString())
+    const o = outcome(world, state, p, action, at?.col ?? col, at?.row ?? row, extra, { size: r.tok.size, strength: r.tok.strength, merged: !!r.tok.tok2 }, game.now().toISOString())
     const res = land.resource
     const what = extra.building ? `Build a ${BUILDINGS[extra.building].name}?`
       : extra.home ? `Build a ${HOMES[extra.home.kind].name.toLowerCase()}?`
       : action === 'gather' && res && GATHER[res] ? `Gather ${GOOD_LABEL[GATHER[res]!].toLowerCase()}?`
       : action === 'road' && r.tok.size === 'medium' ? 'Build a bridge?'
       : ASK_TITLE[action] ?? `${ACTIONS[action].name}?`
-    setConfirm({ title: title ?? what, ...o, onYes: () => void run(action, extra, need) })
+    setConfirm({ title: title ?? what, ...o, onYes: () => void run(action, extra, need, at, stay) })
   }
   const dialog = confirm && <Confirm {...confirm} onNo={() => setConfirm(null)} extra={<ActionStrip game={game} p={p} readOnly />} />
 
@@ -140,7 +145,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
   const ownMine = here && here.village.id === v.id && BUILDINGS[here.building.type].mine && here.building.progress >= 1 ? here.building : null
   const dungeon = state.dungeons?.[i]
   if (fort && !siege?.fallen) acts.push('siege', ...(canScout ? ['scout' as const] : []))
-  else if (lair) acts.push('expedition', ...(canScout ? ['scout' as const] : []))
+  else if (lair) acts.push(game.now().toISOString() >= RAIDS_FROM ? 'recon' : 'expedition', ...(canScout ? ['scout' as const] : []))
   else if (village && village.id !== v.id) acts.push('caravan', 'troops')
   else {
     if (canScout) acts.push('scout')
@@ -225,6 +230,11 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
         {dialog}
       </Shell>
     )
+  }
+
+  if (mode === 'war' && palisades(v)) {
+    return <WarCouncil game={game} p={p} focus={warFocus} onBack={() => setMode('main')} onClose={onClose} dialog={dialog}
+      ask={(a, extra, need, title, at, stay) => ask(a, extra, need, title, at, stay)} />
   }
 
   if (mode === 'gather') {
@@ -313,9 +323,9 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
       )}
       {here && here.village.id === v.id && BUILDINGS[here.building.type].recipes && (
         <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '4px 0' }}>
-          <span className="muted">Making:</span>
+          <span className="muted">{here.building.order === '' ? 'Making nothing yet: pick what it makes' : 'Making:'}</span>
           {BUILDINGS[here.building.type].recipes!.map((r) => {
-            const on = (here.building.order ?? BUILDINGS[here.building.type].recipes![0].id) === r.id
+            const on = here.building.order !== '' && (here.building.order ?? BUILDINGS[here.building.type].recipes![0].id) === r.id
             return <button key={r.id} className={`btn ${on ? 'primary' : ''}`} title={`${fmtGoods(r.consumes)} → ${fmtGoods(r.produces)} a night`}
               onClick={() => !on && void game.dispatch({ t: 'order', id: eventId(), at: game.now().toISOString(), playerId: p.id, building: here.building.id, recipe: r.id })}>{r.name}</button>
           })}
@@ -331,12 +341,29 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
         </p>
       )}
       {fort && <Siege game={game} p={p} fort={fort} siege={siege} />}
-      {lair && <p style={{ margin: '4px 0' }}>Strength {Math.round(lair.strength)}. Bring bronze, iron, leather and food to improve your odds.</p>}
+      {lair && (() => {
+        const c = campAt(state, col, row)
+        if (!c) return null
+        const fc = forecast(state, c, [], 'assault', game.now().toISOString())
+        const quiet = c.state.quietUntil && game.now().toISOString() < c.state.quietUntil
+        return (
+          <>
+            <p style={{ margin: '4px 0' }}><b>{c.name[0].toUpperCase() + c.name.slice(1)}</b>: strength about {approx(fc.strength)} (known {KNOWN[fc.intel]}).{quiet ? ' Scattered after a raid, for now.' : ''}</p>
+            <p className="muted" style={{ margin: '4px 0' }}><Icon name={c.trophy} size={16} /> Its hoard holds {GOOD_LABEL[c.trophy].toLowerCase()}, found at no other camp: merchants pay well for it. Raids march from a palisade within {RAID_RANGE} hexes, with soldiers neighbours send to its walls.</p>
+          </>
+        )
+      })()}
       <div className="actions">
         {mine && !village && here && here.building.progress < 1
           ? <button className={`btn medium action${cant(BUILDINGS[here.building.type].size)}`} onClick={() => ask('build', { building: here.building.type }, BUILDINGS[here.building.type].size, `Finish the ${BUILDINGS[here.building.type].name}?`)}>Finish building<small>would cost {fmtGoods(buildCost(v, BUILDINGS[here.building.type], game.now().toISOString()), 0.5)}</small></button>
           : (cell.tier > 0 || terr === 'shallow') && !(village && village.id !== v.id) && (!lair && !(fort && !siege?.fallen)) && (workActs.length > 0 || inCity || (cobbleOk && !village) || (mine && !village && (!here || here.village.id === v.id)))
             && <button className={`btn medium action${cantAny}`} onClick={() => setMode('build')}>Build…<small>{here ? 'build over it: its materials come back' : 'buildings, roads, wells, trees'}</small></button>}
+        {here && here.village.id === v.id && here.building.type === 'palisade' && here.building.progress >= 1 && (
+          <button className="btn medium action" onClick={() => { setWarFocus(undefined); setMode('war') }}>War council…<small>raid the monster camps nearby, with the soldiers on your walls</small></button>
+        )}
+        {lair && palisades(v) > 0 && (() => { const c = campAt(state, col, row); return c && distance(c.lair, v) <= RAID_RANGE })() && (
+          <button className="btn medium action" onClick={() => { setWarFocus(campAt(state, col, row)!.idx); setMode('war') }}>Plan a raid…<small>from your palisade: the war council</small></button>
+        )}
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {village && village.id !== v.id && welcomeOpen(state, v, village, game.now().toISOString()) && (
           <button className="btn small action" onClick={() => setMode('welcome')}>Send a welcoming caravan…<small>they're new here: no action needed, and it lifts your village's morale (+{WELCOME_MORALE})</small></button>
@@ -599,7 +626,7 @@ function TroopsForm({ game, p, to, onBack, onSend }: { game: Game; p: Player; to
       </div>
       <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>
       <h4 style={{ margin: '8px 0 2px' }}>Weapons and armour</h4>
-      {gear.length ? gear.map(row) : <p className="muted" style={{ margin: 0 }}>None in store (bronze, iron, steel, leather).</p>}
+      {gear.length ? gear.map(row) : <p className="muted" style={{ margin: 0 }}>None in store. Spears, helmets, swords and mail come from a smithy; bows, shields, leather jerkins and ladders from an outfitter.</p>}
       <h4 style={{ margin: '8px 0 2px' }}>Food</h4>
       {food.length ? food.map(row) : <p className="muted" style={{ margin: 0 }}>No food in store.</p>}
       <p className={nights >= 1 ? 'deal-yes' : 'deal-no'} style={{ margin: '6px 0' }}>
@@ -693,5 +720,113 @@ function CaravanForm({ game, p, to, welcome, onBack, onSend }: { game: Game; p: 
       <button className="btn primary" disabled={!weightOf(load) || crew < 1 || crew > free || packed + 1e-9 < need} style={{ marginTop: 4 }}
         onClick={() => onSend(Object.fromEntries(Object.entries(load).filter(([, n]) => n > 0)), crew, Object.fromEntries(Object.entries(food).filter(([, n]) => n > 0)))}>{welcome ? 'Send the welcome' : 'Send caravan'}</button>
     </Shell>
+  )
+}
+
+const KNOWN = ['nothing yet', 'a little', 'fairly well', 'well', 'inside out']
+const pct = (x: number) => `${Math.round(x * 100)}%`
+const approx = (x: number) => (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10)
+
+/** The war council: a palisade's raids on the monster camps within reach. What each would take, and what it
+ *  might bring, as best the council can tell; scouting a camp (small action) sharpens the guesses. */
+function WarCouncil({ game, p, focus, onBack, onClose, ask, dialog }: {
+  game: Game; p: Player; focus?: number; onBack: () => void; onClose: () => void
+  ask: (action: ActionKind, extra: Parameters<typeof tryAction>[5], need: 'big' | 'medium' | 'small' | undefined, title: string, at: { col: number; row: number }, stay: boolean) => void
+  dialog: React.ReactNode
+}) {
+  const { state } = game
+  const v = state.villages[p.villageId]
+  const most = Math.max(0, people(v) - 2 * HEADS)
+  const [own, setOwn] = useState(Math.min(most, 10))
+  const [by, stepChips] = useStep(Math.floor(v.population))
+  const at = game.now().toISOString()
+  const [plan, setPlan] = useState<Strategy>('assault')
+  const ownGear = v.goods
+  const groups: Group[] = [...(own ? [{ village: v.id, troops: own, gear: ownGear }] : []), ...stationed(state, v).map((d) => ({ village: d.from, troops: d.troops, gear: d.gear }))]
+  const fitting = quartermaster(groups)
+  const camps = campsInReach(state, v, game.world.width).sort((a, b) => (a.idx === focus ? -1 : b.idx === focus ? 1 : distance(a.lair, v) - distance(b.lair, v)))
+  const kit = (g: Goods) => GEAR.filter((x) => (g[x] ?? 0) >= 1).map((x) => kitCount(x, Math.floor(g[x]!))).join(', ') || 'no kit: pitchforks'
+  const waiting = garrison(state, v).filter((d) => d.status === 'waiting')
+  return (
+    <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title="War council">
+      <button className="btn ghost" onClick={onBack}>← back</button>
+      <p className="muted" style={{ margin: '4px 0' }}>
+        March on a monster camp with your own fighters and every soldier on your walls. The quartermaster fits everyone out from the kit you all have between you: spears and swords to the line, bows behind, armour and helmets to the front, shields to anyone with a hand free. Win, and the hoard is shared by how many soldiers each village sent, and any of our people they hold come home.
+      </p>
+      <h3 className="sub">Who marches</h3>
+      <div className="row worker-row">
+        <span>Your own fighters <span className="muted">({kit(ownGear)})</span></span>
+        <span className="row stepper">
+          <button className="btn icon" disabled={own <= 0} onClick={() => setOwn(Math.max(0, own - by))}>−</button>
+          <b className="qty">{own}</b>
+          <button className="btn icon" disabled={own >= most} onClick={() => setOwn(Math.min(most, own + by))}>+</button>
+        </span>
+      </div>
+      <div className="row" style={{ gap: 6, margin: '4px 0' }}><span className="muted">Move by</span> {stepChips}</div>
+      {stationed(state, v).map((d) => (
+        <p key={d.id} className="muted" style={{ margin: '2px 0' }}>🛡 {d.troops} from {state.villages[d.from]?.name ?? 'afar'} ({kit(d.gear)}), food for {nightsOf(d)} nights</p>
+      ))}
+      {waiting.length > 0 && <p className="muted" style={{ margin: '2px 0' }}>{waiting.reduce((a, d) => a + d.troops, 0)} more wait at your gate: take them in (tap your village) and they march too.</p>}
+      {!stationed(state, v).length && <p className="muted" style={{ margin: '2px 0' }}>No neighbours' soldiers on your walls yet. Ask them to send troops (and weapons): every hand improves the odds.</p>}
+      <p style={{ margin: '4px 0' }}>Fitted out: <b>{fittingText(fitting)}</b>.</p>
+      <h3 className="sub">The plan</h3>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+        {(Object.keys(STRATEGIES) as Strategy[]).map((k) => (
+          <button key={k} className={`btn${plan === k ? ' primary' : ''}`} onClick={() => setPlan(k)}>{STRATEGIES[k].name}</button>
+        ))}
+      </div>
+      <p className="muted" style={{ margin: '4px 0' }}>{STRATEGIES[plan].blurb}{plan === 'lure' && (fitting.count.bow ?? 0) < 3 ? ' You have fewer than 3 bows: they won\'t take the bait.' : ''}</p>
+      <h3 className="sub">Camps within {RAID_RANGE} hexes</h3>
+      {!camps.length && <p className="muted">No monster camps known within reach of your palisade. Scout the land round about to find them.</p>}
+      {camps.map((c) => {
+        const f = forecast(state, c, groups, plan, at)
+        const quiet = c.state.quietUntil && at < c.state.quietUntil
+        const where = { col: c.lair.col, row: c.lair.row }
+        return (
+          <div key={c.idx} className="card" style={{ padding: 10, margin: '6px 0', boxShadow: 'none' }}>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <b>{c.name[0].toUpperCase() + c.name.slice(1)}</b>
+              <span className="muted">{c.lair.kind}, {distance(c.lair, v)} hexes</span>
+            </div>
+            <p className="muted" style={{ margin: '2px 0' }}>Known: {KNOWN[f.intel]} · strength about {approx(f.strength)}</p>
+            {quiet
+              ? <p className="muted" style={{ margin: '2px 0' }}>Scattered after a raid: back in strength after {new Date(c.state.quietUntil!).toISOString().slice(0, 10)}.</p>
+              : (
+                <>
+                  <div style={{ position: 'relative', height: 12, border: '2px solid var(--ink)', borderRadius: 3, background: 'white', margin: '4px 0' }} title="chance of winning: the council's guess and how sure it is">
+                    <div style={{ position: 'absolute', left: `${f.low * 100}%`, width: `${Math.max(1, (f.high - f.low) * 100)}%`, top: 0, bottom: 0, background: '#e8c040', opacity: 0.55 }} />
+                    <div style={{ position: 'absolute', left: `calc(${f.chance * 100}% - 1px)`, width: 3, top: -2, bottom: -2, background: 'var(--ink)' }} />
+                  </div>
+                  <p style={{ margin: '2px 0' }}>Chance of winning about <b>{pct(f.chance)}</b> <span className="muted">({pct(f.low)}–{pct(f.high)})</span> · may fall about <b>{Math.round(f.fall)}</b> <span className="muted">({f.fallLow}–{f.fallHigh}; most come home wounded, about {Math.round(f.lost)} lost)</span></p>
+                  {c.lair.kind === 'orcs' && <p className="muted" style={{ margin: '2px 0' }}>Behind a stockade: {fitting.rams ? 'our ram will break the gate' : fitting.ladders ? `${fitting.ladders} ladders to get over` : 'no ladders or ram to get in with'}.</p>}
+                  {!!Object.values(c.state.prisoners ?? {}).reduce((a, n) => a + n, 0) && <p style={{ margin: '2px 0' }}>They hold {Object.values(c.state.prisoners ?? {}).reduce((a, n) => a + n, 0)} of our people: take the camp and they come home.</p>}
+                </>
+              )}
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8, margin: '4px 0' }}>
+              {f.booty.map((b) => (
+                <span key={b.good} title={b.good === c.trophy ? `${GOOD_LABEL[b.good]}: found only here, and merchants pay well for it` : GOOD_LABEL[b.good]}>
+                  <Icon name={b.good} size={16} /> {GOOD_LABEL[b.good]}{b.good === c.trophy ? ' ★' : ''} ~{approx(FOOD[b.good] ? b.guess * FOOD[b.good]!.value : b.guess)} <span className="muted">({approx(FOOD[b.good] ? b.low * FOOD[b.good]!.value : b.low)}–{approx(FOOD[b.good] ? b.high * FOOD[b.good]!.value : b.high)})</span>
+                </span>
+              ))}
+            </div>
+            <div className="actions">
+              <WorkButton game={game} p={p} action="recon" col={c.lair.col} row={c.lair.row} onPick={() => ask('recon', {}, undefined, `Scout ${c.name}?`, where, true)} />
+              {!quiet && <RaidButton game={game} p={p} col={c.lair.col} row={c.lair.row} troops={own} strategy={plan} onPick={() => ask('raid', { troops: own, strategy: plan }, undefined, `${STRATEGIES[plan].name}: raid ${c.name}?`, where, true)} />}
+            </div>
+          </div>
+        )
+      })}
+      <p className="muted">★ a trophy found at no other camp: no workshop makes it and no merchant sells it, but they pay well for it.</p>
+      {dialog}
+    </Shell>
+  )
+}
+
+function RaidButton({ game, p, col, row, troops, strategy, onPick }: { game: Game; p: Player; col: number; row: number; troops: number; strategy: Strategy; onPick: () => void }) {
+  const r = tryAction(game, p, 'raid', col, row, { troops, strategy })
+  return (
+    <button className={`btn ${r.ev ? 'medium' : ''} action`} disabled={!r.ev} onClick={onPick} title={r.error ?? ACTIONS.raid.blurb}>
+      Raid the camp<small>{r.error ?? 'medium task: march now'}</small>
+    </button>
   )
 }

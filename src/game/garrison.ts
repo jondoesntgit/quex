@@ -8,11 +8,14 @@
  *  They eat only the food they brought. When it runs out, or the host sends
  *  them home, they walk home and disband, and their gear goes back with them.
  */
-import { EAT, FOOD, HEADS, type Good, type Goods } from './data'
+import { EAT, FOOD, HEADS, KIT, type Good, type Goods } from './data'
 import type { GameState, Village } from './types'
 
-/** Weapons and armour a detachment can bring. */
-export const GEAR: Good[] = ['bronze', 'iron', 'steel', 'leather']
+/** What a detachment can bring besides food: soldiers' kit (from RAIDS_FROM; see BACKCOMPAT.md). */
+export const GEAR: Good[] = KIT
+/** Before RAIDS_FROM they carried raw metal and leather. A detachment that set out then still has it: it doesn't
+ *  count in a fight, and goes home with them. */
+export const OLD_GEAR: Good[] = ['bronze', 'iron', 'steel', 'leather']
 /** Food (in food value) each soldier eats a night. */
 export const RATION = EAT
 /** Troops a palisade can hold (waiting at the gate included). */

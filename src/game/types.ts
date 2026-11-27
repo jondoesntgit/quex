@@ -98,6 +98,8 @@ export interface Village {
   roads: number[]
   /** people away on neighbours' walls: still the village's, but not at home to work or eat */
   away?: number
+  /** people wounded in a fight: at home (they eat) but not fit to work until they're better */
+  wounded?: { n: number; until: string }[]
   /** false: the player assigns workers by hand (jobs); otherwise the village manages them */
   autoJobs?: boolean
   /** workers by building id, when assigned by hand */
@@ -158,12 +160,15 @@ export interface Arrival {
   id: string
   at: string
   /** 'update': the one-time update counting people one by one; 'winter': the spring influx */
-  kind: 'update' | 'winter' | 'food'
+  kind: 'update' | 'winter' | 'food' | 'orcs'
   people: number
   /** where they came from ("a farming valley") */
   from: string
   /** what they carried: three days of food */
   goods: Goods
+  /** 'orcs': the villages raided lately, and the camp nearest this one */
+  raided?: { village: string; at: string; took: string }[]
+  camp?: { name: string; col: number; row: number; hexes: number }
 }
 
 /** A home in the city: a cottage or a town house, with the sprite it's drawn with and where it stands. */
@@ -223,6 +228,10 @@ export interface GameState {
   levelled?: Record<number, number>
   /** dirt road dug so far on each hex being dug (0..1), shared by every road team digging it (see digRoads) */
   roadWork?: Record<number, number>
+  /** what's known and what's happened at each monster camp, by index into `lairs` (see camps.ts) */
+  camps?: Record<number, import('./camps').CampState>
+  /** the orc warning has gone out to every village (see warnOfOrcs) */
+  orcWarning?: boolean
   /** the food update's gift of grain has been handed out (see FOOD_UPDATE_FROM) */
   foodUpdate?: boolean
   worldSeed: string
@@ -261,7 +270,7 @@ export interface GameState {
   /** strongholds besieged, by hex: what's left of them (see strongholds.ts) */
   sieges?: Record<number, { strength: number; fallen?: string; by?: string }>
   /** caravan crews walking home after delivering: back to work when they arrive */
-  homeward?: { village: string; crew: number; at: string }[]
+  homeward?: { village: string; crew: number; at: string; /** what they carry home (soldiers: their gear and the food left) */ goods?: Goods }[]
   /** dungeons broken into by a mine's shaft, by hex (see deposits.ts) */
   dungeons?: Record<number, { kind: DungeonKind; villageId: string; raids: number; strength: number; found: string }>
   /** hexes whose trees have been felled or planted, tree by tree (see TREES_FROM) */
@@ -299,7 +308,7 @@ export type GameEvent =
   /** log progress toward a habit's daily goal (negative to correct a mistake) */
   | (Base & { t: 'drink'; date: ISODate; habitId: string; amount: number })
   | (Base & { t: 'freeze'; date: ISODate })
-  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade */ troops?: number; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods; /** a welcoming caravan to a new village: no action needed (see welcomeOpen) */ welcome?: boolean; /** a home built in the city (for an upgrade, the town house that replaces the cottage at `replace`) */ home?: Home; replace?: number })
+  | (Base & { t: 'act'; tokenId: string; /** a second half-done token, merged with the first into a whole action */ tokenId2?: string; action: ActionKind; col: number; row: number; building?: BuildingId; to?: string; goods?: Goods; /** troops sent to a neighbour's palisade, or marching on a raid */ troops?: number; /** how a raid goes about it */ strategy?: import('./battle').Strategy; /** a caravan's people, and the food they take for the road */ crew?: number; food?: Goods; /** a welcoming caravan to a new village: no action needed (see welcomeOpen) */ welcome?: boolean; /** a home built in the city (for an upgrade, the town house that replaces the cottage at `replace`) */ home?: Home; replace?: number })
   | (Base & { t: 'tick'; date: ISODate })
   | (Base & { t: 'resetHour'; hour: number })
   /** change the player's display name (themselves, or a guardian for them) */

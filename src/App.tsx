@@ -45,6 +45,16 @@ export default function App() {
         let meta = loadMeta()
         if (asked && meta && meta.worldSeed !== asked) meta = null
         meta ??= newMeta(asked ?? (account.enabled ? await account.homeWorld() : SANDBOX_WORLD))
+        // development only: a prepared world played offline (see app/demo.ts)
+        if (import.meta.env.DEV && q.get('demo')) {
+          const { demoGame } = await import('./app/demo')
+          const d = await demoGame(q.get('demo')!)
+          g = d.game
+          ;(window as unknown as { quexDemo: typeof d }).quexDemo = d
+          if (gone) { g.dispose(); return }
+          setGame(g)
+          return
+        }
         const remote = await createSupabaseStore(meta.worldSeed, preview)
         if (remote === 'signin') return setNeedSignIn(true)
         // just looking: don't make this the device's world
@@ -314,6 +324,7 @@ function Main({ game }: { game: Game }) {
       )}
 
       {p && !placing && <Arrivals game={game} p={p} />}
+      {import.meta.env.DEV && <DemoBar game={game} />}
       {p && !placing && <MorningReport game={game} p={p} />}
 
       {p && splitting && (() => {
@@ -425,6 +436,20 @@ function SandboxNote() {
       friends and family on their own, smaller world.{' '}
       <a href={familyPreviewUrl()}>Preview their world →</a>
       <button className="btn ghost" onClick={close} aria-label="close" style={{ float: 'right' }}>✕</button>
+    </div>
+  )
+}
+
+/** Development only: the demo's title and a button to move on to the next morning (see app/demo.ts). */
+function DemoBar({ game }: { game: Game }) {
+  const d = (window as unknown as { quexDemo?: { demo: { title: string }; nextDay: () => Promise<void> } }).quexDemo
+  const [busy, setBusy] = useState(false)
+  if (!d) return null
+  const day = game.now().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+  return (
+    <div style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: 'calc(env(safe-area-inset-top) + 58px)', zIndex: 30, background: '#3a1e3e', color: '#fff4d8', border: '2px solid #141424', borderRadius: 6, padding: '4px 8px', display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+      <span>DEMO · {d.demo.title} · {day} ({weekSeason(game.today())})</span>
+      <button className="btn small" disabled={busy} onClick={async () => { setBusy(true); await d.nextDay(); setBusy(false) }}>Next morning ⏩</button>
     </div>
   )
 }

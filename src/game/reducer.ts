@@ -17,11 +17,13 @@ import { shown } from './amount'
 import { influx, originFor, travelFood, TRAVEL_DAYS } from './immigrants'
 import { CITY_RADIUS, COBBLE_COST, HOMES, claimCity, starterFor, homeFits, homesCap, cottageFor, homesStorage, hexAt, isDwelling, levelling, levelWorld, paveable, relayout, validKey } from './city'
 import { THIRST, THIRSTY, WELL_COST, clayLeft, clayRenews, hasWater, waterAt, winterWater } from './water'
-import { CARRY_EACH, people, spare, staffing, needOf, jobs } from './workers'
+import { CARRY_EACH, idle, people, spare, staffing, needOf, jobs } from './workers'
 import { CHEESE_PER_HEAD, WOOL_PER_HEAD, CULL_RATE, FEED_PER_HEAD, LEAN_CULL, LEAN_DAYS, age, dailyYield, heads, lamb, mutton, pastureCap, sheepOf, slaughter } from './herds'
 import { strongholdAt, wallsAfter } from './strongholds'
 export { clayAt, clayLeft, clayRenews, mountainSpring } from './water'
-import { GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, troopsAt, type Detachment } from './garrison'
+import { GEAR, OLD_GEAR, PER_PALISADE, RATION, WAIT_DAYS, eat, foodValue, garrison, gearWith, nightsOf, stationed, troopsAt, type Detachment } from './garrison'
+import { CAMP_GROWTH, MAX_INTEL, MAX_PRESSURE, QUIET_DAYS, RAID_PRESSURE, RAID_RANGE, campAt, campsOf, defend, fight, tallyText, type Camp, type Fitting, type Group } from './camps'
+import { STRATEGIES, type Fate } from './battle'
 import { type Odds, CLEARED_FIELD_BONUS, DEPLETION_FROM, DUNGEON, HUNT_SHARE, dig, dungeonUnder, gameLeft, hunt, huntRange, leftAt, levels, mineDig, stonyness } from './deposits'
 import type { Arrival, Building, DayRecord, Factor, GameEvent, GameState, ISODate, LogEntry, Player, Source, Token, Village } from './types'
 export type { Factor, Source } from './types'
@@ -32,6 +34,7 @@ export function newGame(world: World, seasonStart: ISODate): GameState {
     cheeseRations: true,
     startersPlaced: true,
     wellsMoved: true,
+    orcWarning: true,
     foodUpdate: true,
     worldSeed: world.seed,
     seasonStart,
@@ -294,10 +297,25 @@ export function defence(v: Village) {
 /** Finished palisades: each holds PER_PALISADE lent troops. */
 export const palisades = (v: Village) => done(v).filter((b) => b.type === 'palisade').length
 
-/** Troops walk home and disband: people and gear back to their village, with any food left. */
-function sendHome(s: GameState, host: Village, d: Detachment, at: string, why: string) {
+/** Days a detachment takes to walk from its palisade back home (a day at least). */
+export function daysHome(s: GameState, world: World | undefined, host: Village, from: Village): number {
+  const p = s.players[from.playerId]
+  const minutes = p ? caravanMinutes(p, host, from, new Date(0).toISOString(), world, s) : distance(host, from) * HEX_MINUTES.wild
+  return Math.max(1, Math.ceil(minutes / 1440))
+}
+
+/** Troops leave the palisade and walk home, eating on the way; at home they disband, with their gear and the
+ *  food left. (Before RAIDS_FROM they were home the moment they left.) */
+function sendHome(s: GameState, host: Village, d: Detachment, at: string, why: string, world?: World) {
   s.garrisons![host.id] = garrison(s, host).filter((x) => x.id !== d.id)
   const from = s.villages[d.from]
+  if (from && at >= RAIDS_FROM) {
+    const days = daysHome(s, world, host, from)
+    for (let k = 0; k < days; k++) eat(d)
+    ;(s.homeward ??= []).push({ village: from.id, crew: d.troops, at: new Date(Date.parse(at) + days * 86_400_000).toISOString(), goods: { ...d.gear, ...d.food } })
+    log(s, at, from.playerId, `${d.troops} troops from ${V(from)} at ${V(host)}'s palisade ${why}, and set off home: ${days} day${days === 1 ? '' : 's'} on the road.`, 'info')
+    return
+  }
   if (from) {
     from.away = Math.max(0, (from.away ?? 0) - d.troops)
     addGoods(from, d.gear)
@@ -745,7 +763,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (!Number.isInteger(n) || n < 1) return 'Send at least one person'
       if (n > people(v) - 2 * HEADS) return `Keep at least ${2 * HEADS} people at home`
       const goods = ev.goods ?? {}
-      if (Object.keys(goods).some((g) => !GEAR.includes(g as Good) && !FOOD[g as Good])) return 'Troops carry only weapons, armour and food'
+      if (Object.keys(goods).some((g) => !(ev.at >= RAIDS_FROM ? GEAR : OLD_GEAR).includes(g as Good) && !FOOD[g as Good])) return 'Troops carry only weapons, armour and food'
       if (!hasGoods(v, goods)) return 'Not enough goods'
       const food = Object.fromEntries(Object.entries(goods).filter(([g]) => FOOD[g as Good]))
       if (foodValue(food) < n * RATION) return `Send food for at least a night (${n * RATION} worth)`
@@ -769,6 +787,7 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       if (here.building.progress < 1) return 'Finish building it first'
       const def = BUILDINGS[here.building.type]
       if (!workable(here.building)) return def.crop ? 'Crops grow in their own time' : 'Nothing to work here'
+      if (idle(here.building)) return 'Pick what it makes first'
       if (staffing(v, here.building, seasonAt(p, ev.at)) <= 0) return 'Nobody works there: give it workers (Village tab)'
       // a dry run: does it have what it needs?
       const test = structuredClone(s)
@@ -808,10 +827,119 @@ function validateAct(s: GameState, world: World, p: Player, v: Village, ev: Extr
       }
       const lair = s.lairs.find((l) => l.col === ev.col && l.row === ev.row && !l.cleared)
       if (!lair) return 'No monsters here'
+      if (ev.at >= RAIDS_FROM) return 'Camps are raided from a palisade now: see its war council'
       if (!revealed) return 'Scout it first'
       if (!territory(v).some((t) => distance(t, ev) <= t.radius + 8)) return 'Too far to march'
       return null
     }
+    case 'recon': {
+      const c = campAt(s, ev.col, ev.row)
+      if (!c) return 'No camp here'
+      if (!revealed) return 'Scout the land there first'
+      if (!territory(v).some((t) => distance(t, ev) <= t.radius + RAID_RANGE)) return 'Too far to send scouts'
+      if (c.state.intel >= MAX_INTEL) return 'Nothing more to learn: they know it inside out'
+      return null
+    }
+    case 'raid': {
+      const c = campAt(s, ev.col, ev.row)
+      if (!c) return 'No camp here'
+      if (!palisades(v)) return 'Raids march from a palisade'
+      if (distance(c.lair, v) > RAID_RANGE) return 'Too far to march from your palisade'
+      const own = ev.troops ?? 0
+      if (!Number.isInteger(own) || own < 0) return 'How many of your own?'
+      if (own > Math.max(0, people(v) - 2 * HEADS)) return `At most ${Math.max(0, people(v) - 2 * HEADS)} of your own: someone has to stay home`
+      if (own + troopsAt(s, v) <= 0) return 'Nobody to march'
+      if (c.state.quietUntil && ev.at < c.state.quietUntil) return 'Scattered: nobody there to fight until they gather again'
+      if (ev.strategy && !STRATEGIES[ev.strategy]) return 'Pick a plan for the raid'
+      return null
+    }
+  }
+}
+
+
+/** Days the wounded are out of action. */
+export const WOUNDED_DAYS = 3
+
+/** What a fight did to the soldiers who fought it. The lost come off their village's people; the wounded are
+ *  carried home to get better (fit for no work for WOUNDED_DAYS); prisoners are held at the camp, away from home
+ *  until a raid frees them; and on a lost field the kit the fallen carried (and the ladders and ram) goes to the
+ *  camp's hoard. `dets[k]` is the detachment behind `groups[k]`, or null for the host's own (its stores). */
+function afterFight(s: GameState, c: Camp, host: Village, groups: Group[], dets: (Detachment | null)[],
+  r: { fitting: Fitting; fates: Fate[]; kitLost: Goods[] }, at: string) {
+  const st = ((s.camps ??= {})[c.idx] ??= { intel: 0, raids: 0 })
+  const until = new Date(Date.parse(at) + WOUNDED_DAYS * 86_400_000).toISOString()
+  r.fitting.soldiers.forEach((x, k) => {
+    const f = r.fates[k]
+    if (f === 'unhurt' || f === 'ran') return
+    const d = dets[x.group], home = s.villages[groups[x.group].village]
+    if (!home) return
+    if (d) d.troops = Math.max(0, d.troops - 1)
+    if (f === 'lost') {
+      home.population = Math.max(0, home.population - 1)
+      if (d) home.away = Math.max(0, (home.away ?? 0) - 1)
+    } else if (f === 'captured') {
+      ;(st.prisoners ??= {})[home.id] = (st.prisoners[home.id] ?? 0) + 1
+      if (!d) home.away = (home.away ?? 0) + 1 // a detachment's were already away: they still are
+    } else {
+      // wounded: home to get better
+      if (d) home.away = Math.max(0, (home.away ?? 0) - 1)
+      const w = (home.wounded ??= []).find((e) => e.until === until)
+      if (w) w.n++
+      else home.wounded.push({ n: 1, until })
+    }
+  })
+  // the kit left on a lost field
+  r.kitLost.forEach((lost, gi) => {
+    const d = dets[gi]
+    const stores = d ? d.gear : s.villages[groups[gi].village]?.goods
+    if (!stores) return
+    for (const [g, n] of Object.entries(lost) as [Good, number][]) {
+      const k = Math.min(n, stores[g] ?? 0)
+      if (k <= 0) continue
+      stores[g] = round2((stores[g] ?? 0) - k)
+      if (!stores[g]) delete stores[g]
+      ;(st.plunder ??= {})[g] = round2((st.plunder[g] ?? 0) + k)
+    }
+  })
+  // a detachment with nobody left: what it still carries goes home
+  for (const d of dets) if (d && d.troops <= 0) { const home = s.villages[d.from]; if (home) addGoods(home, { ...d.gear }) }
+  if (s.garrisons?.[host.id]) s.garrisons[host.id] = garrison(s, host).filter((d) => d.troops > 0)
+}
+
+/** A band from a camp comes at a village in the night. Every able adult turns out (half the village, at least the
+ *  ones at home) with any soldiers on its walls, fitted out from the stores; behind a palisade they hold the
+ *  fighting step. If we lose, they take prisoners, the armoury if the palisade fell, and what they can carry. */
+function nightRaid(s: GameState, c: Camp, v: Village, p: Player, at: string) {
+  const dets: (Detachment | null)[] = [null]
+  const groups: Group[] = [{ village: v.id, troops: Math.max(1, Math.floor(people(v) / 2)), gear: v.goods }]
+  for (const d of stationed(s, v)) { groups.push({ village: d.from, troops: d.troops, gear: d.gear }); dets.push(d) }
+  const walls = palisades(v) > 0
+  const r = defend(s, c, v, groups, walls, at)
+  afterFight(s, c, v, groups, dets, r, at)
+  const st = ((s.camps ??= {})[c.idx] ??= { intel: 0, raids: 0 })
+  const they = c.lair.kind === 'goblins' ? 'Goblins' : 'Orcs'
+  const ours = Object.entries(r.tally).map(([vid, t]) => `${vid === v.id ? 'Of ours' : `Of the soldiers from ${s.villages[vid] ? V(s.villages[vid]) : 'afar'}`}: ${tallyText(t)}.`).join(' ')
+  const report = `${they} from ${c.name} came in the night, ${r.orcs} of them. ${r.story.join(' ')} ${ours}`
+  if (r.win) {
+    v.morale = Math.min(100, v.morale + 2)
+    c.lair.strength = round2(c.lair.strength * 0.95)
+    log(s, at, p.id, `${report} ${walls ? 'Our palisade held.' : 'We drove them off.'}`, 'good')
+  } else {
+    // what they carried off goes into the camp's hoard, to be won back
+    for (const [g, n] of Object.entries(r.plunder) as [Good, number][]) {
+      const k = Math.min(n, v.goods[g] ?? 0)
+      if (k <= 0) continue
+      addGoods(v, { [g]: -k })
+      ;(st.plunder ??= {})[g] = round2((st.plunder[g] ?? 0) + k)
+    }
+    v.morale = Math.max(0, v.morale - 5)
+    c.lair.strength = round2(c.lair.strength * 1.05)
+    const took = Object.keys(r.plunder).length ? ` They carried off ${fmtGoods(r.plunder)}.` : ''
+    log(s, at, p.id, `${report} ${walls ? 'They took our palisade, and its armoury with it.' : 'They broke into our village.'}${took} A raid on ${c.name} could win it all back.`, 'monster')
+  }
+  for (const d of dets) if (d && s.villages[d.from] && s.villages[d.from].id !== v.id) {
+    const t = r.tally[d.from]
+    if (t) log(s, at, s.villages[d.from].playerId, `Your soldiers on ${V(v)}'s walls fought off a night raid${r.win ? '' : ', and lost'}. Yours: ${tallyText(t)}.`, r.win ? 'good' : 'monster')
   }
 }
 
@@ -843,6 +971,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
   convertCheese(s, ev.at)
   placeStarters(s, world, ev.at)
   moveWells(s, world, ev.at)
+  warnOfOrcs(s, world, ev.at)
   foodUpdate(s, world, ev.at)
   giveWells(s, world, ev.at)
   giveStaff(s, world, ev.at)
@@ -952,7 +1081,7 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
         d.since = ev.at
         log(s, ev.at, p.id, `${V(v)} took ${d.troops} troops from ${from ? V(from) : 'afar'} onto its walls (food for ${nightsOf(d)} nights).`, 'good')
       } else {
-        sendHome(s, v, d, ev.at, d.status === 'waiting' ? 'were turned back at the gate' : 'were thanked and sent home')
+        sendHome(s, v, d, ev.at, d.status === 'waiting' ? 'were turned back at the gate' : 'were thanked and sent home', world)
       }
       return s
     }
@@ -1149,6 +1278,35 @@ function placeStarters(s: GameState, world: World, at: string) {
     s.startersPlaced = true
   } catch (e) {
     console.error('laying out the squares could not run yet:', e)
+  }
+}
+
+/** From this moment monster camps are raided from a palisade (see camps.ts) instead of by one village's
+ *  expedition; troops leaving a palisade walk home (eating on the way) instead of being home at once, and
+ *  leave while their food still covers the road; and the camps don't raid villages on spring nights. */
+export const RAIDS_FROM = '2026-11-27T04:30:00.000Z'
+const ORC_RAID = 'Orc raiders stomped through and carried off '
+/** Once, from RAIDS_FROM: every village hears who the orcs have raided lately, and where the nearest camp is
+ *  (a note, see Arrivals), so neighbours think about sending soldiers to a palisade in the spring. */
+function warnOfOrcs(s: GameState, world: World, at: string) {
+  if (s.orcWarning || at < RAIDS_FROM) return
+  s.orcWarning = true
+  // the outfitter makes kit now: one already standing waits to be told what
+  for (const v of Object.values(s.villages)) for (const b of v.buildings) if (b.type === 'outfitter' && b.order === undefined) b.order = ''
+  const since = new Date(Date.parse(at) - 10 * 86_400_000).toISOString()
+  const raids = s.log.filter((e) => e.at >= since && e.text.startsWith(ORC_RAID) && e.playerId)
+  const orcs = campsOf(s).filter((c) => c.lair.kind === 'orcs')
+  for (const v of Object.values(s.villages)) {
+    const raided = raids.map((e) => ({ village: Object.values(s.villages).find((x) => x.playerId === e.playerId)?.id ?? '', at: e.at, took: e.text.slice(ORC_RAID.length).replace(/\.$/, '') }))
+      .filter((r) => r.village)
+    const near = [...orcs].sort((a, b) => distance(a.lair, v) - distance(b.lair, v))[0]
+    // the riders say where it is: the camp and the ground round it are known from now on
+    if (near) reveal(world, s, near.lair, 1)
+    ;(v.arrivals ??= []).push({
+      id: `orcs-${at}`, at, kind: 'orcs', people: 0, from: '', goods: {}, raided,
+      ...(near ? { camp: { name: near.name, col: near.lair.col, row: near.lair.row, hexes: distance(near.lair, v) } } : {}),
+    })
+    v.arrivals = v.arrivals.slice(-6)
   }
 }
 
@@ -1461,7 +1619,8 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       }
       addGoods(v, buildCost(v, def, ev.at), -k)
       if (existing) existing.building.progress = Math.min(1, existing.building.progress + k)
-      else v.buildings.push({ id: ev.id, type: def.id, col: ev.col, row: ev.row, progress: Math.min(1, k) })
+      // a workshop does nothing until someone picks what it makes (from RAIDS_FROM; '' is nothing picked yet)
+      else v.buildings.push({ id: ev.id, type: def.id, col: ev.col, row: ev.row, progress: Math.min(1, k), ...(def.recipes && ev.at >= RAIDS_FROM ? { order: '' } : {}) })
       const b = buildingAt(s, ev.col, ev.row)!.building
       log(s, ev.at, p.id, b.progress >= 1 ? `${P(p)} built ${an(def.name.toLowerCase())}!` : `${P(p)} half-built ${an(def.name.toLowerCase())}.`, 'good')
       break
@@ -1496,7 +1655,7 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
       // they're still the village's people, just away (see workers.people)
       v.away = (v.away ?? 0) + ev.troops!
       const pick = (f: (g: Good) => boolean) => Object.fromEntries(Object.entries(goods).filter(([g, n]) => f(g as Good) && n)) as Goods
-      const d: Detachment = { id: ev.id, from: v.id, troops: ev.troops!, gear: pick((g) => GEAR.includes(g)), food: pick((g) => !!FOOD[g]), status: 'waiting', since: ev.at }
+      const d: Detachment = { id: ev.id, from: v.id, troops: ev.troops!, gear: pick((g) => (ev.at >= RAIDS_FROM ? GEAR : OLD_GEAR).includes(g)), food: pick((g) => !!FOOD[g]), status: 'waiting', since: ev.at }
       ;((s.garrisons ??= {})[to.id] ??= []).push(d)
       log(s, ev.at, p.id, `${d.troops} troops from ${V(v)} marched to ${V(to)}'s palisade${Object.keys(d.gear).length ? ` with ${fmtGoods(d.gear)}` : ''} and food for ${nightsOf(d)} nights. They wait at the gate.`, 'info')
       break
@@ -1562,6 +1721,66 @@ function act(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t: 
         v.morale = Math.max(0, v.morale - 10)
         state.strength = round2(state.strength * 0.9) // the defenders are worn down a little all the same
         log(s, ev.at, p.id, `${P(p)} laid siege to ${fort.name}, but its walls held (x${walls}). ${kit ? `Spent: ${kit}. ` : ''}Bring rams, siege towers or cannon to break them.`, 'monster')
+      }
+      break
+    }
+    case 'recon': {
+      const c = campAt(s, ev.col, ev.row)!
+      const st = ((s.camps ??= {})[c.idx] ??= { intel: 0, raids: 0 })
+      st.intel = Math.min(MAX_INTEL, st.intel + 1)
+      log(s, ev.at, p.id, `${P(p)}'s scouts lay in the bracken and watched ${c.name}: every war council near it now knows it ${['', 'a little', 'fairly well', 'well', 'inside out'][st.intel]}.`, 'info')
+      break
+    }
+    case 'raid': {
+      const c = campAt(s, ev.col, ev.row)!
+      // the host's own, with the kit in its stores; each detachment on the walls with what it brought
+      const dets: (Detachment | null)[] = []
+      const groups: Group[] = []
+      if (ev.troops) { groups.push({ village: v.id, troops: ev.troops, gear: v.goods }); dets.push(null) }
+      for (const d of stationed(s, v)) { groups.push({ village: d.from, troops: d.troops, gear: d.gear }); dets.push(d) }
+      const r = fight(s, c, groups, ev.strategy ?? 'assault', ev.at)
+      const st = ((s.camps ??= {})[c.idx] ??= { intel: 0, raids: 0 })
+      afterFight(s, c, v, groups, dets, r, ev.at)
+      if (c.lair.kind === 'dragon' && r.dragonLeft !== undefined) st.dragonHp = r.dragonLeft
+      const who_ = [...new Set(groups.map((g) => g.village))].filter((x) => x !== v.id).map((x) => s.villages[x]).filter(Boolean)
+      const allies = who_.length ? ` with soldiers from ${who_.map((x) => V(x!)).join(' and ')}` : ''
+      const ours = Object.entries(r.tally).map(([vid, t]) => `${vid === v.id ? 'Of ours' : `From ${s.villages[vid] ? V(s.villages[vid]) : 'afar'}`}: ${tallyText(t)}.`).join(' ')
+      const report = `${r.story.join(' ')} ${ours}`
+      if (r.win) {
+        for (const [vid, goods] of Object.entries(r.shares)) {
+          const home = s.villages[vid]
+          if (!home) continue
+          addGoods(home, goods)
+          home.morale = Math.min(100, home.morale + 4)
+          if (vid !== v.id) log(s, ev.at, home.playerId, `Your soldiers marched with ${V(v)} on ${c.name}, and won. Yours: ${tallyText(r.tally[vid] ?? { lost: 0, wounded: 0, captured: 0, ran: 0, unhurt: 0 })}. Your share of the plunder came home: ${fmtGoods(goods)}.`, 'good')
+        }
+        // our people they held come home, and what they'd carried off from us goes out with the shares
+        for (const [vid, n] of Object.entries(st.prisoners ?? {})) {
+          const home = s.villages[vid]
+          if (!home || !n) continue
+          home.away = Math.max(0, (home.away ?? 0) - n)
+          log(s, ev.at, home.playerId, `${n} of your people, held at ${c.name}, were freed in ${V(v)}'s raid and came home.`, 'good')
+        }
+        st.prisoners = {}
+        st.plunder = {}
+        st.raids++
+        st.intel = Math.floor(st.intel / 2)
+        st.raidedAt = ev.at
+        st.quietUntil = new Date(Date.parse(ev.at) + QUIET_DAYS * 86_400_000).toISOString()
+        c.lair.strength = round2(c.lair.strength * 0.6)
+        if (r.broken) c.lair.cleared = true
+        const gone = c.lair.kind === 'dragon' ? (r.broken ? ' The dragon is gone for good.' : ` The dragon will be back, with ${r.dragonLeft} of its strength.`) : r.broken ? ' The camp broke up and scattered for good.' : ` The ${c.lair.kind} scattered; they'll be back.`
+        log(s, ev.at, p.id, `${V(v)} raided ${c.name}${allies} and won! ${report} The hoard: ${fmtGoods(r.hoard)}, shared by soldiers sent.${gone}`, 'good')
+      } else {
+        for (const vid of new Set(groups.map((g) => g.village))) {
+          const home = s.villages[vid]
+          if (!home) continue
+          home.morale = Math.max(0, home.morale - 5)
+          if (vid !== v.id) log(s, ev.at, home.playerId, `Your soldiers marched with ${V(v)} on ${c.name}, and were beaten back. Yours: ${tallyText(r.tally[vid] ?? { lost: 0, wounded: 0, captured: 0, ran: 0, unhurt: 0 })}.`, 'monster')
+        }
+        c.lair.strength = round2(c.lair.strength * 1.1)
+        st.intel = Math.min(MAX_INTEL, st.intel + 1) // they learned something, the hard way
+        log(s, ev.at, p.id, `${V(v)}'s raid on ${c.name}${allies} was beaten back. ${report} The ${c.lair.kind === 'dragon' ? 'dragon is' : `${c.lair.kind} are`} bolder for it.`, 'monster')
       }
       break
     }
@@ -1845,7 +2064,7 @@ function crewsHome(s: GameState, at: string) {
   const now = Date.parse(at)
   for (const h of s.homeward.filter((x) => Date.parse(x.at) <= now)) {
     const v = s.villages[h.village]
-    if (v) v.away = Math.max(0, (v.away ?? 0) - h.crew)
+    if (v) { v.away = Math.max(0, (v.away ?? 0) - h.crew); if (h.goods) addGoods(v, h.goods) }
   }
   s.homeward = s.homeward.filter((x) => Date.parse(x.at) > now)
 }
@@ -2111,6 +2330,7 @@ export function shift(s: GameState, world: World, v: Village, b: Building, k: nu
   const mul = (label: string, x: number) => { if (Math.abs(x - 1) > 1e-6) why(label, times(x)) }
   const def0 = BUILDINGS[b.type]
   // a workshop makes whatever it's been ordered to (the first thing, if nothing)
+  if (idle(b)) return {}
   const recipe = def0.recipes ? def0.recipes.find((r) => r.id === b.order) ?? def0.recipes[0] : null
   const def = recipe ? { ...def0, consumes: recipe.consumes, produces: recipe.produces } : def0
   // it makes as much as it has hands for
@@ -2474,23 +2694,47 @@ function tick(s: GameState, world: World, p: Player, ev: Extract<GameEvent, { t:
     }
   }
 
+  // 4a. the wounded who are better go back to work
+  if (v.wounded) { v.wounded = v.wounded.filter((w) => w.until > ev.at); if (!v.wounded.length) delete v.wounded }
+
   // 4b. troops at the palisade eat their own provisions; those left waiting too long give up
   for (const d of [...garrison(s, v)]) {
     if (d.status === 'waiting') {
-      if (daysBetween(d.since.slice(0, 10), ev.date) >= WAIT_DAYS) sendHome(s, v, d, ev.at, 'gave up waiting at the gate')
+      if (daysBetween(d.since.slice(0, 10), ev.date) >= WAIT_DAYS) sendHome(s, v, d, ev.at, 'gave up waiting at the gate', world)
+    } else if (ev.at >= RAIDS_FROM) {
+      // they head home while the food left still covers the road
+      const from = s.villages[d.from]
+      const road = from ? daysHome(s, world, v, from) : 1
+      if (!eat(d) || nightsOf(d) <= road) sendHome(s, v, d, ev.at, nightsOf(d) > 0 ? 'had just enough food left for the road' : 'ate the last of their provisions', world)
     } else if (!eat(d) || nightsOf(d) < 1) sendHome(s, v, d, ev.at, 'ate the last of their provisions')
   }
 
   // 5. monsters adapt to nearby players and sometimes raid
   const villages = Object.values(s.villages)
+  const scattered = new Set(campsOf(s).filter((c) => c.state.quietUntil && ev.at < c.state.quietUntil).map((c) => c.lair))
   for (const lair of s.lairs) {
     if (lair.cleared || distance(lair, v) > 7) continue
+    // from RAIDS_FROM a camp grows a little stronger every day it's left alone (CAMP_GROWTH a week), once a day
+    if (ev.at >= RAIDS_FROM && !scattered.has(lair) && lair.kind !== 'dragon') {
+      const st = ((s.camps ??= {})[s.lairs.indexOf(lair)] ??= { intel: 0, raids: 0 })
+      if (st.grewOn !== ev.date) { st.grewOn = ev.date; lair.strength = round2(lair.strength * (1 + CAMP_GROWTH / 7)) }
+    }
+    // the camps keep to themselves in spring (from RAIDS_FROM), and a scattered camp is in no state to raid
+    if (ev.at >= RAIDS_FROM && (weekSeason(ev.date) === 'spring' || scattered.has(lair))) continue
     const near = villages.filter((o) => distance(o, lair) <= 8)
     const target = 0.8 * (near.reduce((a, o) => a + power(o), 0) / Math.max(1, near.length))
     lair.strength = round2(Math.max(lair.strength, lair.strength + (target - lair.strength) * 0.1))
     const bold = winter && v.winterForecast === 'hungry' ? 1.5 : 1
-    const chance = 0.12 * bold * (lair.strength / (lair.strength + (defence(v) + troopsAt(s, v)) * 2))
+    // and the longer the season goes on, the bolder they get (RAID_PRESSURE more a week, from RAIDS_FROM)
+    const pressure = ev.at >= RAIDS_FROM ? Math.min(MAX_PRESSURE, 1 + RAID_PRESSURE * (Date.parse(ev.at) - Date.parse(RAIDS_FROM)) / (7 * 86_400_000)) : 1
+    const chance = 0.12 * bold * pressure * (lair.strength / (lair.strength + (defence(v) + troopsAt(s, v)) * 2))
     if (rng() < chance) {
+      // from RAIDS_FROM, orcs and goblins come in force: every able adult turns out to meet them (see defend)
+      const camp = ev.at >= RAIDS_FROM && (lair.kind === 'orcs' || lair.kind === 'goblins') ? campsOf(s).find((c) => c.lair === lair) : undefined
+      if (camp) {
+        nightRaid(s, camp, v, p, ev.at)
+        continue
+      }
       const goods = Object.entries(v.goods).filter(([, n]) => (n ?? 0) >= 2)
       if (goods.length) {
         const [g, n] = goods[Math.floor(rng() * goods.length)]

@@ -29,7 +29,9 @@ export const VALUE: Record<Good, number> = {
   bread: 2, smoked_fish: 2.5, cheese: 0.2, milk: 0.1, cured_meat: 0.22, biscuit: 2, dried_peas: 1.5, honey: 4, bricks: 2, charcoal: 1.5, planks: 2, leather: 3, cloth: 4,
   copper: 5, iron: 7, bronze: 10, steel: 15, silver: 50,
   relic: 25, dragon_scale: 40,
+  tusk_ivory: 45, warg_pelt: 30, war_banner: 35, black_iron: 40, amber: 30, chieftain_torc: 60, war_horn: 35, troll_pearl: 70, goblin_gold: 50,
   saltpetre: 4, sulfur: 4, gunpowder: 12, cannonballs: 6, musket: 25, cannon: 120, ram: 30, siege_tower: 60,
+  spear: 5, sword: 14, bow: 4, shield: 5, helmet: 5, jerkin: 5, mail: 22, ladder: 2,
 }
 
 /** A worth (in grain) as copper. */
@@ -48,7 +50,9 @@ export const WEIGHT: Record<Good, number> = {
   bread: 22, smoked_fish: 18, cheese: 1.6, milk: 3, cured_meat: 1.2, biscuit: 12, dried_peas: 15, honey: 14, bricks: 1000, charcoal: 500, planks: 500, leather: 200, cloth: 200,
   copper: 50, iron: 50, bronze: 50, steel: 50, silver: 12,
   relic: 10, dragon_scale: 50,
+  tusk_ivory: 20, warg_pelt: 15, war_banner: 10, black_iron: 50, amber: 2, chieftain_torc: 3, war_horn: 25, troll_pearl: 1, goblin_gold: 12,
   saltpetre: 200, sulfur: 200, gunpowder: 200, cannonballs: 1000, musket: 20, cannon: 1500, ram: 800, siege_tower: 4000,
+  spear: 6, sword: 4, bow: 3, shield: 10, helmet: 5, jerkin: 8, mail: 25, ladder: 40,
 }
 
 export const weightOf = (g: Goods) => Object.entries(g).reduce((a, [x, n]) => a + (n ?? 0) * WEIGHT[x as Good], 0)
@@ -70,22 +74,22 @@ export const KINDS: Record<MerchantKind, Kind> = {
   ship: {
     name: 'Sea traders', blurb: 'A trading ship from over the horizon.', size: 1.4,
     pool: ['tin', 'salt', 'cloth', 'iron', 'bronze', 'smoked_fish', 'planks', 'herbs'],
-    wants: ['timber', 'planks', 'grain', 'cheese', 'wool', 'leather', 'relic', 'dragon_scale'],
+    wants: ['timber', 'planks', 'grain', 'cheese', 'wool', 'leather', 'relic', 'dragon_scale', 'tusk_ivory', 'troll_pearl', 'chieftain_torc', 'goblin_gold'],
   },
   barge: {
     name: 'River barge', blurb: 'Bargemen poling goods up and down the river.', size: 1.2,
     pool: ['grain', 'clay', 'fish', 'bread', 'planks', 'charcoal', 'bricks', 'berries'],
-    wants: ['stone', 'copper_ore', 'iron_ore', 'wool', 'cheese', 'leather', 'salt'],
+    wants: ['stone', 'copper_ore', 'iron_ore', 'wool', 'cheese', 'leather', 'salt', 'warg_pelt', 'black_iron'],
   },
   caravan: {
     name: 'Overland caravan', blurb: 'Pack mules up the long roads.', size: 1,
     pool: ['tin', 'leather', 'cloth', 'cheese', 'wool', 'copper_ore', 'iron_ore', 'stone', 'bricks'],
-    wants: ['grain', 'bread', 'timber', 'planks', 'salt', 'smoked_fish', 'berries'],
+    wants: ['grain', 'bread', 'timber', 'planks', 'salt', 'smoked_fish', 'berries', 'war_banner', 'war_horn', 'tusk_ivory', 'chieftain_torc'],
   },
   pedlar: {
     name: 'Pedlar', blurb: 'A lone pedlar with a pack on their back.', size: 0.6,
     pool: ['berries', 'herbs', 'salt', 'game', 'wool', 'timber', 'clay', 'leather'],
-    wants: ['bread', 'cheese', 'smoked_fish', 'grain', 'cloth'],
+    wants: ['bread', 'cheese', 'smoked_fish', 'grain', 'cloth', 'amber', 'goblin_gold'],
   },
 }
 

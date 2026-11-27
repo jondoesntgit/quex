@@ -15,13 +15,22 @@ export const GOODS = [
   // what immigrants carry on the road (see immigrants.ts)
   'biscuit', 'dried_peas', 'honey',
   'copper', 'iron', 'bronze', 'steel', 'silver',
+  // kit soldiers carry into a fight (made at the smithy and the outfitter; ladders and rams are carried along)
+  'spear', 'sword', 'bow', 'shield', 'helmet', 'jerkin', 'mail', 'ladder',
   // powder and siege
   'saltpetre', 'sulfur', 'gunpowder', 'cannonballs', 'musket', 'cannon', 'ram', 'siege_tower',
   // loot
   'relic', 'dragon_scale',
+  // trophies: only from raiding monster camps (each camp has its own); merchants pay well, none sells them
+  'tusk_ivory', 'warg_pelt', 'war_banner', 'black_iron', 'amber', 'chieftain_torc', 'war_horn', 'troll_pearl', 'goblin_gold',
 ] as const
 export type Good = (typeof GOODS)[number]
 export type Goods = Partial<Record<Good, number>>
+/** What soldiers carry into a fight (see battle.ts and the quartermaster in camps.ts). */
+export const KIT: Good[] = ['sword', 'spear', 'bow', 'shield', 'helmet', 'mail', 'jerkin', 'ladder', 'ram']
+/** A count of a piece of kit, in words: "6 spears", "1 mail shirt". */
+export const kitCount = (g: Good, n: number) => `${n} ${n === 1 ? GOOD_LABEL[g].toLowerCase() : KIT_PLURAL[g] ?? `${GOOD_LABEL[g].toLowerCase()}s`}`
+const KIT_PLURAL: Partial<Record<Good, string>> = { jerkin: 'leather jerkins', mail: 'mail shirts', ladder: 'scaling ladders', ram: 'battering rams' }
 
 export const GOOD_LABEL: Record<Good, string> = {
   grain: 'Grain', fish: 'Fish', timber: 'Timber', peat: 'Peat', rice: 'Wild rice', milk: 'Milk', stone: 'Stone', clay: 'Clay', tin: 'Tin',
@@ -31,6 +40,9 @@ export const GOOD_LABEL: Record<Good, string> = {
   cheese: 'Cheese', bricks: 'Bricks', charcoal: 'Charcoal', planks: 'Planks', leather: 'Leather',
   cloth: 'Cloth', copper: 'Copper', iron: 'Iron', bronze: 'Bronze', steel: 'Steel',
   relic: 'Relic', dragon_scale: 'Dragon scale',
+  tusk_ivory: 'Tusk ivory', warg_pelt: 'Warg pelt', war_banner: 'Orc war banner', black_iron: 'Orc black iron', amber: 'Amber',
+  chieftain_torc: "Chieftain's torc", war_horn: 'Bronze war horn', troll_pearl: 'Troll pearl', goblin_gold: 'Goblin gold',
+  spear: 'Spear', sword: 'Sword', bow: 'Bow', shield: 'Shield', helmet: 'Helmet', jerkin: 'Leather jerkin', mail: 'Mail shirt', ladder: 'Scaling ladder',
   saltpetre: 'Saltpetre', sulfur: 'Sulfur', gunpowder: 'Gunpowder', cannonballs: 'Cannonballs', musket: 'Musket',
   cannon: 'Cannon', ram: 'Battering ram', siege_tower: 'Siege tower',
 }
@@ -132,7 +144,7 @@ export type BuildingId =
   | 'nitre_beds' | 'powder_mill' | 'gun_foundry' | 'gunsmith' | 'siege_workshop'
   | 'forager_camp' | 'lumber_camp' | 'hunting_lodge' | 'charcoal_kiln' | 'sawmill'
   | 'pen' | 'dairy' | 'weaver'
-  | 'scout_camp' | 'outfitter'
+  | 'scout_camp' | 'outfitter' | 'smithy'
 
 /** People are counted one by one. Until the conversion at CITY_FROM a "person" was a household of this
  *  many: every per-person number is derived from it, so the economy stays in balance. */
@@ -266,7 +278,21 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   weaver: B({ id: 'weaver', name: 'Weaver', role: 'herding', size: 'big', cost: { timber: 6, planks: 2 }, consumes: { wool: 2 }, produces: { cloth: 1 }, blurb: 'Cloth for clothes and sails.' }),
   // explorer
   scout_camp: B({ id: 'scout_camp', name: 'Scout camp', role: 'explorer', size: 'medium', cost: { timber: 2 }, blurb: 'Scouting reveals one ring further.' }),
-  outfitter: B({ id: 'outfitter', name: 'Outfitter', role: 'explorer', size: 'big', cost: { timber: 4, leather: 2 }, defence: 2, blurb: 'Packs and gear: stronger expeditions.' }),
+  outfitter: B({ id: 'outfitter', name: 'Outfitter', role: 'explorer', size: 'big', cost: { timber: 4, leather: 2 }, defence: 2, blurb: 'Packs and gear for expeditions, and kit for soldiers: bows, shields, leather jerkins and scaling ladders. Put in an order for which.',
+    recipes: [
+      { id: 'bows', name: 'Bows', consumes: { timber: 1, leather: 0.25 }, produces: { bow: 2 } },
+      { id: 'shields', name: 'Shields', consumes: { planks: 1, leather: 0.5 }, produces: { shield: 2 } },
+      { id: 'jerkins', name: 'Leather jerkins', consumes: { leather: 1 }, produces: { jerkin: 1 } },
+      { id: 'ladders', name: 'Scaling ladders', consumes: { timber: 2 }, produces: { ladder: 2 } },
+    ] }),
+  // war: soldiers' kit (see battle.ts: the quartermaster fits everyone out from the stores)
+  smithy: B({ id: 'smithy', name: 'Smithy', role: 'any', size: 'medium', cost: { stone: 4, timber: 4, copper: 1 }, blurb: 'Hammers metal into soldiers\' kit: copper spearheads and helmets, bronze swords, iron mail. Burns charcoal. Put in an order for which.',
+    recipes: [
+      { id: 'spears', name: 'Spears', consumes: { timber: 1, copper: 0.5, charcoal: 0.25 }, produces: { spear: 2 } },
+      { id: 'helmets', name: 'Helmets', consumes: { copper: 1, charcoal: 0.25 }, produces: { helmet: 2 } },
+      { id: 'swords', name: 'Swords', consumes: { bronze: 1, charcoal: 0.5 }, produces: { sword: 1 } },
+      { id: 'mail', name: 'Mail shirts', consumes: { iron: 2, charcoal: 1 }, produces: { mail: 1 } },
+    ] }),
 }
 
 // ------------------------------------------------------------------ tools
@@ -301,7 +327,7 @@ export function toolMult(tools: readonly string[] | undefined, type: BuildingId)
 
 // ------------------------------------------------------------------ actions
 
-export type ActionKind = 'scout' | 'gather' | 'pick' | 'chop' | 'peat' | 'rice' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade'
+export type ActionKind = 'scout' | 'gather' | 'pick' | 'chop' | 'peat' | 'rice' | 'clear' | 'plant' | 'road' | 'build' | 'work' | 'siege' | 'deepen' | 'pave' | 'dig_clay' | 'well' | 'caravan' | 'troops' | 'outpost' | 'expedition' | 'cobble' | 'home' | 'upgrade' | 'recon' | 'raid'
 
 export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: string }> = {
   scout: { size: 'small', name: 'Scout', blurb: 'Reveal the land around a hex.' },
@@ -326,6 +352,8 @@ export const ACTIONS: Record<ActionKind, { size: TaskSize; name: string; blurb: 
   troops: { size: 'medium', name: 'Send troops', blurb: "Lend people, weapons and armour to a neighbour's palisade, with food to live on." },
   outpost: { size: 'big', name: 'Found outpost', blurb: 'Extend your territory.' },
   expedition: { size: 'big', name: 'Expedition', blurb: 'Take on a monster lair for loot.' },
+  recon: { size: 'small', name: 'Scout the camp', blurb: 'Watch a monster camp from cover: how many there are, how they guard, what they hoard. Every war council near it learns from it.' },
+  raid: { size: 'medium', name: 'Raid the camp', blurb: "March on a monster camp from your palisade with your own fighters and the troops on your walls. The hoard is shared by how many soldiers each village sent." },
   siege: { size: 'big', name: 'Lay siege', blurb: 'Storm a stronghold. Its walls triple its strength: bring rams, siege towers or cannon to break them, and muskets for the assault.' },
 }
 

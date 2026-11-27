@@ -11,6 +11,9 @@ import { ACTIONS, BUILDINGS, FOOD, FOOD_SCALE, GATHER, gatherAmount, GOOD_LABEL,
 import { DEPLETION_FROM, gameLeft, leftAt } from './deposits'
 import { PAVE_COST, buildCost, buildingAt, fmtGoods, landAt, cellIndex, refundOf } from './reducer'
 import { COBBLE_COST, HOMES } from './city'
+import { campAt, fittingText, forecast } from './camps'
+import { STRATEGIES, type Strategy } from './battle'
+import { stationed } from './garrison'
 import type { GameState, Home, Player } from './types'
 import { WELL_COST, clayLeft, clayRenews, mountainSpring } from './water'
 import { hasTrees, treeCount } from '../world/land'
@@ -28,13 +31,39 @@ export function taskText(tok: { size: TaskSize; strength: number; merged?: boole
 }
 
 export function outcome(world: World, s: GameState, p: Player, action: ActionKind, col: number, row: number,
-  extra: { building?: BuildingId; home?: Home } = {}, tok: { size: TaskSize; strength: number; merged?: boolean }, at: string): Outcome {
+  extra: { building?: BuildingId; home?: Home; troops?: number; strategy?: Strategy } = {}, tok: { size: TaskSize; strength: number; merged?: boolean }, at: string): Outcome {
   const v = s.villages[p.villageId]
   const i = cellIndex(world, col, row)
   const land = landAt(world, s, i)
   const k = tok.strength
   const out: Outcome = { spends: [taskText(tok)], gets: [], notes: [] }
   switch (action) {
+    case 'recon': {
+      const c = campAt(s, col, row)
+      if (!c) break
+      out.gets.push(`A closer look at ${c.name}: a truer guess at its strength, the odds and its hoard`)
+      out.notes.push('Every palisade near it learns from your scouts, not just yours. A camp can be scouted four times before there is nothing more to learn.')
+      break
+    }
+    case 'raid': {
+      const c = campAt(s, col, row)
+      if (!c) break
+      const own = extra.troops ?? 0
+      const plan = extra.strategy ?? 'assault'
+      const fc = forecast(s, c, [
+        ...(own ? [{ village: v.id, troops: own, gear: v.goods }] : []),
+        ...stationed(s, v).map((d) => ({ village: d.from, troops: d.troops, gear: d.gear })),
+      ], plan, at)
+      const f = fc.fitting
+      const pc = (x: number) => `${Math.round(x * 100)}%`
+      out.spends.push(`${f.troops} soldiers march (${own} of yours${f.troops > own ? `, ${f.troops - own} from your walls` : ''}), fitted out by the quartermaster: ${fittingText(f).replace(/^[^:]*: ?/, '') || 'pitchforks all round'}`)
+      out.spends.push(`About ${Math.round(fc.fall)} may fall (${fc.fallLow}–${fc.fallHigh}): most come home wounded, about ${Math.round(fc.lost)} lost for good, and if we lose, some taken prisoner`)
+      out.gets.push(`${STRATEGIES[plan].name}: chance of winning about ${pc(fc.chance)} (${pc(fc.low)}–${pc(fc.high)})`)
+      out.gets.push(`If you win, the hoard, shared by soldiers sent: ${fc.booty.map((b) => `${GOOD_LABEL[b.good].toLowerCase()} ~${Math.round(b.guess * 10) / 10}`).join(', ')}`)
+      out.notes.push(fc.intel < 2 ? 'Little is known of this camp: these are guesses. Scouting it (a small action) narrows them.' : 'Your scouts know this camp well: the guesses are close.',
+        'Kit counts: spears and swords, shields, helmets, leather jerkins and mail (from the smithy and the outfitter). Against a stockade bring ladders or a ram. On a lost field the fallen leave their kit behind.')
+      break
+    }
     case 'gather': {
       const g = GATHER[land.resource!]
       if (!g) break
