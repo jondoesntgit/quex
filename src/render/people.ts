@@ -27,7 +27,9 @@ import type { GameState, Village } from '../game/types'
 import { landAt, territoryCells } from '../game/reducer'
 import { isSabbath, playerDate } from '../game/calendar'
 import { hasTrees, MOUNTAIN_TERRAIN } from '../world/land'
-import { buildRoute, routeTime, sample, type Pose, type Pt, type RouteHex, type Seg } from './walk'
+import { buildRoute, routeTime, sample, type Pose, type Pt, type RampWay, type RouteHex, type Seg } from './walk'
+import { rampsAround } from './ramps'
+import { workSpot, type Site } from './footprint'
 import { bridgeVia } from './waterways'
 import { hexAt, SQ, townOf, type Town } from '../game/city'
 import { shepherdPens } from './flock'
@@ -269,6 +271,7 @@ export class People {
     const idx = (col: number, row: number) => row * world.width + col
     this.hubs = new Set(vs.flatMap((v) => [idx(v.col, v.row), ...v.outposts.map((o) => idx(o.col, o.row)), ...v.buildings.map((b) => idx(b.col, b.row))]))
     this.vias.clear()
+    this.rampWays.clear()
     const sig = vs.map((v) => `${v.id}:${folkFor(v.population)}:${v.buildings.length}:${v.outposts.length}:${(v.homes ?? []).length}:${(v.city ?? []).length}`).join('|')
     if (sig !== this.sig) {
       this.sig = sig
@@ -436,15 +439,34 @@ export class People {
     return this.vias.get(i)!
   }
 
+  /** building hexes' walking grids, from their Blender models (set by the map) */
+  siteAt: (i: number) => Site | null = () => null
+
+  private rampWays = new Map<number, Map<number, RampWay> | null>()
+  /** The ramps on hex i's edges where a road climbs a cliff (cached until the roads change). */
+  private rampsAt(i: number) {
+    if (!this.rampWays.has(i)) {
+      const all = rampsAround(this.world, i, this.W, this.TP, this.roads, this.hubs)
+      const out = new Map<number, RampWay>()
+      for (const [j, r] of all) {
+        const lc = this.world.cells[r.lower], lp = hexToPixel(lc.col, lc.row, this.W)
+        out.set(j, { way: r.way.map((w) => ({ p: { x: w.p[0], y: w.p[1] }, t: lc.tier + w.h * r.drop })), lower: r.lower, lowerCy: lp.y })
+      }
+      this.rampWays.set(i, out.size ? out : null)
+    }
+    return this.rampWays.get(i)!
+  }
+
   private hex(i: number): RouteHex {
     const c = this.world.cells[i]
     const p = hexToPixel(c.col, c.row, this.W)
-    return { cell: i, cx: p.x, cy: p.y, tier: c.tier, blocked: false }
+    return { cell: i, cx: p.x, cy: p.y, tier: c.tier, blocked: false, site: this.siteAt(i), ramps: this.rampsAt(i) }
   }
 
-  /** A standing spot in a hex: in front of its building if it has one, else near the middle. */
+  /** A standing spot in a hex: by its building's door if it has one, else near the middle. */
   private spot(i: number, blocked: boolean, rng: () => number): Pt {
     const h = this.hex(i), W = this.W
+    if (blocked && h.site) { const p = workSpot(h.site, W, rng); return { x: h.cx + p.x, y: h.cy + p.y } }
     if (blocked) return { x: h.cx + (rng() - 0.5) * W * 0.36, y: h.cy + W * (0.15 + rng() * 0.05) }
     const a = rng() * Math.PI * 2, r = rng() * W * 0.16
     return { x: h.cx + Math.cos(a) * r, y: h.cy + Math.sin(a) * r * 0.5 }

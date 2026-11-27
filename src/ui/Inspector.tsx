@@ -133,8 +133,30 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
   }
 
   const owner = village ? state.players[village.playerId] : null
-  const title = village ? (village.col === col && village.row === row ? village.name : `${owner ? owner.name : village.name.replace(/'s .*$/, '')}'s city`) : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
-  const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
+  // who has a hand in this hex, and what is on it
+  const who = (vv: NonNullable<typeof village>) => (vv.id === v.id ? 'you' : state.players[vv.playerId]?.name ?? vv.name.replace(/'s .*$/, ''))
+  const possessive = (vv: NonNullable<typeof village>) => (vv.id === v.id ? 'your' : `${who(vv)}'s`)
+  const outpostHere = Object.values(state.villages).find((vv) => vv.outposts.some((o) => o.col === col && o.row === row)) ?? null
+  const roadOf = Object.values(state.villages).find((vv) => vv.roads.includes(i)) ?? null
+  const paved = Object.values(state.villages).some((vv) => vv.paved?.includes(i))
+  // territory: the nearest village whose land reaches here (yours first when it's a tie)
+  const claim = Object.values(state.villages).filter((vv) => inTerritory(vv, col, row))
+    .sort((x, y) => distance(x, cell) - distance(y, cell) || Number(y.id === v.id) - Number(x.id === v.id))[0] ?? null
+  const title = village ? (village.col === col && village.row === row ? village.name : `${owner ? owner.name : village.name.replace(/'s .*$/, '')}'s city`)
+    : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name
+    : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair`
+    : here ? BUILDINGS[here.building.type].name
+    : outpostHere ? 'Outpost'
+    : roadOf ? `${TERRAIN_NAME[terr]} with a ${paved ? 'paved ' : ''}road`
+    : TERRAIN_NAME[terr]
+  const ownerLine = village ? `🏠 ${village.id === v.id ? 'Your village' : `${who(village)}'s village`}${village.col === col && village.row === row ? '' : ' (its city)'}`
+    : fort || lair ? null
+    : here ? `🏗 ${here.village.id === v.id ? 'Yours' : `${who(here.village)}'s`}${claim && claim.id !== here.village.id ? `, in ${possessive(claim)} territory` : ''}`
+    : outpostHere ? `⛺ ${outpostHere.id === v.id ? 'Your' : `${who(outpostHere)}'s`} outpost`
+    : roadOf ? `🛤 ${possessive(roadOf)[0].toUpperCase()}${possessive(roadOf).slice(1)} road${claim && claim.id !== roadOf.id ? `, in ${possessive(claim)} territory` : ''}`
+    : claim ? `🚩 ${claim.id === v.id ? 'Your territory' : `${who(claim)}'s territory`} (${claim.name})`
+    : '🏳 Unclaimed land: no village reaches here'
+  const sub = [title !== TERRAIN_NAME[terr] && TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
   const tierOf = (to: NonNullable<typeof village>) => caravanTier(world, state, v, to)
   const acts: ActionKind[] = []
@@ -263,6 +285,7 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
 
   return (
     <Shell strip={<ActionStrip game={game} p={p} />} onClose={onClose} title={title} onShare={share}>
+      {ownerLine && <p style={{ margin: '2px 0' }}>{ownerLine}</p>}
       <p className="muted" style={{ margin: 0 }}>{sub}</p>
       {!here && !village && land.resource && DEPOSIT_NOTE[land.resource] && isDeposit(land.resource, land.feature) && (
         <p className="deposit" style={{ margin: '4px 0' }}>⛏ {DEPOSIT_NOTE[land.resource]}</p>

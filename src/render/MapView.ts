@@ -10,8 +10,10 @@
  *  columns sit half a hex lower). Each hex draws terrain column, river,
  *  then whatever stands on it, so nearer hexes correctly cover farther ones.
  */
-import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } from 'pixi.js'
-import { Ambient } from './ambient'
+import { Application, Container, CullerPlugin, extensions, Graphics, Sprite, type Texture } from 'pixi.js'
+import { Ambient, gust } from './ambient'
+import type { Site } from './footprint'
+import { rampKey, shoreEdge } from './ramps'
 import { Mountains } from './mountains'
 import { Flock } from './flock'
 import { Herd } from './herd'
@@ -22,7 +24,7 @@ import { hexToPixel, neighbours, pixelToHex } from '../world/hex'
 import type { World } from '../world/types'
 import type { BuildingId } from '../game/data'
 import type { GameState } from '../game/types'
-import { clayAt, clayRenews, landAt, territoryCells } from '../game/reducer'
+import { clayAt, clayRenews, inTerritory, landAt, territoryCells } from '../game/reducer'
 import { weekSeason } from '../game/calendar'
 import { strongholdsOf } from '../game/strongholds'
 import { isDeposit, MOUNTAIN_TERRAIN } from '../world/land'
@@ -66,6 +68,8 @@ const BUILDING_SPRITE: Partial<Record<BuildingId, string>> = {
 /** How far a building's front wall stands in front of its centre (ground px). */
 const homeDepth = (key: string) => { try { return homeDims(key)[1] } catch { return 0 } }
 const MONSTER_SPRITE = { goblins: 'f_goblins', orcs: 'f_orcs', trolls: 'f_troll', dragon: 'f_dragon' } as const
+/** Sprites of things dug into the ground: on a mountain the peak stays and they sit in front of it. */
+const DUG = new Set(['f_mine', 'k_quarry', 'k_copper_mine', 'k_iron_mine', 'k_silver_mine'])
 
 /** 3x5 pixel digits, for the road planner's priority numbers. */
 const DIGITS: Record<string, string[]> = {
@@ -250,8 +254,26 @@ export class MapView {
     }
   }
 
+  /** Windmill sails: each turns at the wind's pace (gusts roll across the land), a frame per step of its turn. */
+  private spinners: { s: Sprite; frames: Texture[]; at: number; x: number; y: number }[] = []
+  private spunAt = 0
+  private stillSails = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  private spin() {
+    const now = performance.now() / 1000
+    const dt = Math.min(0.1, this.spunAt ? now - this.spunAt : 0)
+    this.spunAt = now
+    if (this.stillSails) return
+    for (const w of this.spinners) {
+      // a quarter turn every 2-5 s, with the gusts
+      w.at = (w.at + dt * (0.2 + 0.35 * gust(w.x, w.y, now))) % 1
+      const tex = w.frames[Math.floor(w.at * w.frames.length) % w.frames.length]
+      if (w.s.texture !== tex) w.s.texture = tex
+    }
+  }
+
   /** Keep the animated pieces around the camera and move them; true if it had to build new ones. */
   private stepAmbient(): boolean {
+    this.spin()
     if (!this.ambient || !this.host) return false
     const z = this.zoom
     const built = this.ambient.view(this.cells, this.camX, this.camY, this.camX + this.host.clientWidth / z, this.camY + this.host.clientHeight / z, this.sceneScale)
@@ -405,10 +427,25 @@ export class MapView {
 
     // lookup tables for things standing on hexes
     const things = new Map<number, { name: string; alpha?: number }>()
+    /** building hexes' walking grids, by hex */
+    const sites = new Map<number, Site>()
+    this.spinners = []
     const idx = (c: number, r: number) => r * world.width + c
-    for (const l of state.lairs) if (!l.cleared) things.set(idx(l.col, l.row), { name: MONSTER_SPRITE[l.kind] })
+    // the Blender-rendered building or camp (`k_…` in the house sheet) where there is one, else the atlas's
+    const own = (key: string, fallback: string) => (this.houses?.tex(key) ? key : fallback)
+    for (const l of state.lairs) if (!l.cleared) things.set(idx(l.col, l.row), { name: own(`k_lair_${l.kind}`, MONSTER_SPRITE[l.kind]) })
     for (const v of Object.values(state.villages)) {
-      for (const b of v.buildings) things.set(idx(b.col, b.row), { name: BUILDING_SPRITE[b.type] ?? 'f_hut', alpha: b.progress < 1 ? 0.55 : 1 })
+      for (const b of v.buildings) {
+        const i = idx(b.col, b.row)
+        // a pier runs to the shore hex that holds it up: the sprite for that edge
+        const key = b.type === 'docks' || b.type === 'shipyard'
+          ? `k_${b.type}_r${shoreEdge(world, i, W, (j) => inTerritory(v, world.cells[j].col, world.cells[j].row))}`
+          : `k_${b.type}`
+        things.set(i, { name: own(key, BUILDING_SPRITE[b.type] ?? 'f_hut'), alpha: b.progress < 1 ? 0.55 : 1 })
+        // where people and roads can go on the hex, from the building's model (not on a mountainside)
+        const site = this.houses?.site(key)
+        if (site && !MOUNTAIN_FEATURE.has(world.cells[i].feature ?? '')) sites.set(i, site)
+      }
       for (const o of v.outposts) things.set(idx(o.col, o.row), { name: 'f_hut' })
       things.set(idx(v.col, v.row), { name: this.houses ? 'f_townhouses' : 'f_village' })
     }
@@ -561,7 +598,9 @@ export class MapView {
       }
       if (roadSet.has(i) || (hubs.has(i) && neighbours(cell.col, cell.row).some(([nc, nr]) => roadSet.has(idx(nc, nr)))))
       {
-        const { g: rg, bridges } = this.road(world, i, cx, cy, roadSet, hubs, pavedSet.has(i))
+        const { g: rg, bridges, ramps } = this.road(world, i, cx, cy, roadSet, hubs, pavedSet.has(i), sites.get(i) ?? null, pavedSet)
+        // ramps sit on this hex's ground against the cliff, over its road
+        if (ramps) { ramps.zIndex = z(i, 1.05); ramps.cullable = true; if (dim) ramps.tint = DIM; this.cells.addChild(ramps) }
         rg.zIndex = z(i, 1)
         this.cells.addChild(rg)
         // bridges go over the river (which is drawn after the road, covering it where they cross)
@@ -583,17 +622,19 @@ export class MapView {
         ? (variant && this.atlas.tex(`f_${base}_v${variant}`) ? `f_${base}_v${variant}` : this.atlas.tex(`f_${base}`) ? `f_${base}` : `f_${land!.feature}`)
         : null
       // mines and quarries are dug into the mountain: keep the peak, put the shaft in front
-      const dug = thing?.name === 'f_mine' && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
+      const dug = !!thing && DUG.has(thing.name) && (land!.feature === 'mountain' || land!.feature === 'mountain_snow' || land!.feature === 'hills')
       const layers: { name: string; alpha: number; dx?: number; dy: number }[] = []
       // an outcrop on open ground says what's in it (on mountains, the ore stains the rock instead)
       const outcrop = deposit && !MOUNTAIN_FEATURE.has(land!.feature ?? '')
       if (outcrop) {
         // the deposit itself is drawn as rocks scattered on the ground (below)
-        if (thing) layers.push({ name: dug ? 'f_mine' : thing.name, alpha: thing.alpha ?? 1, dy: 0 })
+        if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
         else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
       }
-      else if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: 'f_mine', alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
-      else if (dug) layers.push({ name: 'f_mine', alpha: thing!.alpha ?? 1, dy: 0 })
+      // on a mountainside, its way in on the slope as it is (k_…_slope, placed by the height map)
+      else if (dug && natural && this.houses?.tex(`${thing!.name}_slope`)) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: `${thing!.name}_slope`, alpha: thing!.alpha ?? 1, dy: 0 })
+      else if (dug && natural) layers.push({ name: natural, alpha: 1, dy: 0 }, { name: thing!.name, alpha: thing!.alpha ?? 1, dy: Math.round(W / 10) })
+      else if (dug) layers.push({ name: thing!.name, alpha: thing!.alpha ?? 1, dy: 0 })
       else if (thing) layers.push({ name: thing.name, alpha: thing.alpha ?? 1, dy: 0 })
       else if (natural) layers.push({ name: natural, alpha: 1, dy: 0 })
       // a warlord's stronghold out in the wastes (a ruin once it has fallen)
@@ -695,6 +736,33 @@ export class MapView {
             s.zIndex = z(i, 3)
             this.cells.addChild(s)
           }
+          continue
+        }
+        const ht = l.name.startsWith('k_') ? this.houses?.tex(l.name) : null
+        if (ht) {
+          const art = this.houses!
+          const put = (tex: Texture, zi: number, x: number, y: number) => {
+            const s = new Sprite(tex)
+            s.cullable = true
+            s.anchor.set(art.anchor.x / art.anchor.w, art.anchor.y / art.anchor.h)
+            s.x = x
+            s.y = y
+            s.alpha = l.alpha
+            if (dim) s.tint = DIM
+            s.zIndex = zi
+            this.cells.addChild(s)
+            return s
+          }
+          // a mine's way in on a mountainside stands on the slope, at the height of the ground there
+          const ledge = l.name.endsWith('_slope') ? this.mountains!.ledge(i) : null
+          const x = cx + (l.dx ?? 0) + (ledge?.dx ?? 0), y = cy + l.dy + (ledge ? ledge.dy - ledge.h : 0)
+          // crops, yards and pits lie under the roads; what stands is drawn over them
+          const ground = art.ground(l.name)
+          if (ground) put(ground, z(i, 0.9), x, y)
+          put(ht, z(i, ledge ? 3.05 : 3), x, y)
+          // the windmill's sails turn (in front of the tower)
+          const frames = art.anim(`${l.name}_s`)
+          if (frames.length) this.spinners.push({ s: put(frames[0], z(i, 3.02), x, y), frames, at: (i * 0.37) % 1, x, y })
           continue
         }
         const f = this.atlas.tex(l.name)
@@ -920,6 +988,8 @@ export class MapView {
       this.overlay.addChild(s)
     }
     this.overlay.addChildAt(g, 0)
+    this.people.siteAt = (j) => sites.get(j) ?? null
+    this.traders.siteAt = (j) => sites.get(j) ?? null
     this.people.sync(world, state, revealed)
     this.people.attach(this.cells, rank, this.townLayers)
     this.traders.sync(world, state, revealed)
@@ -932,19 +1002,19 @@ export class MapView {
     this.settle()
   }
 
-  /** Dirt track across the hex top toward neighbouring roads/buildings; where it
-   *  drops to a lower hex in front, wooden steps run down the visible cliff face. */
-  private road(world: World, i: number, cx: number, cy: number, roads: Set<number>, hubs: Set<number>, paved = false): { g: Graphics; bridges: Graphics | null } {
+  /** Dirt track across the hex top toward neighbouring roads/buildings; where it climbs to a higher
+   *  neighbour, a ramp against the cliff on this side carries it up (ramps.ts). */
+  private road(world: World, i: number, cx: number, cy: number, roads: Set<number>, hubs: Set<number>, paved = false, site: Site | null = null, pavedSet: Set<number> = new Set()): { g: Graphics; bridges: Graphics | null; ramps: Container | null } {
     const W = this.W
     const TP = this.atlas.meta.tier
     const g = new Graphics()
-    const L = roadLayout(world, i, cx, cy, W, TP, roads, hubs)
+    const L = roadLayout(world, i, cx, cy, W, TP, roads, hubs, site)
     // a paved road is laid in grey stone; a dirt road is packed earth
     const dirt = paved ? 0xb8b2a2 : 0xc09858, edge = paved ? 0x6c665a : 0x7a5830
     const w = L.width
     if (!L.legs.length) {
       g.ellipse(cx, cy, w + 1, Math.ceil(w / 2) + 1).fill(edge).ellipse(cx, cy, w, Math.ceil(w / 2)).fill(dirt)
-      return { g, bridges: null }
+      return { g, bridges: null, ramps: null }
     }
     // Each hex draws its half of every road segment, from its middle to the
     // shared edge, with flat (butt) ends: a round cap there would paint its
@@ -979,12 +1049,29 @@ export class MapView {
         }
       }
     }
-    for (const st of L.steps) {
-      // wide enough for two walkers shoulder to shoulder (room for a pack animal later)
-      const hw = Math.max(6, w + 2)
-      g.rect(st.x - hw - 1, st.y0, 2 * hw + 3, st.y1 - st.y0).fill(edge)
-      g.rect(st.x - hw, st.y0, 2 * hw + 1, st.y1 - st.y0).fill(dirt)
-      for (let y = st.y0 + 1; y < st.y1; y += 2) g.rect(st.x - hw, y, 2 * hw + 1, 1).fill({ color: edge, alpha: 0.45 })
+    // ramps up to higher neighbours, against the cliff on this side (ramps.ts; Blender sprites, r_…)
+    let ramps: Container | null = null
+    for (const { ramp, at } of L.ramps) {
+      ramps ??= new Container()
+      const both = paved && pavedSet.has(ramp.upper)
+      const tex = this.houses?.tex(rampKey(ramp, both))
+      if (tex) {
+        const art = this.houses!
+        const s = new Sprite(tex)
+        s.anchor.set(art.anchor.x / art.anchor.w, art.anchor.y / art.anchor.h)
+        s.x = Math.round(at[0])
+        s.y = Math.round(at[1])
+        ramps.addChild(s)
+        continue
+      }
+      // no sprite sheet: a plain track along its walking line, rising as it goes
+      const pts = ramp.way.map((q) => [at[0] + q.p[0] - ramp.anchor[0], at[1] + q.p[1] - ramp.anchor[1] - q.h * ramp.drop * this.atlas.meta.tier] as [number, number])
+      const rg = new Graphics()
+      polyline(rg, pts)
+      rg.stroke({ width: w + 4, color: edge, cap: 'butt', join: 'round' })
+      polyline(rg, pts)
+      rg.stroke({ width: w + 2, color: both ? 0xb8b2a2 : 0xc09858, cap: 'butt', join: 'round' })
+      ramps.addChild(rg)
     }
     // bridges where the road crosses the river (planned by roadLayout)
     let bridges: Graphics | null = null
@@ -992,7 +1079,7 @@ export class MapView {
       bridges = new Graphics()
       for (const br of L.bridges) drawBridge(bridges, br.a, br.b, w)
     }
-    return { g, bridges }
+    return { g, bridges, ramps }
   }
 
 

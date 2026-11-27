@@ -15,7 +15,8 @@ import { rngFor } from '../world/rng'
 import type { World } from '../world/types'
 import type { GameState } from '../game/types'
 import { cellIndex } from '../game/reducer'
-import { crossHex, type Pt } from './walk'
+import { byDoor, crossHex, type Pt } from './walk'
+import type { Site } from './footprint'
 import { bridgeVia } from './waterways'
 import type { Atlas } from './atlas'
 
@@ -36,7 +37,8 @@ export interface TraderTrip {
 }
 
 /** The caravan (if any) for the time window containing `now`. Deterministic. */
-export function tripAt(world: World, s: GameState, now: number, W: number): TraderTrip | null {
+/** `siteAt`: a building hex's walking grid (from its model), so carts go round what stands there. */
+export function tripAt(world: World, s: GameState, now: number, W: number, siteAt: (i: number) => Site | null = () => null): TraderTrip | null {
   const window = Math.floor(now / PERIOD)
   if (new Date(window * PERIOD).getDay() === 6) return null // the Sabbath: merchants rest too
   const villages = Object.values(s.villages).sort((a, b) => (a.id < b.id ? -1 : 1))
@@ -76,7 +78,7 @@ export function tripAt(world: World, s: GameState, now: number, W: number): Trad
     let cur = start
     for (let k = 0; k < path.length; k++) {
       const i = path[k], c = centre(i)
-      const h = { cell: i, cx: c.x, cy: c.y, tier: world.cells[i].tier, blocked: blocked.has(i) }
+      const h = { cell: i, cx: c.x, cy: c.y, tier: world.cells[i].tier, blocked: blocked.has(i), site: siteAt(i) }
       const next = path[k + 1]
       if (next === undefined) {
         for (const p of crossHex(h, cur, end, W).slice(k === 0 ? 0 : 1)) push(p, i)
@@ -93,7 +95,7 @@ export function tripAt(world: World, s: GameState, now: number, W: number): Trad
         const d = (p: Pt, q: Pt) => Math.hypot(p.x - q.x, p.y - q.y)
         return d(cur, u) + d(v, a) <= d(cur, v) + d(u, a) ? [cur, u, v, a] : [cur, v, u, a]
       })() : null
-      const via = brPts ?? (roads.has(i) && !h.blocked ? [cur, c, a] : crossHex(h, cur, a, W))
+      const via = brPts ?? (roads.has(i) && h.site ? byDoor(h, h.site, cur, a, W) : roads.has(i) && !h.blocked ? [cur, c, a] : crossHex(h, cur, a, W))
       for (const p of via.slice(k === 0 ? 0 : 1)) push(p, i)
       out.push({ x: b.x, y: b.y, tier: world.cells[next].tier, cell: next, cy: n.y })
       cur = b
@@ -207,6 +209,9 @@ export class Traders {
     for (const n of this.nodes()) if (n.parent !== parent) parent.addChild(n)
   }
 
+  /** building hexes' walking grids (set by the map) */
+  siteAt: (i: number) => Site | null = () => null
+
   sync(world: World, state: GameState, revealed: Set<number>) {
     this.world = world
     this.state = state
@@ -220,7 +225,7 @@ export class Traders {
     const sig = `${window}:${Object.keys(state.villages).length}`
     if (sig !== this.sig) {
       this.sig = sig
-      this.trip = tripAt(world, state, now, this.W)
+      this.trip = tripAt(world, state, now, this.W, this.siteAt)
     }
     const trip = this.trip
     const pose = trip && now >= trip.start ? traderPose(trip, now - trip.start, this.TP) : null

@@ -21,6 +21,8 @@
  *  the road at that point, long enough to span the water at that angle. */
 import type { World } from '../world/types'
 import { hexToPixel, neighbours } from '../world/hex'
+import { doorOf, sitePath, type Site } from './footprint'
+import { rampBetween, type Ramp } from './ramps'
 
 export type Pt = [number, number]
 
@@ -143,8 +145,19 @@ export interface RoadLayout {
   bridges: { a: Pt; b: Pt }[]
   /** a dead end's rounded tip (behind the middle), if any */
   tip: Pt | null
-  /** cliffs the road steps down, on the south-facing edges */
-  steps: { x: number; y0: number; y1: number }[]
+  /** ramps this hex draws: where the road climbs to a higher neighbour, a ramp against the cliff on this
+   *  side (ramps.ts), and its middle on the edge at this hex's level (the sprite's anchor) */
+  ramps: { ramp: Ramp; at: Pt }[]
+}
+
+/** Which part of hex i a map point (untiered) lies in, as the river divides it: a key that two points share
+ *  if they're on the same bank ('' where there's no river). */
+export function bankOf(world: World, i: number, W: number, p: Pt): string {
+  const c = world.cells[i]
+  if (c.riverTo === -1 || c.tier === 0) return ''
+  const h = hexToPixel(c.col, c.row, W)
+  const R = riverLayout(world, i, h.x, h.y, W, 0)
+  return R.flows.map((f) => sideOf(f, p)).join(',')
 }
 
 /** Which side of a curve a point lies on (+1 / -1), by the nearest segment. */
@@ -199,22 +212,55 @@ function dryLeg(from: Pt, e: Pt, n: Pt, flows: Pt[][], W: number): Pt[] {
  *  mid-stream. So however many roads meet here, the river is crossed once per
  *  stream, never by a tangle of legs. Springs and rare three-way joins fall back
  *  to bridging wherever a leg happens to cross. */
-export function roadLayout(world: World, i: number, cx: number, cy: number, W: number, TP: number, roads: Set<number>, hubs: Set<number>): RoadLayout {
+/** Past a building: the road from its door out to edge point e, around what stands on the hex (its walking
+ *  grid, from the Blender model), coming square onto the edge, its bends rounded. */
+function siteLeg(site: Site, cx: number, cy: number, e: Pt, n: Pt, W: number): Pt[] {
+  const d = doorOf(site, W)
+  const inner = { x: e[0] - n[0] * W * 0.08 - cx, y: e[1] - n[1] * W * 0.08 - cy }
+  const path = sitePath(site, d, inner, W).map((p): Pt => [p.x + cx, p.y + cy])
+  path.push(e)
+  // round the corners a little (twice cutting each corner a quarter of the way in), keeping both ends
+  let pts = path
+  for (let k = 0; k < 2; k++) {
+    const out: Pt[] = [pts[0]]
+    for (let j = 0; j + 1 < pts.length; j++) {
+      const [a, b] = [pts[j], pts[j + 1]]
+      if (j > 0) out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25])
+      if (j + 2 < pts.length) out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75])
+    }
+    out.push(pts[pts.length - 1])
+    pts = out
+  }
+  return pts
+}
+
+/** `site`: the walking grid of a building on this hex (if any): the road runs to its door and on, around it. */
+export function roadLayout(world: World, i: number, cx: number, cy: number, W: number, TP: number, roads: Set<number>, hubs: Set<number>, site: Site | null = null): RoadLayout {
   const cell = world.cells[i]
   const width = Math.max(3, Math.round(W / 14))
   const ends: { e: Pt; n: Pt }[] = []
-  const steps: RoadLayout['steps'] = []
-  neighbours(cell.col, cell.row).forEach(([nc, nr], k) => {
+  const ramps: RoadLayout['ramps'] = []
+  const p0 = hexToPixel(cell.col, cell.row, W)
+  /** a map point (untiered) at a given tier, in this layout's frame */
+  const here = (q: Pt, tier: number): Pt => [cx + q[0] - p0.x, cy + q[1] - p0.y - (tier - cell.tier) * TP]
+  neighbours(cell.col, cell.row).forEach(([nc, nr]) => {
     if (nc < 0 || nr < 0 || nc >= world.width || nr >= world.height) return
     const j = nr * world.width + nc
     // roads link to roads and to the places they serve; places only link to roads
     if (!roads.has(j) && !(roads.has(i) && hubs.has(j))) return
     const n = world.cells[j]
     if (n.tier === 0) return
+    // a cliff between: the road meets a ramp, at its foot down here or at its top end up there
+    const r = n.tier !== cell.tier ? rampBetween(world, i, j, W, TP) : null
+    if (r && r.lower === i) {
+      // the road comes to the foot from inside the hex, square to the cliff, and turns up the ramp
+      ends.push({ e: here(r.foot, cell.tier), n: edgeNormal(world, i, j, W) })
+      ramps.push({ ramp: r, at: here(r.anchor, cell.tier) })
+      return
+    }
+    if (r) { ends.push({ e: here(r.edge, cell.tier), n: edgeNormal(world, i, j, W) }); return }
     const e = roadEdgePoint(world, i, j, W, TP)
     ends.push({ e, n: edgeNormal(world, i, j, W) })
-    // south-facing edges (SE, S, SW) show this hex's cliff when the neighbour is lower
-    if (k >= 1 && k <= 3 && n.tier < cell.tier) steps.push({ x: e[0], y0: e[1], y1: e[1] + (cell.tier - n.tier) * TP })
   })
   const centre: Pt = [cx, cy]
   const place = hubs.has(i)
@@ -226,9 +272,13 @@ export function roadLayout(world: World, i: number, cx: number, cy: number, W: n
       const len = Math.hypot(x - mid[0], y - mid[1]) || 1
       tip = [mid[0] - ((x - mid[0]) / len) * width * 0.3, mid[1] - ((y - mid[1]) / len) * width * 0.3]
     }
-    return { width, mid, legs, bridges: [], tip, steps }
+    return { width, mid, legs, bridges: [], tip, ramps }
   }
   const river = cell.riverTo !== -1 && cell.tier > 0
+  if (site && !river) {
+    const d = doorOf(site, W)
+    return { width, mid: [cx + d.x, cy + d.y], legs: ends.map(({ e, n }) => siteLeg(site, cx, cy, e, n, W)), bridges: [], tip: null, ramps }
+  }
   if (!river) return plain(place ? centre : bendPoint(i, cx, cy, W))
 
   const R = riverLayout(world, i, cx, cy, W, TP)
@@ -353,7 +403,7 @@ export function roadLayout(world: World, i: number, cx: number, cy: number, W: n
   }
   // safety net: any leg that still crosses the water gets a bridge where it does
   for (const leg of legs) for (const x of crossings([leg], R.flows)) bridges.push(span(x, R.width))
-  return { width, mid: main, legs, bridges, tip: null, steps }
+  return { width, mid: main, legs, bridges, tip: null, ramps }
 }
 
 /** A bank-to-bank span for a crossing found by intersection (the fallback). */

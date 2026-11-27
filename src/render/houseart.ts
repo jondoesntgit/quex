@@ -2,19 +2,31 @@
  *  the tile atlas. Made by tools/blender/render_houses.py and packed by tools/pack_houses.py into
  *  public/art/houses. Every sprite is 64x96 with its ground point at (32, 80), like the atlas's
  *  features, so it's placed the same way.
+ *  The same sheet holds a sprite for each building on the map (`k_<building id>`) and the orc and goblin
+ *  camps (`k_lair_<kind>`), from tools/blender/render_buildings.py; MapView falls back to the atlas without them.
  *
  *  The sheet is a nicety: if it can't be loaded the game keeps drawing the old village and
  *  houses, so a failure here is never fatal. */
 import { ImageSource, Rectangle, Texture } from 'pixi.js'
+import { decodeSite, type Site, type SiteGrid } from './footprint'
 
 export interface HouseArt {
   /** the sprite for a key (e.g. 't_tile_y_0', 'c_M_thatch_x_1', 'well'), or null if the sheet lacks it */
   tex: (key: string) => Texture | null
   /** where the ground point sits in a sprite (px from its top left) */
   anchor: { x: number; y: number; w: number; h: number }
+  /** a hex building's walking plan (from its Blender model), or null if it has none */
+  site: (key: string) => Site | null
+  /** a hex building's ground layer (crops, yards, pits: drawn under roads), or null */
+  ground: (key: string) => Texture | null
+  /** an animation's frames (`k_mill_s` -> the windmill's sails), or [] */
+  anim: (key: string) => Texture[]
 }
 
-interface Sheet { w: number; h: number; ax: number; ay: number; hash?: string; frames: Record<string, [number, number]> }
+interface Sheet {
+  w: number; h: number; ax: number; ay: number; hash?: string; frames: Record<string, [number, number]>
+  buildings?: { grid: SiteGrid; walk: Record<string, string>; doors: Record<string, [number, number]>; ground: string[]; anim: Record<string, number> }
+}
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -32,16 +44,25 @@ export async function loadHouseArt(): Promise<HouseArt> {
   const img = await loadImage(`${base}houses.png${sheet.hash ? `?v=${sheet.hash}` : ''}`)
   const source = new ImageSource({ resource: img, scaleMode: 'nearest' })
   const cache = new Map<string, Texture>()
+  const sites = new Map<string, Site | null>()
+  const B = sheet.buildings
+  const tex = (key: string) => {
+    const hit = cache.get(key)
+    if (hit) return hit
+    const f = sheet.frames[key]
+    if (!f) return null
+    const t = new Texture({ source, frame: new Rectangle(f[0], f[1], sheet.w, sheet.h) })
+    cache.set(key, t)
+    return t
+  }
   return {
     anchor: { x: sheet.ax, y: sheet.ay, w: sheet.w, h: sheet.h },
-    tex(key) {
-      const hit = cache.get(key)
-      if (hit) return hit
-      const f = sheet.frames[key]
-      if (!f) return null
-      const t = new Texture({ source, frame: new Rectangle(f[0], f[1], sheet.w, sheet.h) })
-      cache.set(key, t)
-      return t
+    tex,
+    site(key) {
+      if (!sites.has(key)) sites.set(key, B?.walk[key] && B.doors[key] ? decodeSite(B.grid, B.walk[key], B.doors[key]) : null)
+      return sites.get(key)!
     },
+    ground: (key) => (B?.ground.includes(key) ? tex(`${key}_g`) : null),
+    anim: (key) => Array.from({ length: B?.anim[key] ?? 0 }, (_, k) => tex(`${key}${k}`)).filter((t): t is Texture => !!t),
   }
 }

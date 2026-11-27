@@ -118,6 +118,39 @@ export class Mountains {
     return s
   }
 
+  private ledges = new Map<number, { dx: number; dy: number; h: number } | null>()
+  /** Where on this mountain hex's slope a mine's way in goes, and how high the ground is there (px above the
+   *  hex's base level): a spot toward the front that the hex's own ground doesn't hide, where the slope rises
+   *  behind it (so the portal leads into the hillside). Null if it isn't a mountain hex. */
+  ledge(i: number): { dx: number; dy: number; h: number } | null {
+    if (this.ledges.has(i)) return this.ledges.get(i)!
+    const { world, W, TP } = this
+    const c = world.cells[i]
+    let out: { dx: number; dy: number; h: number } | null = null
+    if (isMountain(c.feature)) {
+      const field = this.makeField(i)
+      const p = hexToPixel(c.col, c.row, W)
+      const base = c.tier * TP
+      const at = (dx: number, dy: number) => Math.max(0, field(p.x + dx, p.y + dy).alt - base)
+      let best = -Infinity
+      for (const dx of [0, -0.08, 0.08, -0.16, 0.16].map((k) => Math.round(k * W))) {
+        for (const dy of [0.16, 0.12, 0.08, 0.04].map((k) => Math.round(k * W))) {
+          const h = at(dx, dy)
+          // hidden if the ground in front, within the hex, stands higher on screen
+          let hidden = false
+          for (let f = dy + 1; f <= W / 4 - 1 && !hidden; f++) if (f - at(dx, f) < dy - h - 1) hidden = true
+          if (hidden) continue
+          const rise = at(dx, dy - W * 0.06) - h // the slope going back
+          const score = rise + dy * 0.3 - Math.abs(dx) * 0.2
+          if (score > best) { best = score; out = { dx, dy, h: Math.round(h) } }
+        }
+      }
+      out ??= { dx: 0, dy: Math.round(W * 0.16), h: Math.round(at(0, Math.round(W * 0.16))) }
+    }
+    this.ledges.set(i, out)
+    return out
+  }
+
   // ------------------------------------------------------------ the height map
 
   /** Mountain hexes near (gx, gy) with their centres in true-distance space. */

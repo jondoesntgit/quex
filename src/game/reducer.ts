@@ -366,7 +366,8 @@ export function buildSiteError(world: World, s: GameState, v: Village, def: Buil
     const shore = neighbours(col, row).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < world.width && nr < world.height && world.cells[nr * world.width + nc].tier > 0 && inTerritory(v, nc, nr))
     if (!shore) return `${def.name} has to reach out from your own shore`
   } else if (cell.tier === 0) return 'Not on water'
-  if (v.city?.includes(i)) return 'This is cobbled city: homes go here, workshops need open ground'
+  // the chapel and the market stand in the village with the homes, on the cobbles
+  if (v.city?.includes(i) && def.id !== 'chapel' && def.id !== 'market') return 'This is cobbled city: homes, the chapel and the market go here, workshops need open ground'
   if (col === v.col && row === v.row) return 'That is your village square'
   // a sawmill stands by its stream in the woods, where the logs and the water both are
   const woodland = def.terrain?.includes('forest') || (def.riverWoods && cell.riverTo !== -1)

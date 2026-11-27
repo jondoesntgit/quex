@@ -192,6 +192,8 @@ function Main({ game }: { game: Game }) {
       // while choosing a village site, taps pick the site instead of opening the inspector
       view.onSelect = (col, row, x, y) => (placingRef.current ? setPreview({ col, row }) : setSel({ col, row, x, y }))
       viewRef.current = view
+      // development only: let review scripts point the camera (window.quexView.centreOn(col, row))
+      if (import.meta.env.DEV) (window as unknown as { quexView: MapView }).quexView = view
       setReady(true)
     })()
     return () => { alive = false; view?.destroy(); viewRef.current = null }

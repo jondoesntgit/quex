@@ -10,16 +10,28 @@
  *    height, and only drop once past it, so nobody walks off a ledge;
  *  - inside a hex they walk straight lines, and both ends are inside the
  *    (convex) hex, so the whole line is too;
- *  - hexes with a building are crossed around the building, via waypoints
- *    near the rim;
- *  - on a road hex they follow the dirt track, which runs through the centre. */
+ *  - hexes with a building are crossed around it: by its walking grid (footprint.ts, from the Blender
+ *    model) where it has one, else around a round footprint via waypoints near the rim;
+ *  - on a road hex they follow the dirt track, which runs through the centre (or, past a building, to its
+ *    door and on, as the road is drawn). */
+import { doorOf, sitePath, type Site } from './footprint'
 
 export interface Pt { x: number; y: number }
 export interface RouteHex {
   cell: number; cx: number; cy: number; tier: number; blocked: boolean; road?: boolean
   /** on a river hex with a road: the bridge's two ends, to cross by instead of the middle */
   via?: [number, number][] | null
+  /** the building's walking grid, if it has one */
+  site?: Site | null
+  /** ramps on its edges (ramps.ts), by the neighbour each leads to: walked up and down instead of climbing
+   *  the cliff or hopping off it. Points are on the untiered ground plane, like cx/cy. */
+  ramps?: Map<number, RampWay> | null
 }
+
+/** A ramp as walkers use it (ramps.ts): its walking line from the foot to the point on the edge where the
+ *  higher hex begins (round the landing, on a switchback), each point with its tier; and the hex it stands on
+ *  (the lower one), which they sort with while on it. */
+export interface RampWay { way: { p: Pt; t: number }[]; lower: number; lowerCy: number }
 
 export type Seg =
   | { kind: 'walk'; a: Pt; b: Pt; tier: number; cell: number; cy: number; dur: number }
@@ -29,6 +41,8 @@ export type Seg =
   | { kind: 'pause'; at: Pt; tier: number; cell: number; cy: number; dur: number; pose: 'land' | 'work' | 'stand' }
   /** a startled little jump on the spot */
   | { kind: 'bounce'; at: Pt; tier: number; cell: number; cy: number; dur: number; height: number }
+  /** up or down a ramp: along the ground from a to b while the height goes from tier t0 to t1 */
+  | { kind: 'ramp'; a: Pt; b: Pt; t0: number; t1: number; cell: number; cy: number; dur: number }
 
 export interface Pose {
   x: number
@@ -40,6 +54,7 @@ export interface Pose {
 }
 
 export const SPEED = 9 // px / s walking
+export const RAMP_UP = 0.7 // of walking pace, going up a ramp (down is walking pace)
 export const CLIMB_SPEED = 4 // px / s up a cliff
 export const HOP_TIME = 0.5 // s in the air
 export const LAND_TIME = 0.15 // s squashed on landing
@@ -81,6 +96,7 @@ function clearance(cx: number, cy: number, p: Pt, q: Pt): number {
 
 /** Straight across a hex, or around its building via one or two rim waypoints. */
 export function crossHex(h: RouteHex, p: Pt, q: Pt, W: number): Pt[] {
+  if (h.site) return onSite(h, h.site, p, q, W)
   const r = OBSTACLE * W
   const clear = (a: Pt, b: Pt) => clearance(h.cx, h.cy, a, b) >= r
   if (!h.blocked || clear(p, q)) return [p, q]
@@ -100,6 +116,18 @@ export function crossHex(h: RouteHex, p: Pt, q: Pt, W: number): Pt[] {
   return best ?? [p, q]
 }
 
+/** Across a building's hex by its walking grid (points in map px). */
+function onSite(h: RouteHex, site: Site, p: Pt, q: Pt, W: number): Pt[] {
+  const rel = (v: Pt) => ({ x: v.x - h.cx, y: v.y - h.cy })
+  return sitePath(site, rel(p), rel(q), W).map((v) => ({ x: v.x + h.cx, y: v.y + h.cy }))
+}
+/** Along the road past a building: to its door, then on (the road is drawn the same way). */
+export function byDoor(h: RouteHex, site: Site, p: Pt, q: Pt, W: number): Pt[] {
+  const d = doorOf(site, W)
+  const door = { x: h.cx + d.x, y: h.cy + d.y }
+  return [...onSite(h, site, p, door, W), ...onSite(h, site, door, q, W).slice(1)]
+}
+
 /** Timed segments from `start` (in hexes[0]) to `end` (in the last hex). */
 export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP: number): Seg[] {
   const segs: Seg[] = []
@@ -113,7 +141,9 @@ export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP:
       const d = (p: Pt, q: Pt) => Math.hypot(p.x - q.x, p.y - q.y)
       return d(a, u) + d(v, b) <= d(a, v) + d(u, b) ? [a, u, v, b] : [a, v, u, b]
     }
-    const pts = h.road && !h.blocked && h.via
+    const pts = h.road && h.site && !h.via
+      ? byDoor(h, h.site, a, b, W)
+      : h.road && !h.blocked && h.via
       ? bridge()
       : h.road && !h.blocked
         ? [a, ...(near(a) || near(b) ? [] : [c]), b]
@@ -123,9 +153,30 @@ export function buildRoute(hexes: RouteHex[], start: Pt, end: Pt, W: number, TP:
       if (d > 0.01) segs.push({ kind: 'walk', a: pts[i - 1], b: pts[i], tier: h.tier, cell: h.cell, cy: h.cy, dur: d / SPEED })
     }
   }
+  const flat = (a: Pt, b: Pt, tier: number, cell: number, cy: number) => {
+    const d = Math.hypot(b.x - a.x, b.y - a.y)
+    if (d > 0.01) segs.push({ kind: 'walk', a, b, tier, cell, cy, dur: d / SPEED })
+  }
+  const slope = (a: Pt, b: Pt, t0: number, t1: number, cell: number, cy: number) => {
+    const d = Math.hypot(b.x - a.x, b.y - a.y, (t1 - t0) * TP)
+    segs.push({ kind: 'ramp', a, b, t0, t1, cell, cy, dur: d / (SPEED * (t1 > t0 ? RAMP_UP : 1)) })
+  }
   let cur = start
   for (let i = 0; i + 1 < hexes.length; i++) {
     const h = hexes[i], n = hexes[i + 1]
+    // a ramp on this edge: up from its foot to its top and onto the higher hex, or down the same way
+    const rw = h.ramps?.get(n.cell) ?? n.ramps?.get(h.cell)
+    if (rw) {
+      const way = n.tier > h.tier ? rw.way : [...rw.way].reverse()
+      walk(h, cur, way[0].p)
+      for (let k = 1; k < way.length; k++) {
+        const a = way[k - 1], b = way[k]
+        if (a.t === b.t) flat(a.p, b.p, a.t, rw.lower, rw.lowerCy)
+        else slope(a.p, b.p, a.t, b.t, rw.lower, rw.lowerCy)
+      }
+      cur = way[way.length - 1].p
+      continue
+    }
     const edge = { x: (h.cx + n.cx) / 2, y: (h.cy + n.cy) / 2 }
     const lower = h.tier <= n.tier ? h : n
     if (n.tier > h.tier) {
@@ -159,7 +210,7 @@ export function sample(segs: Seg[], t: number, TP: number): Pose {
     const g = segs[k]
     const last = k === segs.length - 1
     if (t > g.dur && !last) {
-      if (g.kind === 'walk') dist += g.dur * SPEED
+      if (g.kind === 'walk' || g.kind === 'ramp') dist += g.dur * SPEED
       t -= g.dur
       continue
     }
@@ -181,6 +232,11 @@ export function sample(segs: Seg[], t: number, TP: number): Pose {
       }
       case 'pause':
         return { x: g.at.x, y: g.at.y - g.tier * TP, cell: g.cell, front: g.at.y > g.cy, kind: g.pose, dist }
+      case 'ramp': {
+        const x = g.a.x + (g.b.x - g.a.x) * u, y = g.a.y + (g.b.y - g.a.y) * u
+        const tier = g.t0 + (g.t1 - g.t0) * u
+        return { x, y: y - tier * TP, cell: g.cell, front: y > g.cy, kind: 'walk', dist: dist + g.dur * SPEED * u }
+      }
       case 'bounce':
         return { x: g.at.x, y: g.at.y - g.tier * TP - 4 * u * (1 - u) * g.height, cell: g.cell, front: g.at.y > g.cy, kind: u < 1 ? 'hop' : 'stand', dist }
     }
