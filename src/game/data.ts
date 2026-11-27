@@ -114,7 +114,7 @@ export const DEEPEN_COST: Record<number, Goods> = { 2: { timber: 4, planks: 2 },
 /** What a gather action on a hex yields. */
 export const GATHER: Partial<Record<Resource, Good>> = {
   grain: 'grain', fish: 'fish', timber: 'timber', stone: 'stone', clay: 'clay', copper: 'copper_ore',
-  iron: 'limonite', silver: 'silver_ore', tin: 'tin', wool: 'wool', berries: 'berries', herbs: 'herbs', salt: 'salt', game: 'game',
+  iron: 'limonite', silver: 'silver_ore', tin: 'tin', berries: 'berries', herbs: 'herbs', salt: 'salt', game: 'game',
 }
 
 export type TaskSize = 'big' | 'medium' | 'small'

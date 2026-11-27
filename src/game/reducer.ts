@@ -515,7 +515,7 @@ export function validate(s: GameState, world: World, ev: GameEvent): string | nu
           // the plan runs out from your land or your roads, one hex after another
           if (!roadReach(world, v, h, seen)) return 'A road must join your land or one of your roads'
           if (!s.revealed.includes(j) && !inTerritory(v, h.col, h.row)) return 'Scout there first'
-          if (v.roads.includes(j)) return 'Already a road'
+          if (Object.values(s.villages).some((x) => x.roads.includes(j))) return 'Already a road'
         }
       }
       if (ev.crew !== undefined && (!Number.isInteger(ev.crew) || ev.crew < 0 || ev.crew > people(v))) return `The team can be at most ${people(v)} people`
@@ -903,7 +903,8 @@ export function apply(s: GameState, world: World, ev: GameEvent): GameState {
     case 'roadplan': {
       const v = s.villages[p.villageId]
       // the team has been digging up to this moment (apply did that first); now it takes the new orders
-      if (ev.plan) { v.roadPlan = ev.plan.map((h) => cellIndex(world, h.col, h.row)); v.roadDone = 0 }
+      // (digging done on a hex stays with the hex: see digRoads)
+      if (ev.plan) { v.roadPlan = ev.plan.map((h) => cellIndex(world, h.col, h.row)); v.roadDone = v.roadPlan.length ? s.roadWork?.[v.roadPlan[0]] ?? 0 : 0 }
       if (ev.crew !== undefined) v.roadCrew = ev.crew
       v.roadAt = ev.at
       return s
@@ -1853,24 +1854,50 @@ function crewsHome(s: GameState, at: string) {
 const ARRIVED_KEPT = 40
 
 /** Each village's road team digs the planned hexes in order: ROAD_TEAM people lay a hex a day, pro rata
- *  by the hour (so 5 people take two days, 20 lay two a day). Dirt roads cost nothing but the people's time. */
+ *  by the hour (so 5 people take two days, 20 lay two a day). Dirt roads cost nothing but the people's time.
+ *  The digging on a hex is shared (s.roadWork): where two villages' plans line up, both teams' work goes into
+ *  the same hex, and when it's done it is a road for every village that planned it. */
 export function digRoads(s: GameState, world: World, at: string) {
   const now = Date.parse(at)
+  // (worlds from before the work was shared: each team's part-dug hex keeps what it had)
+  if (!s.roadWork) {
+    s.roadWork = {}
+    for (const v of Object.values(s.villages)) {
+      const i = v.roadPlan?.[0]
+      if (i !== undefined && (v.roadDone ?? 0) > 0) s.roadWork[i] = Math.max(s.roadWork[i] ?? 0, v.roadDone!)
+    }
+  }
+  const work = s.roadWork
+  const isRoad = (i: number) => Object.values(s.villages).some((x) => x.roads.includes(i))
   for (const v of Object.values(s.villages)) {
     const plan = v.roadPlan
     if (!plan?.length || !(v.roadCrew && v.roadCrew > 0)) continue
     const was = v.roadAt ? Date.parse(v.roadAt) : now
     if (now <= was) continue
     v.roadAt = at
-    let work = (v.roadDone ?? 0) + (v.roadCrew / ROAD_TEAM) * ((now - was) / 86_400_000)
-    while (work >= 1 && plan.length) {
-      work -= 1
-      const i = plan.shift()!
-      if (world.cells[i].tier === 0 || v.roads.includes(i)) { work += 1; continue }
-      v.roads.push(i)
-      log(s, at, v.playerId, world.cells[i].riverTo !== -1 ? `${who(s, v)}'s road team built a bridge over the river.` : `${who(s, v)}'s road team finished a stretch of dirt road.`, 'good')
+    let left = (v.roadCrew / ROAD_TEAM) * ((now - was) / 86_400_000)
+    while (left > 1e-9 && plan.length) {
+      const i = plan[0]
+      if (world.cells[i].tier === 0 || isRoad(i)) { plan.shift(); delete work[i]; continue }
+      const need = 1 - (work[i] ?? 0)
+      if (left < need) { work[i] = Math.round(((work[i] ?? 0) + left) * 1000) / 1000; left = 0; break }
+      left -= need
+      delete work[i]
+      // a road for every village that had it on its plan (dug together, it's theirs together)
+      const with_ = Object.values(s.villages).filter((x) => x.roadPlan?.includes(i))
+      for (const x of with_) {
+        x.roads.push(i)
+        x.roadPlan = x.roadPlan!.filter((j) => j !== i)
+      }
+      const others = with_.filter((x) => x.id !== v.id)
+      const what = world.cells[i].riverTo !== -1 ? 'built a bridge over the river' : 'finished a stretch of dirt road'
+      log(s, at, v.playerId, others.length ? `${who(s, v)}'s road team and ${others.map((x) => `${who(s, x)}'s`).join(' and ')} ${what} together.` : `${who(s, v)}'s road team ${what}.`, 'good')
     }
-    v.roadDone = plan.length ? Math.round(work * 1000) / 1000 : 0
+  }
+  // what each team's next hex has had (the planner and the digger show it)
+  for (const v of Object.values(s.villages)) {
+    if (v.roadPlan?.length) v.roadDone = work[v.roadPlan[0]] ?? 0
+    else if (v.roadDone) v.roadDone = 0
   }
 }
 

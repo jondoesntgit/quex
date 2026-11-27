@@ -57,7 +57,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
   const v = state.villages[p.villageId]
   const season = weekSeason(game.today(p.id))
   const here = buildingAt(state, col, row)
-  const village = villageAt(state, col, row)
+  // any hex of a village's city is that village: tapping its cobbles names it and offers caravans and troops
+  const village = villageAt(state, col, row) ?? Object.values(state.villages).find((x) => x.city?.includes(row * world.width + col)) ?? null
   const lair = state.lairs.find((l) => l.col === col && l.row === row && !l.cleared)
   const fort = known ? strongholdAt(world, i) : null
   const siege = fort ? state.sieges?.[i] : undefined
@@ -126,7 +127,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
     )
   }
 
-  const title = village ? village.name : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
+  const owner = village ? state.players[village.playerId] : null
+  const title = village ? (village.col === col && village.row === row ? village.name : `${owner ? owner.name : village.name.replace(/'s .*$/, '')}'s city`) : known && strongholdAt(world, i) ? strongholdAt(world, i)!.name : lair ? `${lair.kind[0].toUpperCase()}${lair.kind.slice(1)} lair` : here ? BUILDINGS[here.building.type].name : TERRAIN_NAME[terr]
   const sub = [TERRAIN_NAME[terr], `height ${cell.tier}`, land.resource && `${land.resource} deposit`, treeNote, cell.riverTo !== -1 && cell.tier > 0 && 'river'].filter(Boolean).join(' · ')
 
   const tierOf = (to: NonNullable<typeof village>) => caravanTier(world, state, v, to)
@@ -150,7 +152,8 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
     if (mine && !here && !village && !trees) workActs.push('plant')
     if (cell.tier > 0 && !mine) acts.push('outpost')
     // dirt roads are dug by the road team (the plan above); by hand, only stone
-    if (cell.tier > 0 && !v.paved?.includes(i) && !inCity) workActs.push('pave')
+    // on a building's hex, paving is offered on the card itself (a road through a field joins two cities)
+    if (cell.tier > 0 && !v.paved?.includes(i) && !inCity && !here) workActs.push('pave')
     if (mine && cell.tier > 0 && !waterAt(world, state, i) && (!hasWater(world, state, i) || (here && THIRSTY.has(here.building.type)))) workActs.push('well')
     if (ownMine && (ownMine.depth ?? 1) < MAX_DEPTH) acts.unshift('deepen')
     if (here && here.village.id === v.id && here.building.progress >= 1 && workable(here.building)) acts.unshift('work')
@@ -275,6 +278,14 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
       })()}
       {inCity && <p className="muted" style={{ margin: '4px 0' }}>🧱 Cobbled city: homes can stand here{(v.homes ?? []).length ? ` (${v.homes!.length} in the city so far)` : ''}.</p>}
       {v.paved?.includes(i) && <p className="muted" style={{ margin: '4px 0' }}>A paved road: caravans along it carry more and go faster.</p>}
+      {(() => {
+        // other players' road plans through this hex: put it on yours too, and the teams dig it together
+        const others = Object.values(state.villages).filter((x) => x.id !== v.id && x.roadPlan?.includes(i))
+        if (!others.length) return null
+        const names = others.map((x) => `${state.players[x.playerId]?.name ?? x.name}'s (no. ${x.roadPlan!.indexOf(i) + 1})`).join(' and ')
+        const mineToo = v.roadPlan?.includes(i)
+        return <p className="muted" style={{ margin: '4px 0' }}>🛠 On {names} road plan.{mineToo ? ' On yours too: your teams dig it together.' : ' Add it to your plan and your teams dig it together.'}</p>
+      })()}
       {village && <p style={{ margin: '4px 0' }}>👥 {Math.floor(village.population)}{village.away ? ` (${village.away} away)` : ''} · morale {village.morale}</p>}
       {here && here.building.progress < 1 && <p style={{ margin: '4px 0' }}>Half built — spend another medium/big task to finish.</p>}
       {here && <p className="muted" style={{ margin: '4px 0' }}>{BUILDINGS[here.building.type].blurb}</p>}
@@ -329,6 +340,11 @@ export function Inspector({ game, p, col, row, tap, onClose, notify, welcome: we
         {gatherActs.length > 0 && <button className="btn small action" onClick={() => setMode('gather')}>Gather…<small>{gatherActs.length === 1 ? 'one thing to gather here' : `${gatherActs.length} things to gather here`}</small></button>}
         {village && village.id !== v.id && welcomeOpen(state, v, village, game.now().toISOString()) && (
           <button className="btn small action" onClick={() => setMode('welcome')}>Send a welcoming caravan…<small>they're new here: no action needed, and it lifts your village's morale (+{WELCOME_MORALE})</small></button>
+        )}
+        {here && cell.tier > 0 && !v.paved?.includes(i) && !inCity && (
+          <WorkButton game={game} p={p} action="pave" col={col} row={row} label={`Pave a road through the ${BUILDINGS[here.building.type].name.toLowerCase()}`}
+            note={`2 stone: the ${BUILDINGS[here.building.type].name.toLowerCase()} stays and keeps working, and a paved road runs on through it (to join two cities, say)`}
+            onPick={() => ask('pave', {}, undefined, `Pave a road through the ${BUILDINGS[here.building.type].name.toLowerCase()}?`)} />
         )}
         {acts.map((a) => a === 'caravan'
           ? <button key={a} className={`btn ${tierOf(village!) === 'medium' ? 'medium' : 'small'} action${tierOf(village!) === 'free' ? '' : cant(tierOf(village!) === 'medium' ? 'medium' : 'small')}`} onClick={() => setMode('caravan')}>Send caravan…<small>{tierOf(village!) === 'free' ? 'free on paved road (ox carts)' : tierOf(village!) === 'small' ? 'small task: a road connects you' : 'medium task: no road connects you'}</small></button>
@@ -502,14 +518,14 @@ function UpgradeButton({ game, p, hex, col, row, onPick }: { game: Game; p: Play
 }
 
 /** A thing you can lay or dig (road, paving, well, trees): what it does, until you pick it. */
-function WorkButton({ game, p, action, col, row, onPick }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onPick: () => void }) {
+function WorkButton({ game, p, action, col, row, onPick, label, note }: { game: Game; p: Player; action: ActionKind; col: number; row: number; onPick: () => void; label?: string; note?: string }) {
   const r = tryAction(game, p, action, col, row)
   const bridge = (action === 'road' || action === 'pave') && actionSize(game.world, action, col, row, game.now().toISOString(), game.state.villages[p.villageId]) === 'medium'
   const a = ACTIONS[action]
   return (
     <button className={`btn ${r.ev ? (bridge ? 'medium' : a.size) : ''} action`} disabled={!r.ev} onClick={onPick} title={r.error ?? a.blurb}>
-      {bridge ? (action === 'pave' ? 'Stone bridge' : 'Bridge') : action === 'pave' && game.state.villages[p.villageId]?.roads.includes(cellIndex(game.world, col, row)) ? 'Pave the road' : a.name}
-      <small>{r.error ?? (bridge ? `A ${action === 'pave' ? 'stone' : 'wood and stone'} bridge carries the road over the river${action === 'pave' ? ' (2 stone, a medium task)' : ''}.` : a.blurb)}</small>
+      {(!bridge && label) || (bridge ? (action === 'pave' ? 'Stone bridge' : 'Bridge') : action === 'pave' && game.state.villages[p.villageId]?.roads.includes(cellIndex(game.world, col, row)) ? 'Pave the road' : a.name)}
+      <small>{r.error ?? (!bridge && note) ?? (bridge ? `A ${action === 'pave' ? 'stone' : 'wood and stone'} bridge carries the road over the river${action === 'pave' ? ' (2 stone, a medium task)' : ''}.` : a.blurb)}</small>
     </button>
   )
 }

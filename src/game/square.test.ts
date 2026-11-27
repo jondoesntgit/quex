@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { generateWorld } from '../world/generate'
-import { neighbours } from '../world/hex'
-import { SQUARE_FROM, STARTER_FROM, apply, newGame, popCap, roadPath, storageCap, validate } from './reducer'
+import { neighbours, spiral } from '../world/hex'
+import { SQUARE_FROM, STARTER_FROM, apply, digRoads, newGame, popCap, roadPath, storageCap, validate } from './reducer'
 import { HOMES, SQUARE, cornerOf, findHome, homeFits, levelWorld, relayout, visible } from './city'
-import { FOOD_SCALE } from './data'
+import { FOOD_SCALE, ROAD_TEAM } from './data'
 import type { GameEvent, GameState, Village } from './types'
 
 const world = generateWorld('test-seed')
@@ -169,5 +169,45 @@ describe('notices had on any device', () => {
     apply(s, world, ev('s1', ['night:2026-11-27']))
     apply(s, world, ev('s2', ['night:2026-11-27', 'a1']))
     expect(s.villages.v_ann.seen).toEqual(['night:2026-11-27', 'a1'])
+  })
+})
+
+describe('road teams dig together where their plans line up', () => {
+  const setup = () => {
+    const s = newGame(world, '2026-11-15')
+    join(s, after, 'ann', 0)
+    join(s, after, 'bob', 1)
+    const a = s.villages.v_ann, b = s.villages.v_bob
+    const hex = spiral(a, 2).map((o) => o.row * world.width + o.col)
+      .find((i) => world.cells[i]?.tier > 0 && !a.city!.includes(i) && !b.city!.includes(i) && i !== a.row * world.width + a.col)!
+    return { s, a, b, hex }
+  }
+  it('two teams on one hex dig it twice as fast, and it is a road for both', () => {
+    const { s, a, b, hex } = setup()
+    for (const v of [a, b]) { v.roadPlan = [hex]; v.roadCrew = ROAD_TEAM; v.roadAt = '2026-11-28T10:00:00.000Z' }
+    digRoads(s, world, '2026-11-28T16:00:00.000Z') // a quarter day each: half the hex
+    expect(s.roadWork?.[hex]).toBeCloseTo(0.5, 2)
+    expect(a.roadDone).toBeCloseTo(0.5, 2)
+    digRoads(s, world, '2026-11-28T22:00:00.000Z')
+    expect(a.roads).toContain(hex)
+    expect(b.roads).toContain(hex)
+    expect(a.roadPlan).toEqual([])
+    expect(b.roadPlan).toEqual([])
+    expect(s.log.at(-1)!.text).toMatch(/together/)
+  })
+  it('someone else’s road is not planned again', () => {
+    const { s, a, b, hex } = setup()
+    b.roads.push(hex)
+    const cell = world.cells[hex]
+    const ev = { t: 'roadplan', id: 'rp', at: after, playerId: 'ann', plan: [{ col: cell.col, row: cell.row }] } as GameEvent
+    expect(validate(s, world, ev)).toMatch(/Already a road/)
+    void a
+  })
+  it('a team’s part-dug hex from before keeps what it had', () => {
+    const { s, a, hex } = setup()
+    a.roadPlan = [hex]; a.roadCrew = ROAD_TEAM; a.roadAt = '2026-11-28T10:00:00.000Z'; a.roadDone = 0.4
+    delete s.roadWork
+    digRoads(s, world, '2026-11-28T10:00:00.000Z')
+    expect(s.roadWork?.[hex]).toBeCloseTo(0.4, 3)
   })
 })

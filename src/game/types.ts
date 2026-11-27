@@ -221,6 +221,8 @@ export interface GameState {
   wellsMoved?: boolean
   /** hexes raised or lowered so a city's square stands on one level: hex -> level (see levelWorld) */
   levelled?: Record<number, number>
+  /** dirt road dug so far on each hex being dug (0..1), shared by every road team digging it (see digRoads) */
+  roadWork?: Record<number, number>
   /** the food update's gift of grain has been handed out (see FOOD_UPDATE_FROM) */
   foodUpdate?: boolean
   worldSeed: string

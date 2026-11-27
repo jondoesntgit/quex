@@ -863,7 +863,7 @@ function RoadPlanner({ game, p }: { game: Game; p: Player }) {
     <>
       <h3 style={{ marginBottom: 2 }}>Road planner</h3>
       <p className="muted" style={{ margin: '0 0 4px' }}>
-        A team of {ROAD_TEAM} lays a hex of dirt road a day (by the hour); no actions or goods, just the team's time, taken off the buildings' workers. Plan hexes from the map (Build… on a hex next to your land). Stone roads still take a small action and 2 stone each.
+        A team of {ROAD_TEAM} lays a hex of dirt road a day (by the hour); no actions or goods, just the team's time, taken off the buildings' workers. Plan hexes from the map (Build… on a hex next to your land). Other players' plans show on the map in their colour: where your plans line up, your teams dig those hexes together. Stone roads still take a small action and 2 stone each.
       </p>
       <div className="row worker-row">
         <span>Road team {crew > 0 && plan.length > 0 && <span className="muted">· {perDay.toFixed(perDay < 1 ? 1 : 0)} hex a day</span>}</span>
@@ -881,7 +881,13 @@ function RoadPlanner({ game, p }: { game: Game; p: Player }) {
             <p className="muted" style={{ margin: '2px 0' }}>{plan.length} hex{plan.length === 1 ? '' : 'es'} planned, in this order{crew > 0 ? `: about ${days < 1 ? 'a day' : `${Math.ceil(days)} days`} to finish` : ' (put people on the team to start)'}.</p>
             {cells.map((c, k) => (
               <div key={`${c.col},${c.row}`} className="row worker-row">
-                <span><b>{k + 1}.</b> hex {c.col},{c.row}{k === 0 && crew > 0 && (v.roadDone ?? 0) > 0 ? <span className="muted"> · {Math.round((v.roadDone ?? 0) * 100)}% dug</span> : null}</span>
+                <span><b>{k + 1}.</b> hex {c.col},{c.row}{(() => {
+                  // dug so far (by anyone: the work on a hex is shared), and who else plans it
+                  const i = plan[k], dug = game.state.roadWork?.[i] ?? 0
+                  const with_ = Object.values(game.state.villages).filter((x) => x.id !== v.id && x.roadPlan?.includes(i)).map((x) => game.state.players[x.playerId]?.name ?? x.name)
+                  const bits = [dug > 0 ? `${Math.round(dug * 100)}% dug` : '', with_.length ? `with ${with_.join(' and ')}` : ''].filter(Boolean)
+                  return bits.length ? <span className="muted"> · {bits.join(' · ')}</span> : null
+                })()}</span>
                 <span className="row stepper">
                   <button className="btn icon" disabled={k === 0} onClick={() => move(k, -1)} aria-label="higher priority">↑</button>
                   <button className="btn icon" disabled={k === cells.length - 1} onClick={() => move(k, 1)} aria-label="lower priority">↓</button>

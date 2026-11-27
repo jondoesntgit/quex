@@ -14,6 +14,7 @@ import { Application, Container, CullerPlugin, extensions, Graphics, Sprite } fr
 import { Ambient } from './ambient'
 import { Mountains } from './mountains'
 import { Flock } from './flock'
+import { Herd } from './herd'
 import { mulberry32 } from '../world/rng'
 import { extend, riverLayout, roadLayout } from './waterways'
 import { drawBridge } from './bridge'
@@ -102,6 +103,8 @@ export class MapView {
   traders!: Traders
   /** sheep and shepherds at the pens */
   flock!: Flock
+  /** deer on hexes rich in game */
+  herd!: Herd
   /** surf, glints, swaying trees, shimmering fields */
   ambient!: Ambient
   /** mountain ranges drawn from one height map (cached per world) */
@@ -128,6 +131,7 @@ export class MapView {
     this.people = new People(atlas.meta.size, atlas.meta.tier)
     this.traders = new Traders(atlas)
     this.flock = new Flock(atlas.meta.size, atlas.meta.tier)
+    this.herd = new Herd(atlas.meta.size, atlas.meta.tier)
   }
 
   get W() { return this.atlas.meta.size }
@@ -207,6 +211,11 @@ export class MapView {
       this.people.update(Math.min(0.1, t.deltaMS / 1000))
       this.traders.update(Date.now())
       this.flock.update(Math.min(0.1, t.deltaMS / 1000))
+      // deer only move where the camera is looking (scene px; the scene shrinks below zoom 1)
+      if (this.host) {
+        const k = this.zoom
+        this.herd.update(Math.min(0.1, t.deltaMS / 1000), [this.camX, this.camY, this.camX + this.host.clientWidth / k, this.camY + this.host.clientHeight / k])
+      }
       // new animated pieces came into view: draw them once now (see settle)
       if (this.stepAmbient()) this.app.render()
     })
@@ -369,7 +378,7 @@ export class MapView {
     const { world, state, viewer } = input
     const { tier: TP } = this.atlas.meta
     const W = this.W
-    const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes(), ...this.flock.nodes()])
+    const walkers = new Set<unknown>([...this.people.nodes(), ...this.traders.nodes(), ...this.flock.nodes(), ...this.herd.nodes()])
     // villagers walking in a city live in its town layer: take them out before the layer goes
     for (const layer of this.townLayers.values()) for (const c of [...layer.children]) if (walkers.has(c)) layer.removeChild(c)
     this.townLayers.clear()
@@ -867,6 +876,22 @@ export class MapView {
       g.poly(cs, true).stroke({ width: 2, color: rim })
     }
     this.drawSelection(input)
+    // everyone else's road plans, in their own colour (no numbers): where plans line up, the teams dig together
+    for (const v of Object.values(state.villages)) {
+      if (v.playerId === viewer || !v.roadPlan?.length) continue
+      const own = state.players[v.playerId]?.colors?.border
+      const color = own ? parseInt(own.slice(1), 16) : 0xff90c0
+      for (const i of v.roadPlan) {
+        const cell = world.cells[i]
+        if (!cell || !revealed.has(i)) continue
+        const p = hexToPixel(cell.col, cell.row, W)
+        // a little inside the hex, so a hex on two plans shows both
+        const cs = hexCorners(p.x, p.y - cell.tier * TP, W * 0.86).flat()
+        // dark under the owner's colour, so any colour reads on any ground
+        g.poly(cs, true).stroke({ width: 3, color: 0x141424, alpha: 0.55 })
+        g.poly(cs, true).stroke({ width: 1, color })
+      }
+    }
     // the road planner: the viewer's own dirt-road plan, numbered in the order the team will dig it
     const mine = Object.values(state.villages).find((v) => v.playerId === viewer)
     mine?.roadPlan?.forEach((i, k) => {
@@ -901,6 +926,9 @@ export class MapView {
     this.traders.attach(this.cells, rank)
     this.flock.sync(world, state, revealed, (vid) => this.people.shirt(vid))
     this.flock.attach(this.cells, rank)
+    // no deer while choosing where to settle (that screen stays still)
+    this.herd.sync(world, state, input.showAll ? new Set() : revealed, input.today)
+    this.herd.attach(this.cells, rank)
     this.settle()
   }
 

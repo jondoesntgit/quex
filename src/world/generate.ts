@@ -348,6 +348,9 @@ export function generateWorld(seed: string, opts: GenOptions = {}): World {
     }
   }
 
+  // no wool deposits: wool comes from sheep pens. Taken off last, so everything chosen with them in place
+  // (sites, regions, lairs) stays as it was in worlds made before
+  for (const c of cells) if (c.resource === 'wool') c.resource = null
   return { seed, width: W, height: H, regionSize: RS, seaLevel, cells, regions, startRegion, lairs }
 }
 

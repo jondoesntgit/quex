@@ -57,6 +57,8 @@ All of them are called at the top of `apply()`. Arrivals.tsx has the matching on
 - `Village.greeted`, `Village.city`, `Village.paved`, `Village.homes`, `Village.tools` and similar: `?? []`.
 - `Village.starter.square` (2026-11-27): unset means the old square (well on the village hex, no open ground kept round it).
 - `GameState.levelled` (2026-11-27): unset means no hex was levelled.
+- `GameState.roadWork` (2026-11-27): unset in older worlds; `digRoads` fills it once from each team's `Village.roadDone`
+  (the part-dug hex it was on). `roadDone` is now just a copy of the shared work on the team's next hex.
 - `Building.sown`: unset counts as fully sown (fields built before sowing existed).
 - `DayRecord.slots`: `dayScore` treats it as empty if missing (some test fixtures, very old days).
 
@@ -66,6 +68,9 @@ All of them are called at the top of `apply()`. Arrivals.tsx has the matching on
 - `BuildingDef.legacy` (the House): not offered any more except to a village with no room for a city; old ones still stand.
 - The Granary is `legacy` too since 2026-11-27 (the Barn, on the cobbles, replaced it): old ones that didn't fit as barns still stand and store food.
 - `Village.role` and `ROLE_TOWN` names ("Mine", "Trading Post"...) from when villages had roles.
+
+- Wool deposits were taken out of every world on 2026-11-27 (stripped at the end of `generateWorld`, so nothing else moves).
+  An old offline log's hand-gathering of wool from one is now ignored; `Resource` still lists `'wool'`.
 
 ## Display-time fixes for old saved text
 

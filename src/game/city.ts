@@ -527,6 +527,8 @@ export function starterFor(world: World, v: Village, corner = false): { starter:
         base.homes!.push(home)
         placed.push(home)
       }
+      // leave room for the player's first cottage: fewer starting homes if need be (the square holds 30 either way)
+      while (placed.length > 2 && !findHome(world, base, 'cottage')) { placed.pop(); base.homes!.pop() }
       if (placed.length >= 2) return { starter, homes: placed }
     }
   }
